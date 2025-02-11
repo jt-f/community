@@ -1,108 +1,162 @@
-# Community Flow Visualization
+# Community Flow - Agent Monitoring Dashboard
 
-A real-time message flow visualization system built with React and Flask. This application provides an interactive graph visualization of message exchanges between users and systems, with real-time WebSocket updates and a clean, modern interface.
+A real-time agent monitoring system with message flow visualization built with React and FastAPI. This application provides both a flow-based visualization of message exchanges and a comprehensive dashboard for monitoring agent states and activities.
 
-## Prerequisites
+## Features
 
-Before you begin, ensure you have the following installed:
-- Python 3.8 or higher
-- Poetry (Python dependency management)
-- Node.js 16 or higher (required for React frontend)
-- npm (comes with Node.js)
+### 1. Dual View Interface
+- **Flow View**: Real-time visualization of message exchanges between agents
+- **Dashboard View**: Detailed monitoring of agent states and activities
+
+### 2. Agent Monitoring
+- Real-time agent status tracking
+- Message queue visualization
+- Agent capability overview
+- Status distribution analytics
+- Interactive agent cards
+
+### 3. Real-time Communication
+- WebSocket-based real-time updates
+- Automatic reconnection handling
+- Message history tracking
+- Bi-directional communication
+
+### 4. Visualization Components
+- Message flow graph
+- Queue size charts
+- Status distribution pie charts
+- Agent status cards
+- Message history timeline
 
 ## Tech Stack
 
 ### Frontend
-- Node.js and npm for JavaScript runtime and package management
 - React 18
-- React Flow for graph visualization
-- Socket.IO client for real-time communication
-- Material-UI for styling
-- Webpack 5 for bundling
+- Material-UI 5.15
+- ReactFlow for graph visualization
+- Recharts for data visualization
+- Zustand for state management
+- WebSocket for real-time communication
 
 ### Backend
-- Flask
-- Flask-SocketIO for WebSocket support
-- CORS for cross-origin resource sharing
-- Python logging for debugging
+- FastAPI
+- WebSockets
+- Pydantic for data validation
+- Uvicorn ASGI server
 
 ## Getting Started
 
-### Start the Backend Server
+### Prerequisites
+- Node.js 16 or higher
+- Python 3.8 or higher
+- Poetry (Python dependency management)
 
-```bash
-cd backend
-poetry install
-poetry run python app.py
-```
+### Installation
 
-The backend server will start on `http://[your-ip]:5000`
+1. **Backend Setup**
+   ```bash
+   cd community/backend
+   poetry install
+   ```
 
-### Start the Frontend Development Server
+2. **Frontend Setup**
+   ```bash
+   cd community/frontend
+   npm install
+   ```
 
-```bash
-cd frontend
-npm install
-npm start
-```
+### Running the Application
 
-The frontend will be available at `http://[your-ip]:3000`
+1. **Start the Backend Server**
+   ```bash
+   cd community/backend
+   poetry run python -m src.app
+   ```
+   The backend server will start on `http://localhost:8000`
 
-### Send a Test Message
+2. **Start the Frontend Development Server**
+   ```bash
+   cd community/frontend
+   npm start
+   ```
+   The frontend will be available at `http://localhost:3000`
 
-You can use the provided test script to send messages:
+## Usage
 
-```bash
-cd backend
-poetry run python test_message.py
-```
+### Flow View
+- Shows real-time message exchanges between agents
+- Animated edges represent active communications
+- Interactive node positioning
+- Zoom and pan controls
 
-Or send a custom message using curl:
+### Dashboard View
+- Agent Status Cards
+  - Current status
+  - Queue size
+  - Last activity
+  - Capabilities list
+  
+- Monitoring Charts
+  - Queue size distribution
+  - Agent status distribution
+  - Message history timeline
 
-```bash
-curl -X POST http://[your-ip]:5000/message \
-  -H "Content-Type: application/json" \
-  -d '{"from": "user", "text": "Hello, World!"}'
-```
-
-## Features
-
-- Real-time message visualization
-- Interactive graph layout
+### WebSocket Communication
+The application uses WebSocket connections for:
+- Real-time agent state updates
+- Message broadcasting
+- Connection status monitoring
 - Automatic reconnection handling
-- Cross-platform compatibility
-- Clean, modern UI
-- Robust error handling
 
 ## Development
 
-The application uses:
-- WebSocket for real-time bi-directional communication
-- React Flow for graph visualization
-- Material-UI for consistent styling
-- Flask's development server with threading
-
-## Architecture
-
+### Project Structure
 ```
-frontend/                 # React application
-  ├── src/               # Source files
-  │   ├── App.js         # Main application component
-  │   └── styles.css     # Global styles
-  └── public/            # Static files
-
-backend/                  # Flask server
-  ├── app.py             # Main server file
-  └── test_message.py    # Message testing utility
+community/
+├── backend/
+│   ├── src/
+│   │   ├── app.py           # FastAPI application
+│   │   ├── agent.py         # Agent base class
+│   │   ├── community.py     # Community management
+│   │   └── test_agents.py   # Test agent implementations
+│   └── pyproject.toml       # Python dependencies
+└── frontend/
+    ├── src/
+    │   ├── components/      # React components
+    │   ├── store/          # Zustand state management
+    │   └── App.js          # Main application
+    └── package.json        # JavaScript dependencies
 ```
 
-## Notes
+### Key Components
+- **AgentDashboard**: Main dashboard component
+- **MessageFlow**: Flow visualization
+- **AgentCard**: Individual agent status cards
+- **QueueChart**: Message queue visualization
+- **StatusDistribution**: Agent status pie chart
+- **MessageHistory**: Communication timeline
 
-- The backend uses threading mode for WebSocket support
-- CORS is configured to accept connections from any origin for development
-- The frontend automatically attempts to reconnect on connection loss
-- All messages are logged for debugging purposes
+## Configuration
+
+### Backend
+- WebSocket server port: 8000
+- CORS settings: All origins allowed (development)
+- Logging level: Configurable via environment
+
+### Frontend
+- WebSocket connection: `ws://localhost:8000/ws`
+- Reconnection attempts: 10
+- Reconnection interval: 2 seconds
+- Message history limit: 20 messages
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a new Pull Request
 
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the LICENSE file for details. 

@@ -190,3 +190,5 @@ cython_debug/
 */__pycache__/
 examples/__pycache__/basic_agent.cpython-39.pyc
 src/__pycache__/llm_interface.cpython-39.pyc
+
+.env
