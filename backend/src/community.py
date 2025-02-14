@@ -113,14 +113,24 @@ class Community:
         """Start the community and its message loop"""
         self.running = True
         logger.debug("Community started")
-        # Start the message loop
-        logger.debug("Starting message loop")
-        await self.message_loop()  # This will run continuously
+        # Start the message loop as a background task
+        asyncio.create_task(self.message_loop())
+        logger.debug("Message loop started as background task")
             
     async def stop(self):
-        """Stop the community"""
+        """Stop the community and clean up resources"""
+        logger.info("Stopping community...")
         self.running = False
-        logging.debug("Community stopped")
+        
+        # Close all active connections
+        for connection in list(self.active_connections):
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
+        
+        self.active_connections.clear()
+        logger.info("Community stopped successfully")
 
     async def send_state_update(self):
         # Send state update to all clients
@@ -142,28 +152,37 @@ class Community:
     async def message_loop(self):
         """Main message processing loop"""
         logger.info("Starting message loop")
-        while self.running:
-            for agent in self.agents:
-                logger.info(f"Agent {agent.name}-{agent.id} has {len(agent.message_queue)} messages in queue")
-                # Process messages in agent's queue
-                if agent.message_queue:
-                    message = agent.message_queue.pop(0)
-                    logger.debug(f"Popping message from agent {agent.name} queue: {message.content}")
-                    response = await agent.process_message(message)
-                    if response:
-                        logger.debug(f"Routing response from agent {agent.name}: {response}")
-                        await self.route_message(response)
+        try:
+            while self.running:
+                for agent in self.agents:
+                    if not self.running:  # Check if we should stop
+                        break
+                        
+                    logger.debug(f"Processing agent {agent.name}")
+                    # Process messages in agent's queue
+                    if agent.message_queue:
+                        message = agent.message_queue.pop(0)
+                        logger.debug(f"Processing message from queue: {message.content}")
+                        response = await agent.process_message(message)
+                        if response:
+                            await self.route_message(response)
+                    
+                    # Allow agent to think and generate messages
+                    thought = await agent.think()
+                    if thought:
+                        await self.route_message(thought)
                 
-                # Allow agent to think and generate messages
-                thought = await agent.think()
-                if thought:
-                    logger.debug(f"Routing agent {agent.name}'s thought: {thought}")
-                    await self.route_message(thought)
-                else:
-                    logger.debug(f"Agent {agent.name} has no thought")
-            await asyncio.sleep(3)
-            logger.info("Sending state update")
-            await self.send_state_update()
+                # Send state update if we're still running
+                if self.running:
+                    await self.send_state_update()
+                    await asyncio.sleep(3)
+                
+        except asyncio.CancelledError:
+            logger.info("Message loop cancelled")
+        except Exception as e:
+            logger.error(f"Error in message loop: {e}")
+        finally:
+            logger.info("Message loop stopped")
 
     async def broadcast_to_clients(self, message: dict):
         """Broadcast a message to all connected WebSocket clients"""

@@ -37,10 +37,11 @@ app = FastAPI(title="Community Flow", lifespan=lifespan)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Message model for API
@@ -89,17 +90,23 @@ async def list_agents():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # Set CORS headers for WebSocket handshake
+    websocket.scope["headers"].append(
+        (b"Access-Control-Allow-Origin", b"*")
+    )
+    
     try:
         await community.connect(websocket)
         
         # Send welcome message
-        welcome_msg = CommunityMessage(
-            sender_id="system",
-            sender_name="System",
-            content="Connected to server",
-            timestamp=datetime.now()
-        )
-        await community.route_message(welcome_msg)
+        # welcome_msg = CommunityMessage(
+        #     sender_id="system",
+        #     sender_name="System",
+        #     recipient_id
+        #     content="Connected to server",
+        #     timestamp=datetime.now()
+        # )
+        # await community.route_message(welcome_msg)
         
         # Handle messages
         while True:
@@ -127,17 +134,17 @@ async def websocket_endpoint(websocket: WebSocket):
         await community.disconnect(websocket)
         
         # Only try to broadcast disconnect message if we still have active connections
-        if community.active_connections:
-            try:
-                disconnect_msg = CommunityMessage(
-                    sender_id="system",
-                    sender_name="System",
-                    content="Client disconnected",
-                    timestamp=datetime.now()
-                )
-                await community.route_message(disconnect_msg)
-            except Exception as e:
-                logger.error(f"Error sending disconnect message: {e}")
+        # if community.active_connections:
+        #     try:
+        #         disconnect_msg = CommunityMessage(
+        #             sender_id="system",
+        #             sender_name="System",
+        #             content="Client disconnected",
+        #             timestamp=datetime.now()
+        #         )
+        #         await community.route_message(disconnect_msg)
+        #     except Exception as e:
+        #         logger.error(f"Error sending disconnect message: {e}")
 
 @app.post("/message")
 async def post_message(message: MessageAPI):
@@ -166,6 +173,7 @@ if __name__ == "__main__":
     import sys
 
     def signal_handler(sig, frame):
+        """Handle shutdown signals"""
         logger.info("Shutdown signal received, stopping server...")
         sys.exit(0)
 
@@ -178,15 +186,18 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=False,
-        log_level="info",
-        loop="asyncio"
+        log_level="info"
     )
-    server = uvicorn.Server(config)
     
     try:
-        logger.debug("Starting server on http://172.19.36.55:8000")
-        server.run()
+        logger.info("Starting server on http://0.0.0.0:8000")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info"
+        )
     except KeyboardInterrupt:
-        logger.info("Received shutdown signal, stopping server...")
+        logger.info("Keyboard interrupt received...")
     finally:
         logger.info("Server shutdown complete") 

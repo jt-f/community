@@ -29,6 +29,7 @@ def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Send test messages to agents')
     parser.add_argument('--target', '-t', help='Target agent ID (optional, broadcasts to all if not specified)')
+    parser.add_argument('--message', '-m', help='Message to send')
     args = parser.parse_args()
 
     # Test messages
@@ -36,7 +37,7 @@ def main():
         "Hello agents, this is a test message from Human",
         "Can anyone help me analyze this data?",
         "Please respond to this message"
-    ]
+    ] if not args.message else [args.message]
     
     print("Starting test message sequence...")
     print(f"Target: {'all agents' if not args.target else args.target}")

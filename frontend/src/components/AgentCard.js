@@ -55,6 +55,9 @@ function AgentCard({ agent }) {
           <Typography variant="h6" component="div">
             {agent.name}
           </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: -0.5 }}>
+            ID: {agent.id}
+          </Typography>
         </Box>
 
         <Chip

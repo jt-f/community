@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
-const WS_URL = 'ws://172.19.36.55:8000/ws';
+// Get WebSocket URL from environment or default to localhost
+const WS_URL = 'ws://172.19.36.55:8000/ws'; 
 const RECONNECT_INTERVAL = 2000; // 2 seconds
 const CONNECTION_TIMEOUT = 5000; // 5 seconds
 
@@ -59,7 +60,7 @@ const useAgentStore = create((set, get) => ({
     set({ connectionTimer });
     
     socket.onopen = () => {
-      console.log('WebSocket connection established');
+      console.log('WebSocket connection established successfully');
       clearTimeout(connectionTimer);
       set({ 
         connected: true, 
@@ -76,14 +77,11 @@ const useAgentStore = create((set, get) => ({
         
         switch (message.type) {
           case 'state_update':
-            console.log('Processing state update. Current agents:', get().agents);
-            console.log('New agent state:', message.data);
-            console.log('Number of agents in update:', Object.keys(message.data).length);
+            console.log('Processing state update:', message.data);
             set({ agents: message.data });
-            console.log('Updated store agents:', get().agents);
             break;
           case 'message':
-            console.log('Received message:', message.data);
+            console.log('Processing message:', message.data);
             get().addMessage(message.data);
             break;
           case 'server_message':
@@ -102,13 +100,12 @@ const useAgentStore = create((set, get) => ({
     };
 
     socket.onerror = (error) => {
-      const errorMessage = 'WebSocket error occurred';
-      console.error(errorMessage, error);
-      set({ error: errorMessage });
+      console.error('WebSocket error occurred:', error);
+      set({ error: 'WebSocket connection error' });
     };
 
     socket.onclose = (event) => {
-      console.log('WebSocket connection closed:', event.code, event.reason);
+      console.log('WebSocket connection closed. Code:', event.code, 'Reason:', event.reason);
       clearTimeout(state.connectionTimer);
       
       set(state => ({ 
