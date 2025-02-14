@@ -1,10 +1,15 @@
-from typing import Dict, List
-
+from typing import Dict, Set
+import asyncio
+import zmq.asyncio
+from agent import Agent
 import logging
+from dataclasses import asdict
 import os
 from dotenv import load_dotenv
-from agent import Agent
-from communication import CommunicationHub
+from message import Message
+from fastapi import WebSocket
+from datetime import datetime
+from population import create_test_agents
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,47 +25,198 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class Community:
-    def __init__(self, name: str):
+    def __init__(self, name: str = "Main Community"):
         self.name = name
-        self.agents: Dict[str, Agent] = {}
-        self.comm_hub = CommunicationHub()
-        logger.info("Community created") 
+        #self.agents: Dict[str, Agent] = {}
+        self.context = zmq.asyncio.Context()
+        self.running = False
+        self.active_connections: Set[WebSocket] = set()
+        self.agents = create_test_agents()
+        logger.debug(f"Community '{name}' initialized")
         
-    def add_agent(self, agent: Agent):
-        """Add a new agent to the community"""
-        logging.debug(f"Adding agent {agent.id} to community {self.name}")
+    def reset_state(self):
+        """Reset all state to initial values"""
+        self.active_connections = set()
+        self.running = False
+        logger.debug("Community state reset")
+
+    async def connect(self, websocket: WebSocket):
+        """Handle new WebSocket connection"""
+        await websocket.accept()
+        self.active_connections.add(websocket)
+        logger.debug(f"Client connected. Total connections: {len(self.active_connections)}")
+        
+        # Send current state to the new client
+        try:
+            current_state = {
+                "type": "state_update",
+                "data": {
+                    agent.id: {
+                        "id": agent.id,
+                        "name": agent.name,
+                        "status": agent.status,
+                        "queue_size": len(agent.message_queue),
+                        "capabilities": agent.capabilities,
+                        "last_activity": agent.last_activity.isoformat()
+                    }
+                    for agent in self.agents
+                }
+            }
+            logger.debug(f"Sending current state to new client: {current_state}")
+            await websocket.send_json(current_state)
+        except Exception as e:
+            logger.error(f"Error sending current state: {e}")
+            await self.disconnect(websocket)
+
+    async def disconnect(self, websocket: WebSocket):
+        """Safely disconnect a WebSocket connection"""
+        try:
+            if websocket in self.active_connections:
+                # First remove from active connections to prevent any new messages
+                self.active_connections.remove(websocket)
+                logger.debug(f"Removed connection from active set. Total connections: {len(self.active_connections)}")
+                
+                try:
+                    # Check if the connection is already closed
+                    if not websocket.client_state.DISCONNECTED:
+                        await websocket.close()
+                        logger.debug("WebSocket closed successfully")
+                except RuntimeError as e:
+                    # Ignore "already closed" errors as they're expected in some cases
+                    if "already completed" not in str(e) and "close message has been sent" not in str(e):
+                        logger.error(f"Error closing websocket: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error closing websocket: {e}")
+                
+                # If this was the last connection, reset the state
+                if not self.active_connections:
+                    self.reset_state()
+                    logger.debug("Last client disconnected, state reset")
+        except Exception as e:
+            logger.error(f"Error during disconnect cleanup: {e}")
+            # Ensure connection is removed even if there's an error
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+        
+    def register_agent(self, agent: Agent):
+        """Register an agent with the community"""
         self.agents[agent.id] = agent
-        self.comm_hub.register_agent(agent)
+        logger.debug(f"Registered agent {agent.name}")
         
-    def remove_agent(self, agent_id: str):
-        """Remove an agent from the community"""
-        if agent_id in self.agents:
-            agent = self.agents[agent_id]
-            self.comm_hub.unregister_agent(agent)
-            del self.agents[agent_id]
+    def unregister_agent(self, agent: Agent):
+        """Unregister an agent from the community"""
+        if agent.id in self.agents:
+            del self.agents[agent.id]
+            logger.debug(f"Unregistered agent {agent.name}")
             
     async def start(self):
-        """Start the community's communication hub"""
-        self.comm_hub.running = True
-        logger.debug(f"Community {self.name} started")
-
-    async def run(self):
-        """Run the community's message loop"""
-        logger.debug(f"Community {self.name} running message loop")
-        await self.comm_hub.message_loop()
-        logger.debug(f"Community {self.name} message loop finished")
+        """Start the community and its message loop"""
+        self.running = True
+        logger.debug("Community started")
+        # Start the message loop
+        logger.debug("Starting message loop")
+        await self.message_loop()  # This will run continuously
             
     async def stop(self):
         """Stop the community"""
-        # Update all agents to offline status
-        # for agent in self.agents.values():
-        #     update_agent_monitor(agent, "offline")
-        await self.comm_hub.stop()
+        self.running = False
+        logging.debug("Community stopped")
 
-    async def broadcast_message(self, message):
-        """Broadcast a message to all agents"""
-        logging.debug(f"Broadcasting message: {message.content}")
-        # Send to monitoring
-        # await broadcast_message(message)
-        # Send to agents
-        await self.comm_hub.route_message(message) 
+    async def send_state_update(self):
+        # Send state update to all clients
+        await self.broadcast_to_clients({
+            "type": "state_update",
+            "data": {
+                agent.id: {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "status": agent.status,
+                    "queue_size": len(agent.message_queue),
+                    "capabilities": agent.capabilities,
+                    "last_activity": agent.last_activity.isoformat()
+                }
+                for agent in self.agents
+            }
+        })     
+
+    async def message_loop(self):
+        """Main message processing loop"""
+        logger.info("Starting message loop")
+        while self.running:
+            for agent in self.agents:
+                logger.info(f"Agent {agent.name}-{agent.id} has {len(agent.message_queue)} messages in queue")
+                # Process messages in agent's queue
+                if agent.message_queue:
+                    message = agent.message_queue.pop(0)
+                    logger.debug(f"Popping message from agent {agent.name} queue: {message.content}")
+                    response = await agent.process_message(message)
+                    if response:
+                        logger.debug(f"Routing response from agent {agent.name}: {response}")
+                        await self.route_message(response)
+                
+                # Allow agent to think and generate messages
+                thought = await agent.think()
+                if thought:
+                    logger.debug(f"Routing agent {agent.name}'s thought: {thought}")
+                    await self.route_message(thought)
+                else:
+                    logger.debug(f"Agent {agent.name} has no thought")
+            await asyncio.sleep(3)
+            logger.info("Sending state update")
+            await self.send_state_update()
+
+    async def broadcast_to_clients(self, message: dict):
+        """Broadcast a message to all connected WebSocket clients"""
+        logger.info(f"Broadcasting '{message['type']}' message to {len(self.active_connections)} clients")
+        # Make a copy of connections to safely iterate
+        current_connections = self.active_connections.copy()
+        dead_connections = set()
+        
+        # Send updates to WebSocket clients
+        for connection in current_connections:
+            try:
+                if connection in self.active_connections:  # Double check connection is still active
+                    await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending updates: {e}")
+                dead_connections.add(connection)
+                
+        # Clean up dead connections
+        for dead_conn in dead_connections:
+            await self.disconnect(dead_conn)
+
+    async def route_message(self, message: Dict):
+        """Route a message to its intended recipient(s)"""
+        # Convert dict to Message object if needed
+        if isinstance(message, dict):
+            message = Message.from_dict(message)
+        
+        logger.info(f"Routing message: {message}")
+        
+        # First broadcast the message to all WebSocket clients
+        await self.broadcast_to_clients({
+            "type": "message",
+            "data": message.to_dict()
+        })
+        
+        if message.recipient_id:
+            # Direct message to specific agent
+            recipient_id = message.recipient_id
+            logger.debug(f"Directing message to agent {recipient_id}")
+            target_agent = next((a for a in self.agents if a.id == recipient_id), None)
+            if target_agent:
+                logger.debug(f"Adding message to agent {target_agent.name} queue")
+                target_agent.add_to_queue(message)
+            else:
+                logger.error(f"Agent {recipient_id} not found")
+        else:
+            # Broadcast message to all agents
+            logger.debug(f"Broadcasting message to {len(self.agents)} agents")
+            for agent in self.agents:
+                if 'system' not in agent.capabilities:
+                    logger.debug(f"Adding message to agent {agent.name} queue")
+                    agent.add_to_queue(message)
+                else:
+                    logger.debug(f"Agent {agent.name} is a system agent, skipping")
+
+        await self.send_state_update()

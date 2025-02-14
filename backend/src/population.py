@@ -59,7 +59,8 @@ class BasicAgent(Agent):
             logger.debug(f"{self.name} processing message: {message.content}")
             
             # Echo the message back with agent name and add some context based on capabilities
-            response = f"{self.name} received: {message.content}"
+            # response = f"{self.name} received: {message.content}"
+            response = None
             
             # Add some specific responses based on agent capabilities
             if "echo" in self.capabilities:
@@ -68,14 +69,18 @@ class BasicAgent(Agent):
                 response += "\nI am an assistant agent, how can I help you?"
             elif "analyze" in self.capabilities:
                 response += "\nLet me analyze that for you..."
-                
-            return Message(
-                sender_id=self.id,
-                sender_name=self.name,
-                recipient_id=message.sender_id,  # Reply to the sender
-                content=response,
-                timestamp=datetime.now()  # Add current timestamp
-            )
+
+            if response:    
+                return Message(
+                    sender_id=self.id,
+                    sender_name=self.name,
+                    recipient_id=message.sender_id,  # Reply to the sender
+                    content=response,
+                    timestamp=datetime.now()  # Add current timestamp
+                )
+            else:
+                return None
+            
         except Exception as e:
             logger.error(f"Error processing message in {self.name}: {e}")
             return Message(
@@ -123,7 +128,7 @@ def create_test_agents():
     agent_configs = [
         {
             "name": "Analyzer",
-            "capabilities": ["analyze", "proactive"],
+            "capabilities": [],
             "llm_config": {"model": "basic"}
         }
         # ,

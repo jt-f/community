@@ -28,7 +28,7 @@ class Agent(ABC):
         self.message_queue = []
         self.status = "idle"
         self.last_activity = datetime.now()
-        logger.info(f"Agent {self.name} initialized with status {self.status} and ID {self.id}")
+        logger.debug(f"Agent {self.name} initialized with status {self.status} and ID {self.id}")
         
     def update_status(self, new_status: str):
         """Update agent status and last activity time"""

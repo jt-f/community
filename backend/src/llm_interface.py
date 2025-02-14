@@ -25,7 +25,7 @@ class LLMInterface:
         # self.base_url = base_url
         self.model='unknown'
         for key, value in kwargs.items():
-            logger.info(f'Adding {key}={value} to LLM interface')
+            logger.debug(f'Adding {key}={value} to LLM interface')
             setattr(self, key, value)
         
     async def generate_response(self, 
