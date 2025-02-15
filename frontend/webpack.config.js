@@ -18,7 +18,8 @@ module.exports = {
         use: {
           loader: 'babel-loader',
           options: {
-            presets: ['@babel/preset-env', '@babel/preset-react']
+            presets: ['@babel/preset-env', '@babel/preset-react'],
+            plugins: ['@babel/plugin-transform-runtime']
           }
         }
       },
@@ -37,16 +38,33 @@ module.exports = {
       'process.env': {
         'REACT_APP_WS_URL': JSON.stringify(process.env.REACT_APP_WS_URL || 'ws://172.19.36.55:8000/ws')
       }
-    })
+    }),
+    new webpack.HotModuleReplacementPlugin()
   ],
   resolve: {
-    extensions: ['.js', '.jsx']
+    extensions: ['.js', '.jsx'],
+    modules: ['node_modules']
   },
   devServer: {
     host: '0.0.0.0',
     port: 3000,
     hot: true,
     historyApiFallback: true,
-    open: false
+    open: false,
+    client: {
+      overlay: true,
+      progress: true
+    },
+    static: {
+      directory: path.join(__dirname, 'public')
+    }
+  },
+  cache: {
+    type: 'filesystem'
+  },
+  optimization: {
+    removeAvailableModules: false,
+    removeEmptyChunks: false,
+    splitChunks: false,
   }
 }; 

@@ -70,7 +70,7 @@ function MessageHistory({ messages }) {
             <ListItemText
               primary={
                 <Typography variant="subtitle2" color="text.secondary">
-                  {msg.sender_id ? msg.sender_name || 'Agent' : 'Human'} • {new Date(msg.timestamp).toLocaleTimeString()}
+                  {msg.sender_id ? msg.sender_name || 'Error' : 'Human'} {'to'} {msg.recipient_name || 'Unknown recipient'} • {new Date(msg.timestamp).toLocaleTimeString()}
                 </Typography>
               }
               secondary={

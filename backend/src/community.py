@@ -112,7 +112,7 @@ class Community:
     async def start(self):
         """Start the community and its message loop"""
         self.running = True
-        logger.debug("Community started")
+        logger.info("Community started")
         # Start the message loop as a background task
         asyncio.create_task(self.message_loop())
         logger.debug("Message loop started as background task")
@@ -152,30 +152,40 @@ class Community:
     async def message_loop(self):
         """Main message processing loop"""
         logger.info("Starting message loop")
+        counter =0
         try:
             while self.running:
+                changed = False
                 for agent in self.agents:
-                    if not self.running:  # Check if we should stop
-                        break
-                        
-                    logger.debug(f"Processing agent {agent.name}")
+                    logger.info(f"{agent.name} checking queue")
                     # Process messages in agent's queue
                     if agent.message_queue:
+                        changed = True
                         message = agent.message_queue.pop(0)
-                        logger.debug(f"Processing message from queue: {message.content}")
+                        logger.info(f"{agent.name} processing message from queue: {message.content}")
                         response = await agent.process_message(message)
                         if response:
                             await self.route_message(response)
+                    elif agent.status != "idle":
+                            agent.status = "idle"
+                            changed = True
+                            logger.info(f"Agent {agent.name} is now idle")
+                            changed = True
                     
                     # Allow agent to think and generate messages
                     thought = await agent.think()
                     if thought:
                         await self.route_message(thought)
                 
-                # Send state update if we're still running
+                    # Send state update if we're still running
+                    if self.running and changed:
+                        await self.send_state_update()
                 if self.running:
-                    await self.send_state_update()
+                    if counter == 5:
+                        await self.send_state_update()
+                        counter = 0
                     await asyncio.sleep(3)
+                    counter += 1
                 
         except asyncio.CancelledError:
             logger.info("Message loop cancelled")
@@ -187,6 +197,7 @@ class Community:
     async def broadcast_to_clients(self, message: dict):
         """Broadcast a message to all connected WebSocket clients"""
         logger.info(f"Broadcasting '{message['type']}' message to {len(self.active_connections)} clients")
+        logger.info(f"Message: {message}")
         # Make a copy of connections to safely iterate
         current_connections = self.active_connections.copy()
         dead_connections = set()
@@ -212,29 +223,38 @@ class Community:
         
         logger.info(f"Routing message: {message}")
         
-        # First broadcast the message to all WebSocket clients
-        await self.broadcast_to_clients({
-            "type": "message",
-            "data": message.to_dict()
-        })
+
         
         if message.recipient_id:
             # Direct message to specific agent
             recipient_id = message.recipient_id
-            logger.debug(f"Directing message to agent {recipient_id}")
+            logger.info(f"Directing message to agent {recipient_id}")
             target_agent = next((a for a in self.agents if a.id == recipient_id), None)
             if target_agent:
                 logger.debug(f"Adding message to agent {target_agent.name} queue")
                 target_agent.add_to_queue(message)
+                # broadcast the message to all WebSocket clients
+                await self.broadcast_to_clients({
+                    "type": "message",
+                    "data": message.to_dict()
+                })
             else:
                 logger.error(f"Agent {recipient_id} not found")
         else:
             # Broadcast message to all agents
-            logger.debug(f"Broadcasting message to {len(self.agents)} agents")
+            logger.info(f"Broadcasting message to {len(self.agents)} agents")
             for agent in self.agents:
-                if 'system' not in agent.capabilities:
-                    logger.debug(f"Adding message to agent {agent.name} queue")
+                if 'system' not in agent.capabilities and message.sender_id != agent.id:
+                    logger.info(f"Adding message to agent {agent.name} queue")
                     agent.add_to_queue(message)
+                    # broadcast the message to all WebSocket clients
+                    message.recipient_name = agent.name
+                    message.recipient_id = agent.id
+                    logger.info(f"Updated broadcast message data: {message}")
+                    await self.broadcast_to_clients({
+                        "type": "message",
+                        "data": message.to_dict()
+                    })
                 else:
                     logger.debug(f"Agent {agent.name} is a system agent, skipping")
 

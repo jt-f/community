@@ -8,6 +8,7 @@ class Message:
     sender_name: str
     content: str
     recipient_id: Optional[str] = None
+    recipient_name: Optional[str] = None
     timestamp: datetime = None
     metadata: dict[str, Any] = None
 
@@ -27,6 +28,7 @@ class Message:
             "sender_name": self.sender_name,
             "content": self.content,
             "recipient_id": self.recipient_id,
+            "recipient_name": self.recipient_name,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "metadata": self.metadata
         }
@@ -54,7 +56,7 @@ class Message:
             message_data["timestamp"] = datetime.fromisoformat(message_data["timestamp"])
             
         # Filter out any unexpected keywords
-        valid_fields = {'sender_id', 'sender_name', 'content', 'recipient_id', 'timestamp', 'metadata'}
+        valid_fields = {'sender_id', 'sender_name', 'content', 'recipient_id', 'recipient_name', 'timestamp', 'metadata'}
         filtered_data = {k: v for k, v in message_data.items() if k in valid_fields}
         
         return cls(**filtered_data) 

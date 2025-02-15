@@ -50,6 +50,7 @@ class MessageAPI(BaseModel):
     sender_name: str
     content: str
     recipient_id: Optional[str] = None
+    recipient_name: Optional[str] = None
     timestamp: Optional[datetime] = None
     metadata: Optional[Dict] = None
 
@@ -60,6 +61,7 @@ class MessageAPI(BaseModel):
                 "sender_name": "Human",
                 "content": "Hello, World!",
                 "recipient_id": None,
+                "recipient_name": None,
                 "timestamp": datetime.now().isoformat(),
                 "metadata": {}
             }
@@ -156,6 +158,7 @@ async def post_message(message: MessageAPI):
             sender_name=message.sender_name,
             content=message.content,
             recipient_id=message.recipient_id,
+            recipient_name=message.recipient_name,
             timestamp=message.timestamp or datetime.now(),
             metadata=message.metadata or {}
         )
