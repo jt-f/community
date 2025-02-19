@@ -72,14 +72,14 @@ A real-time agent monitoring system with message flow visualization built with R
    cd community/backend
    poetry run python -m src.app
    ```
-   The backend server will start on `http://localhost:8000`
+   The backend server will start on `http://172.19.36.55:8000`
 
 2. **Start the Frontend Development Server**
    ```bash
    cd community/frontend
    npm start
    ```
-   The frontend will be available at `http://localhost:3000`
+   The frontend will be available at `http://172.19.36.55:3000`
 
 ## Usage
 
@@ -144,7 +144,7 @@ community/
 - Logging level: Configurable via environment
 
 ### Frontend
-- WebSocket connection: `ws://localhost:8000/ws`
+- WebSocket connection: `ws://172.19.36.55:8000/ws`
 - Reconnection attempts: 10
 - Reconnection interval: 2 seconds
 - Message history limit: 20 messages
@@ -160,3 +160,6 @@ community/
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details. 
+
+REACT_APP_WS_URL=ws://172.19.36.55:8000/ws
+REACT_APP_API_URL=http://172.19.36.55:8000/api 

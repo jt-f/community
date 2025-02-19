@@ -14,27 +14,41 @@ import {
   Update as UpdateIcon,
 } from '@mui/icons-material';
 
-function AgentCard({ agent }) {
-  const getStatusColor = (status) => {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return 'success';
-      case 'idle':
-        return 'info';
-      case 'busy':
-        return 'warning';
-      case 'error':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
+interface AgentState {
+  id: string;
+  name: string;
+  status: string;
+  queue_size: number;
+  last_activity: string;
+  capabilities: string[];
+  metadata?: Record<string, unknown>;
+}
 
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString();
-  };
+interface AgentCardProps {
+  agent: AgentState;
+}
 
+const getStatusColor = (status: string): "success" | "info" | "warning" | "error" | "default" => {
+  switch (status.toLowerCase()) {
+    case 'active':
+      return 'success';
+    case 'idle':
+      return 'info';
+    case 'busy':
+      return 'warning';
+    case 'error':
+      return 'error';
+    default:
+      return 'default';
+  }
+};
+
+const formatTimestamp = (timestamp: string): string => {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString();
+};
+
+export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   return (
     <Card
       sx={{
@@ -112,6 +126,4 @@ function AgentCard({ agent }) {
       </CardContent>
     </Card>
   );
-}
-
-export default AgentCard; 
+}; 
