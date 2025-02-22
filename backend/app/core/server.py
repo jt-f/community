@@ -27,14 +27,14 @@ class AgentServer:
             # Only add to active connections if it's not already there
             if websocket not in self.active_connections:
                 self.active_connections.add(websocket)
-                logger.info("New WebSocket connection added")
+                logger.debug("New WebSocket connection added")
                 
                 # Send initial state only if the connection is established
                 if (websocket.client_state == WebSocketState.CONNECTED and 
                     websocket.application_state == WebSocketState.CONNECTED):
-                    logger.info("(connect) Broadcasting state")
+                    logger.debug("(connect) Broadcasting state")
                     await self.broadcast_state()
-                    logger.info("(connect) Finished broadcasting state")
+                    logger.debug("(connect) Finished broadcasting state")
         except Exception as e:
             logger.error(f"Error in connect: {e}")
             if websocket in self.active_connections:
@@ -45,7 +45,7 @@ class AgentServer:
         try:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
-                logger.info("WebSocket connection removed")
+                logger.debug("WebSocket connection removed")
         except Exception as e:
             logger.error(f"Error in disconnect: {e}")
 
@@ -58,10 +58,10 @@ class AgentServer:
             if receiver_id:
                 # Direct message to specific agent
                 if receiver_id in self.agents:
-                    logger.info(f"Routing message from {sender_id} to {receiver_id}")
+                    logger.debug(f"Routing message from {sender_id} to {receiver_id}")
                     await self.agents[receiver_id].add_message(message)
                 elif receiver_id == "all":
-                    logger.info(f"Routing message from {sender_id} to all agents")
+                    logger.debug(f"Routing message from {sender_id} to all agents")
                     for agent_id, agent in self.agents.items():
                         if agent_id != sender_id:
                             await agent.add_message(message)
@@ -69,14 +69,14 @@ class AgentServer:
                     logger.warning(f"Recipient agent {receiver_id} not found")
             else:
                 # Broadcast to all agents except sender
-                logger.info(f"Not routing to any agents")
+                logger.debug(f"Not routing to any agents")
                 return
         except Exception as e:
             logger.error(f"Error routing message: {e}")
         
     async def broadcast_state(self):
         """Broadcast current agent states to all connected clients."""
-        logger.info("(broadcast_state) Broadcasting state to all clients")
+        logger.debug("(broadcast_state) Broadcasting state to all clients")
         if not self.active_connections:
             return
             
@@ -126,24 +126,24 @@ class AgentServer:
                 
         # Remove disconnected clients
         if disconnected:
-            logger.info(f"Removing {len(disconnected)} disconnected clients")
+            logger.debug(f"Removing {len(disconnected)} disconnected clients")
             self.active_connections.difference_update(disconnected)
 
-        logger.info('Finished broadcasting')
+        logger.debug('Finished broadcasting')
         
     async def register_agent(self, agent: BaseAgent):
         """Register a new agent with the server."""
         self.agents[agent.id] = agent
-        logger.info(f"(register_agent) Registered agent {agent.id}")
-        logger.info(f"(register_agent) Broadcasting state to all clients")
+        logger.debug(f"(register_agent) Registered agent {agent.id}")
+        logger.debug(f"(register_agent) Broadcasting state to all clients")
         await self.broadcast_state()
         
     async def remove_agent(self, agent_id: str):
         """Remove an agent from the server."""
         if agent_id in self.agents:
             del self.agents[agent_id]
-            logger.info(f"(remove_agent) Removed agent {agent_id}")
-            logger.info(f"(remove_agent) Broadcasting state to all clients")
+            logger.debug(f"(remove_agent) Removed agent {agent_id}")
+            logger.debug(f"(remove_agent) Broadcasting state to all clients")
             await self.broadcast_state()
 
     async def start(self):
@@ -151,7 +151,7 @@ class AgentServer:
         if self._running:
             return
             
-        logger.info("Starting agent server...")
+        logger.debug("Starting agent server...")
         self._running = True
         
         # Create default agents
@@ -164,14 +164,14 @@ class AgentServer:
         await self.register_agent(human_agent)
         await self.register_agent(analyst_agent)
         
-        logger.info(f"Created default agents: System, Human, and Analyst")
+        logger.debug(f"Created default agents: System, Human, and Analyst")
         
         # Start background tasks
         asyncio.create_task(self._run_agents())
 
     async def stop(self):
         """Stop the agent server."""
-        logger.info("Stopping agent server...")
+        logger.debug("Stopping agent server...")
         self._running = False
         
         # Close all WebSocket connections
@@ -197,25 +197,27 @@ class AgentServer:
                 
                 # Process agent messages and thinking
                 if self.agents:
+                    # First, create new tasks for agents that need them
                     for agent_id, agent in self.agents.items():
-                        # Always check messages from each agent
                         if agent_id not in think_tasks or think_tasks[agent_id].done():
-                            # Start a new processing cycle
-                            logger.debug(f"(_run_agents) Starting processing cycle for agent {agent.name}")
+                            logger.debug(f"(_run_agents) Creating new task for agent {agent.name}")
                             think_tasks[agent_id] = asyncio.create_task(self._process_agent_messages(agent))
-                        
-                        # Check for completed tasks and handle their results
-                        if agent_id in think_tasks and think_tasks[agent_id].done():
+                    
+                    # Then, check completed tasks
+                    for agent_id, task in list(think_tasks.items()):
+                        if task.done():
                             try:
-                                message = await think_tasks[agent_id]
+                                message = await task
                                 if message and self._running:
-                                    logger.info(f"(_run_agents) Broadcasting message from agent {agent.name}")
+                                    logger.debug(f"(_run_agents) Broadcasting message from agent {self.agents[agent_id].name}")
                                     await self.broadcast(WebSocketMessage(
                                         type="message",
                                         data=message.dict()
                                     ))
                             except Exception as e:
-                                logger.error(f"Error handling task result for agent {agent.name}: {e}")
+                                logger.error(f"Error handling task result for agent {self.agents[agent_id].name}: {e}")
+                        else:
+                            logger.debug(f"(_run_agents) agent {self.agents[agent_id].name} think task is still running")
 
                 # Update states periodically
                 if current_time - last_state_update >= STATE_UPDATE_INTERVAL:
@@ -236,21 +238,45 @@ class AgentServer:
         try:
             # Get the message iterator
             message_iterator = agent.run()
-            
-            # Process messages until we get None or StopAsyncIteration
+            logger.debug(f"(_process_agent_messages) Got message iterator for agent {agent.name}")
+
             try:
-                async for message in message_iterator:
-                    if message and self._running:
-                        return message  # Return the first message we get
-                    await asyncio.sleep(0.1)  # Small sleep to prevent CPU overuse
+                # Use wait_for to prevent infinite blocking
+                message = await asyncio.wait_for(
+                    message_iterator.__anext__(),
+                    timeout=0.5  # 500ms timeout
+                )
+                
+                if message:
+                    logger.debug(f"(_process_agent_messages) Got message from agent {agent.name}: {message.dict()}")
+                    try:
+                        await self.broadcast(WebSocketMessage(
+                            type="message",
+                            data=message.dict()
+                        ))
+                        logger.debug(f"(_process_agent_messages) Successfully broadcast message from agent {agent.name}")
+                        return message
+                    except Exception as broadcast_error:
+                        logger.debug(f"(_process_agent_messages) Error broadcasting message from agent {agent.name}: {broadcast_error}", exc_info=True)
+                        return None
+                else:
+                    logger.debug(f"(_process_agent_messages) No message from agent {agent.name}")
+                    return None
                     
+            except asyncio.TimeoutError:
+                logger.debug(f"(_process_agent_messages) Timeout waiting for message from agent {agent.name}")
+                return None
             except StopAsyncIteration:
-                logger.debug(f"No more messages from agent {agent.name}")
+                logger.debug(f"(_process_agent_messages) No more messages from agent {agent.name}")
+                return None
+            except Exception as iteration_error:
+                logger.error(f"(_process_agent_messages) Error getting next message from agent {agent.name}: {iteration_error}", exc_info=True)
                 return None
                 
         except Exception as e:
-            logger.error(f"Error processing messages for agent {agent.name}: {e}")
+            logger.error(f"(_process_agent_messages) Critical error processing messages for agent {agent.name}: {e}", exc_info=True)
             return None
 
+
 # Create a singleton instance
-agent_server = AgentServer() 
+agent_server = AgentServer()

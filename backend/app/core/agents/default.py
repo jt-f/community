@@ -23,6 +23,11 @@ class SystemAgent(BaseAgent):
                 "status_reporting"
             ]
         )
+        self.THINK_INTERVAL = 600  # Think every 600 iterations (~ every minute with 0.1s sleep)
+    
+    def should_think(self) -> bool:
+        """System agent thinks every THINK_INTERVAL iterations."""
+        return self._think_counter >= self.THINK_INTERVAL
     
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process system-related messages."""
@@ -36,19 +41,17 @@ class SystemAgent(BaseAgent):
         return None
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
-        """Periodically check system status."""
-        while True:
-            # Broadcast system status every 60 seconds
-            yield Message(
-                sender_id=self.id,
-                content={
-                    "text": "System health check",
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "operational"
-                },
-                message_type="system_status"
-            )
-            await asyncio.sleep(60)
+        """Generate system status message."""
+        yield Message(
+            sender_id=self.id,
+            content={
+                "text": "System health check",
+                "timestamp": datetime.now().isoformat(),
+                "status": "operational"
+            },
+            message_type="system_status"
+        )
+
 
 class HumanAgent(BaseAgent):
     """Human agent representing user interactions."""
@@ -62,26 +65,34 @@ class HumanAgent(BaseAgent):
                 "task_delegation"
             ]
         )
+        self.id = 'human'
+    
+    def should_think(self) -> bool:
+        """Human agents never think autonomously."""
+        return False
     
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process messages directed to the human agent."""
-        # Simply acknowledge receipt of messages
-        return Message(
-            sender_id=self.id,
-            receiver_id=message.sender_id,
-            content={
-                "text": "Message received",
-                "original": message.content,
-                "timestamp": datetime.now().isoformat()
-            },
-            message_type="acknowledgment"
-        )
+        try:
+            logger.debug(f"(human_agent) Processing message: {message.content}")
+            # Simply acknowledge receipt of messages
+            return Message(
+                sender_id=self.id,
+                receiver_id=message.sender_id,
+                content={
+                    "text": "Message received",
+                    "original": message.content,
+                    "timestamp": datetime.now().isoformat()
+                },
+                message_type="acknowledgment"
+            )
+        except Exception as e:
+            logger.error(f"(human_agent) Error processing message: {str(e)}", exc_info=True)
+            return None
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
         """Human agents don't think autonomously."""
-        while True:
-            await asyncio.sleep(1)
-            yield None
+        yield None
 
 class AnalystAgent(BaseAgent):
     """Analyst agent for data analysis and insights."""
@@ -96,10 +107,15 @@ class AnalystAgent(BaseAgent):
                 "report_creation"
             ]
         )
+        self.THINK_INTERVAL = 100  # Think every 100 iterations (~ every 10 seconds with 0.1s sleep)
+    
+    def should_think(self) -> bool:
+        """Analyst thinks every THINK_INTERVAL iterations."""
+        return self._think_counter >= self.THINK_INTERVAL
     
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process analysis requests and generate insights."""
-        logger.info(f"(analyst_agent) Processing message: {message.content}")
+        logger.debug(f"(analyst_agent) Processing message: {message.content}")
         if "analyze" in message.content:
             return Message(
                 sender_id=self.id,
@@ -127,16 +143,15 @@ class AnalystAgent(BaseAgent):
         return None
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
-        """Periodically generate insights from observed patterns."""
-        logger.info(f"(analyst_agent) Running think cycle")
-        while True:
-            yield Message(
-                sender_id=self.id,
-                content={
-                    "text": "Periodic insight report",
-                    "timestamp": datetime.now().isoformat(),
-                    "insights": ["Periodic Insight 1", "Periodic Insight 2"]
-                },
-                message_type="periodic_analysis"
-            )
-            await asyncio.sleep(10) 
+        """Generate periodic insights."""
+        logger.debug(f"(analyst_agent) Generating insights")
+        yield Message(
+            sender_id=self.id,
+            receiver_id="human",
+            content={
+                "text": "Periodic insight report",
+                "timestamp": datetime.now().isoformat(),
+                "insights": ["Periodic Insight 1", "Periodic Insight 2"]
+            },
+            message_type="periodic_analysis"
+        )
