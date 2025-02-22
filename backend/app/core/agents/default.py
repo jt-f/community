@@ -75,19 +75,11 @@ class HumanAgent(BaseAgent):
         """Process messages directed to the human agent."""
         try:
             logger.debug(f"(human_agent) Processing message: {message.content}")
-            # Simply acknowledge receipt of messages
-            return Message(
-                sender_id=self.id,
-                receiver_id=message.sender_id,
-                content={
-                    "text": "Message received",
-                    "original": message.content,
-                    "timestamp": datetime.now().isoformat()
-                },
-                message_type="acknowledgment"
-            )
+            # For human agents, we'll just acknowledge receipt of messages
+            # but won't auto-respond to keep interaction natural
+            return None
         except Exception as e:
-            logger.error(f"(human_agent) Error processing message: {str(e)}", exc_info=True)
+            logger.error(f"(human_agent) Error processing message: {e}", exc_info=True)
             return None
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
@@ -115,8 +107,9 @@ class AnalystAgent(BaseAgent):
     
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process analysis requests and generate insights."""
-        logger.debug(f"(analyst_agent) Processing message: {message.content}")
-        if "analyze" in message.content:
+        logger.info(f"(analyst_agent) Processing message: {message.content}")
+        if "analyze" in message.content['text']:
+            logger.info(f"(analyst_agent) Analyzing data: {message.content.get('data', {})}")
             return Message(
                 sender_id=self.id,
                 receiver_id=message.sender_id,
@@ -129,17 +122,7 @@ class AnalystAgent(BaseAgent):
                 message_type="analysis_result"
             )
         else:
-            return Message(
-                sender_id=self.id,
-                receiver_id=message.sender_id,
-                content={
-                    "text": "No analysis requested",
-                    "insights": ["No Insight"],
-                    "data": message.content.get("data", {}),
-                    "timestamp": datetime.now().isoformat()
-                },
-                message_type="analysis_result"
-            )
+            logger.info(f"(analyst_agent) Not an analysis request")
         return None
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:

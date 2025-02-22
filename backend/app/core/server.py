@@ -68,11 +68,14 @@ class AgentServer:
                 else:
                     logger.warning(f"Recipient agent {receiver_id} not found")
             else:
-                # Broadcast to all agents except sender
-                logger.debug(f"Not routing to any agents")
-                return
+                # If no receiver specified, broadcast to all agents except sender
+                logger.debug(f"Broadcasting message from {sender_id} to all agents")
+                for agent_id, agent in self.agents.items():
+                    if agent_id != sender_id:  # Don't send to self
+                        logger.debug(f"Routing broadcast message to agent {agent_id}")
+                        await agent.add_message(message)
         except Exception as e:
-            logger.error(f"Error routing message: {e}")
+            logger.error(f"Error routing message: {e}", exc_info=True)
         
     async def broadcast_state(self):
         """Broadcast current agent states to all connected clients."""
@@ -100,11 +103,10 @@ class AgentServer:
         if not self.active_connections:
             return
 
-        logger.info(f"(broadcast) message to broadcast: {message.dict()}")
-        
-        # If this is a message (not a state update), route it to agent queues first
-        if message.type == "message":
-            await self.route_message(Message(**message.data))
+        if message.type != "state_update":
+            logger.info(f"(broadcast) message to broadcast: {message.dict()}")
+        else:
+            logger.info("sending state update")
             
         disconnected = set()
         for connection in self.active_connections:
@@ -186,7 +188,7 @@ class AgentServer:
     async def _run_agents(self):
         """Background task to run agent processing loops."""
         last_state_update = 0
-        STATE_UPDATE_INTERVAL = 30.0  # Update state every 30 seconds
+        STATE_UPDATE_INTERVAL = 2.0  # Update state every 30 seconds
         
         # Keep track of agent think tasks
         think_tasks = {}
