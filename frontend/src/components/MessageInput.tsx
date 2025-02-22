@@ -3,6 +3,10 @@ import {
   Box,
   TextField,
   Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
   Typography,
   CircularProgress,
   Divider,
@@ -11,109 +15,67 @@ import { Send as SendIcon } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
 
 export const MessageInput: React.FC = () => {
+  const { agents, sendMessage } = useAgentStore();
   const [message, setMessage] = useState('');
-  const [sending, setSending] = useState(false);
-  const { isConnected, socket, connect } = useAgentStore();
+  const [selectedAgent, setSelectedAgent] = useState<string>('all');
 
-  // Ensure connection is attempted when component mounts
-  useEffect(() => {
-    if (!isConnected) {
-      connect();
-    }
-  }, [isConnected, connect]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !isConnected) return;
-
-    setSending(true);
-    try {
-      useAgentStore.getState().sendMessage({
+    if (message.trim()) {
+      sendMessage({
         sender_id: 'human',
+        receiver_id: selectedAgent === 'all' ? undefined : selectedAgent,
         content: {
-          text: message.trim(),
-          type: 'user_message'
+          text: message,
+          timestamp: new Date().toISOString()
         },
         message_type: 'text'
       });
       setMessage('');
-    } catch (error) {
-      console.error('Error sending message:', error);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const getConnectionStatus = () => {
-    if (!socket) return 'Not connected to server';
-    switch (socket.readyState) {
-      case WebSocket.CONNECTING:
-        return 'Connecting to server...';
-      case WebSocket.OPEN:
-        return 'Connected';
-      case WebSocket.CLOSING:
-        return 'Connection closing...';
-      case WebSocket.CLOSED:
-        return 'Connection closed';
-      default:
-        return 'Not connected to server';
-    }
-  };
-
-  const getStatusColor = () => {
-    if (!socket) return 'error';
-    switch (socket.readyState) {
-      case WebSocket.OPEN:
-        return 'success';
-      case WebSocket.CONNECTING:
-        return 'warning';
-      default:
-        return 'error';
     }
   };
 
   return (
-    <>
-      <Divider />
-      <Box sx={{ p: 2, backgroundColor: 'background.paper' }}>
-        <form onSubmit={handleSubmit}>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <Box sx={{ flexGrow: 1 }}>
-              <TextField
-                fullWidth
-                variant="outlined"
-                placeholder="Type your message..."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                disabled={!isConnected || sending}
-                InputProps={{
-                  sx: { pr: 1 },
-                  endAdornment: sending && (
-                    <CircularProgress size={20} sx={{ mr: 1 }} />
-                  ),
-                }}
-              />
-              <Typography 
-                variant="caption" 
-                color={getStatusColor()}
-                sx={{ mt: 0.5, display: 'block' }}
-              >
-                {getConnectionStatus()}
-              </Typography>
-            </Box>
-            <Button
-              variant="contained"
-              color="primary"
-              endIcon={<SendIcon />}
-              type="submit"
-              disabled={!isConnected || !message.trim() || sending}
-              sx={{ height: 56 }}
-            >
-              Send
-            </Button>
-          </Box>
-        </form>
-      </Box>
-    </>
+    <Box
+      component="form"
+      onSubmit={handleSubmit}
+      sx={{
+        p: 2,
+        display: 'flex',
+        gap: 1,
+        borderTop: 1,
+        borderColor: 'divider',
+        backgroundColor: 'background.paper'
+      }}
+    >
+      <FormControl size="small" sx={{ minWidth: 200 }} component={Box}>
+        <InputLabel id="send-to-label">Send to</InputLabel>
+        <Select
+          value={selectedAgent}
+          onChange={(e) => setSelectedAgent(e.target.value)}
+          label="Send to"
+        >
+          <MenuItem value="all">All Agents</MenuItem>
+          {Object.entries(agents).map(([id, agent]) => (
+            <MenuItem key={id} value={id}>
+              {agent.name} ({id})
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+
+      <TextField
+        fullWidth
+        size="small"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="Type your message..."
+        variant="outlined"
+      />
+
+      <Button type="submit" variant="contained" disabled={!message.trim()}>
+        Send
+      </Button>
+    </Box>
   );
-}; 
+};
