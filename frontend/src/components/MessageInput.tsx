@@ -15,9 +15,24 @@ import { Send as SendIcon } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
 
 export const MessageInput: React.FC = () => {
-  const { agents, sendMessage } = useAgentStore();
+  const { agents, sendMessage, isConnected, connect } = useAgentStore();
   const [message, setMessage] = useState('');
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Ensure connection is established
+  useEffect(() => {
+    if (!isConnected) {
+      connect();
+    }
+  }, [isConnected, connect]);
+
+  // Update loading state based on agents
+  useEffect(() => {
+    if (Object.keys(agents).length > 0) {
+      setIsLoading(false);
+    }
+  }, [agents]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +50,28 @@ export const MessageInput: React.FC = () => {
     }
   };
 
+  if (!isConnected || isLoading) {
+    return (
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+          borderTop: 1,
+          borderColor: 'divider',
+          backgroundColor: 'background.paper'
+        }}
+      >
+        <CircularProgress size={20} />
+        <Typography variant="body2" color="text.secondary">
+          {!isConnected ? 'Connecting to server...' : 'Loading agents...'}
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box
       component="form"
@@ -48,9 +85,10 @@ export const MessageInput: React.FC = () => {
         backgroundColor: 'background.paper'
       }}
     >
-      <FormControl size="small" sx={{ minWidth: 200 }} component={Box}>
+      <FormControl size="small" sx={{ minWidth: 200 }}>
         <InputLabel id="send-to-label">Send to</InputLabel>
         <Select
+          labelId="send-to-label"
           value={selectedAgent}
           onChange={(e) => setSelectedAgent(e.target.value)}
           label="Send to"
@@ -71,9 +109,15 @@ export const MessageInput: React.FC = () => {
         onChange={(e) => setMessage(e.target.value)}
         placeholder="Type your message..."
         variant="outlined"
+        disabled={!isConnected}
       />
 
-      <Button type="submit" variant="contained" disabled={!message.trim()}>
+      <Button 
+        type="submit" 
+        variant="contained" 
+        disabled={!message.trim() || !isConnected}
+        endIcon={<SendIcon />}
+      >
         Send
       </Button>
     </Box>

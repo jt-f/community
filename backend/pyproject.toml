@@ -18,6 +18,8 @@ aiohttp = "^3.9.1"
 structlog = "^24.1.0"
 httptools = "^0.6.1"
 slowapi = "^0.1.9"
+ollama = "^0.4.7"
+
 
 [tool.poetry.dev-dependencies]
 pytest = "^7.4.0"

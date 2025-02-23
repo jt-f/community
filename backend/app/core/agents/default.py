@@ -8,6 +8,8 @@ from datetime import datetime
 from .base import BaseAgent
 from ..models import Message
 from ...utils.logger import get_logger
+from ...utils.ollama import OllamaClient
+from .config import ANALYST_CONFIG
 
 logger = get_logger(__name__)
 
@@ -100,41 +102,110 @@ class AnalystAgent(BaseAgent):
             ]
         )
         self.THINK_INTERVAL = 100  # Think every 100 iterations (~ every 10 seconds with 0.1s sleep)
+        self.config = ANALYST_CONFIG
+
     
     def should_think(self) -> bool:
         """Analyst thinks every THINK_INTERVAL iterations."""
         return self._think_counter >= self.THINK_INTERVAL
     
     async def process_message(self, message: Message) -> Optional[Message]:
-        """Process analysis requests and generate insights."""
+        """Process analysis requests and generate insights using Ollama."""
         logger.info(f"(analyst_agent) Processing message: {message.content}")
-        if "analyze" in message.content['text']:
-            logger.info(f"(analyst_agent) Analyzing data: {message.content.get('data', {})}")
+        
+        try:
+            # Select prompt based on message content or use default
+            prompt_key = "default"
+            if "technical" in message.content.get("text", "").lower():
+                prompt_key = "technical"
+            elif "data" in message.content.get("text", "").lower():
+                prompt_key = "data"
+                
+            # Format prompt with message
+            prompt_template = self.config["prompts"][prompt_key]
+            prompt = prompt_template.format(message=message.content.get("text", ""))
+            
+            # Get response from Ollama
+            logger.info(f"(analyst_agent) Sending prompt to Ollama: {prompt}")
+            with OllamaClient() as client:
+                response = client.generate(
+                    prompt=prompt,
+                    model=self.config["model"],
+                    parameters={
+                        "temperature": self.config["temperature"],
+                        "num_ctx": 4096,  # Larger context window
+                        "num_predict": 1024,  # Longer responses
+                        "top_p": 0.9,
+                        "top_k": 40
+                    }
+                )
+            
+            logger.info(f"(Analyst Agent) Ollama response: {response}")
+            
+            # Check if response is an error dict
+            if isinstance(response, dict) and "error" in response:
+                logger.error(f"Error from Ollama: {response['error']}")
+                return Message(
+                    sender_id=self.id,
+                    receiver_id=message.sender_id,
+                    content={
+                        "text": "Sorry, I encountered an error while processing your message.",
+                        "error": response["error"],
+                        "details": response.get("details", "No additional details"),
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    message_type="error"
+                )
+            
+            # Response should be a string if successful
+            if not isinstance(response, str):
+                logger.error(f"Unexpected response type from Ollama: {type(response)}")
+                return Message(
+                    sender_id=self.id,
+                    receiver_id=message.sender_id,
+                    content={
+                        "text": "Sorry, I received an unexpected response format.",
+                        "error": "Invalid response format",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    message_type="error"
+                )
+            
             return Message(
                 sender_id=self.id,
                 receiver_id=message.sender_id,
                 content={
-                    "text": "Analysis complete",
-                    "insights": ["Insight 1", "Insight 2"],
-                    "data": message.content.get("data", {}),
+                    "text": response,
+                    "prompt_used": prompt_key,
                     "timestamp": datetime.now().isoformat()
                 },
                 message_type="analysis_result"
             )
-        else:
-            logger.info(f"(analyst_agent) Not an analysis request")
-        return None
+            
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
+            return Message(
+                sender_id=self.id,
+                receiver_id=message.sender_id,
+                content={
+                    "text": "An error occurred while processing your message.",
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                },
+                message_type="error"
+            )
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
         """Generate periodic insights."""
         logger.debug(f"(analyst_agent) Generating insights")
+        # For now, we'll keep the periodic insights simple
         yield Message(
             sender_id=self.id,
             receiver_id="human",
             content={
                 "text": "Periodic insight report",
                 "timestamp": datetime.now().isoformat(),
-                "insights": ["Periodic Insight 1", "Periodic Insight 2"]
+                "insights": ["System is operating normally", "No anomalies detected"]
             },
             message_type="periodic_analysis"
         )

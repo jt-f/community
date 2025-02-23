@@ -98,38 +98,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
 
     try {
-      console.log(`Attempting WebSocket connection to ${host} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+      console.log(`Attempting WebSocket connection to ${host}`);
       const socket = new WebSocket(host);
       
-      // Set a connection timeout
-      const connectionTimeout = setTimeout(() => {
-        if (socket.readyState !== WebSocket.OPEN) {
-          console.log('WebSocket connection timeout');
-          socket.close();
-          set({ socket: null, isConnected: false });
-          
-          // Try to reconnect if we haven't exceeded max attempts
-          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-            console.log(`Scheduling reconnection in ${delay}ms`);
-            reconnectTimeout = setTimeout(() => get().connect(), delay);
-          } else {
-            console.log('Max reconnection attempts reached');
-            reconnectAttempts = 0;
-          }
-        }
-      }, 5000);
-      
       socket.onopen = () => {
-        clearTimeout(connectionTimeout);
         console.log('WebSocket connected successfully');
         reconnectAttempts = 0;
         set({ isConnected: true, socket });
+        
+        // Request initial state
+        socket.send(JSON.stringify({
+          type: 'request_state',
+          data: {}
+        }));
       };
       
       socket.onclose = (event) => {
-        clearTimeout(connectionTimeout);
         console.log('WebSocket connection closed:', event.code, event.reason);
         set({ isConnected: false, socket: null });
         
@@ -149,7 +133,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       
       socket.onerror = (error) => {
         console.error('WebSocket error:', error);
-        clearTimeout(connectionTimeout);
         set({ isConnected: false });
       };
 

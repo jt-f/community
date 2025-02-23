@@ -113,6 +113,14 @@ jupyter = ["ipython (>=7.8.0)", "tokenize-rt (>=3.2.0)"]
 uvloop = ["uvloop (>=0.15.2)"]
 
 [[package]]
+name = "certifi"
+version = "2025.1.31"
+description = "Python package for providing Mozilla's CA Bundle."
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
 name = "click"
 version = "8.1.8"
 description = "Composable command line interface toolkit"
@@ -189,6 +197,24 @@ optional = false
 python-versions = ">=3.7"
 
 [[package]]
+name = "httpcore"
+version = "1.0.7"
+description = "A minimal low-level HTTP client."
+category = "main"
+optional = false
+python-versions = ">=3.8"
+
+[package.dependencies]
+certifi = "*"
+h11 = ">=0.13,<0.15"
+
+[package.extras]
+asyncio = ["anyio (>=4.0,<5.0)"]
+http2 = ["h2 (>=3,<5)"]
+socks = ["socksio (>=1.0.0,<2.0.0)"]
+trio = ["trio (>=0.22.0,<1.0)"]
+
+[[package]]
 name = "httptools"
 version = "0.6.4"
 description = "A collection of framework independent HTTP protocol utils."
@@ -198,6 +224,27 @@ python-versions = ">=3.8.0"
 
 [package.extras]
 test = ["Cython (>=0.29.24)"]
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+description = "The next generation HTTP client."
+category = "main"
+optional = false
+python-versions = ">=3.8"
+
+[package.dependencies]
+anyio = "*"
+certifi = "*"
+httpcore = ">=1.0.0,<2.0.0"
+idna = "*"
+
+[package.extras]
+brotli = ["brotli", "brotlicffi"]
+cli = ["click (>=8.0.0,<9.0.0)", "pygments (>=2.0.0,<3.0.0)", "rich (>=10,<14)"]
+http2 = ["h2 (>=3,<5)"]
+socks = ["socksio (>=1.0.0,<2.0.0)"]
+zstd = ["zstandard (>=0.18.0)"]
 
 [[package]]
 name = "idna"
@@ -292,6 +339,18 @@ description = "Type system extensions for programs checked with the mypy type ch
 category = "dev"
 optional = false
 python-versions = ">=3.5"
+
+[[package]]
+name = "ollama"
+version = "0.4.7"
+description = "The official Python client for Ollama."
+category = "main"
+optional = false
+python-versions = "<4.0,>=3.8"
+
+[package.dependencies]
+httpx = ">=0.27,<0.29"
+pydantic = ">=2.9.0,<3.0.0"
 
 [[package]]
 name = "packaging"
@@ -576,7 +635,7 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "8de7d8b10cc12471d69a900d20c4b6de8dc6a25b985d6686dc353ffd3e5dbd47"
+content-hash = "a6c1bf2e2f3965867c4dc683d10e6e789f1923dc3a4facfda856dda482d8b5b9"
 
 [metadata.files]
 aiohappyeyeballs = []
@@ -587,6 +646,7 @@ anyio = []
 async-timeout = []
 attrs = []
 black = []
+certifi = []
 click = []
 colorama = []
 deprecated = []
@@ -594,7 +654,9 @@ exceptiongroup = []
 fastapi = []
 frozenlist = []
 h11 = []
+httpcore = []
 httptools = []
+httpx = []
 idna = []
 iniconfig = []
 isort = []
@@ -602,6 +664,7 @@ limits = []
 multidict = []
 mypy = []
 mypy-extensions = []
+ollama = []
 packaging = []
 pathspec = []
 platformdirs = []

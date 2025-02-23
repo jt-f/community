@@ -70,7 +70,7 @@ A real-time agent monitoring system with message flow visualization built with R
 1. **Start the Backend Server**
    ```bash
    cd community/backend
-   poetry run python -m src.app
+   poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
    The backend server will start on `http://172.19.36.55:8000`
 
