@@ -1,6 +1,8 @@
 import logging
+import time
 from typing import Optional, Dict, Union
-import ollama
+import asyncio
+from ollama import AsyncClient
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -9,34 +11,65 @@ class OllamaClient:
     def __init__(self, base_url: str = "http://localhost:11434", max_retries: int = 3):
         self.base_url = base_url
         self.max_retries = max_retries
-        self.client = ollama.Client(host=base_url)
+        self.client = AsyncClient(host=base_url)
         self.DEFAULT_TIMEOUT = 300.0  # 5 minutes
         logger.info(f"Initialized OllamaClient with base_url: {base_url}")
-        
-    def __enter__(self):
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
+
+    async def __aenter__(self):
+        # Asynchronous setup code here
+        return self  # Or some other object
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # Asynchronous cleanup code here
         pass
-        
-    def generate(self, prompt: str = "Say a funny thing", model: str = "mistral", parameters: Optional[Dict] = None) -> Union[str, Dict[str, str]]:
+
+    async def ensure_model_loaded(self, model: str) -> bool:
+        """Ensure model is loaded."""
+        try:
+            # Check if model exists
+            await self.client.show(model)
+            logger.info(f"Model {model} is available")
+            return True
+        except Exception as e:
+            if "model not found" in str(e).lower():
+                logger.info(f"Model {model} not found, pulling...")
+                try:
+                    await self.client.pull(model)
+                    logger.info(f"Successfully pulled model {model}")
+                    return True
+                except Exception as pull_error:
+                    logger.error(f"Error pulling model {model}: {pull_error}")
+                    return False
+            else:
+                logger.error(f"Error checking model {model}: {e}")
+                return False
+    
+    async def generate(self, prompt: str = "Say a funny thing", model: str = "mistral", parameters: Optional[Dict] = None) -> Union[str, Dict[str, str]]:
         """Generate a response using the Ollama client."""
         try:
-            # Send request to Ollama
-            response = self.client.chat(
+            logger.info(f"Generating response for prompt: {prompt} {model} {parameters}")
+            # First ensure model is loaded
+            if not await self.ensure_model_loaded(model):
+                return {
+                    'error': f'Failed to load model {model}',
+                    'details': 'Model could not be loaded or pulled'
+                }
+
+            logger.info(f"Sending request to Ollama")
+            response = await self.client.generate(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                prompt=prompt,
                 options=parameters or {}
             )
-            
-            if not response or not response.message:
+            logger.info(f"Received response from Ollama {response}")
+            if not response or not response.response:
                 return {
                     'error': 'No response from Ollama',
                     'details': 'Empty response received'
                 }
-                
-            return response.message.content
-                
+            
+            return response.response
+            
         except Exception as e:
             logger.error(f"Error in generate: {e}")
             return {
@@ -45,4 +78,4 @@ class OllamaClient:
             }
 
 # Create a singleton instance for the application
-ollama_client = OllamaClient() 
+ollama_client = OllamaClient()

@@ -2,13 +2,13 @@
 Default agent implementations.
 """
 import asyncio
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, Union
 from datetime import datetime
 
 from .base import BaseAgent
 from ..models import Message
 from ...utils.logger import get_logger
-from ...utils.ollama import OllamaClient
+from ...utils.ollama import ollama_client
 from .config import ANALYST_CONFIG
 
 logger = get_logger(__name__)
@@ -104,10 +104,15 @@ class AnalystAgent(BaseAgent):
         self.THINK_INTERVAL = 100  # Think every 100 iterations (~ every 10 seconds with 0.1s sleep)
         self.config = ANALYST_CONFIG
 
-    
+
     def should_think(self) -> bool:
         """Analyst thinks every THINK_INTERVAL iterations."""
         return self._think_counter >= self.THINK_INTERVAL
+
+    async def _generate_response(self, prompt: str, model: str, parameters: dict) -> Union[str, dict]:
+        async with ollama_client as client:
+            logger.info(f"Using OllamaClient to make generate call: {prompt}")
+            return await client.generate(prompt=prompt, model=model, parameters=parameters)
     
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process analysis requests and generate insights using Ollama."""
@@ -125,19 +130,33 @@ class AnalystAgent(BaseAgent):
             prompt_template = self.config["prompts"][prompt_key]
             prompt = prompt_template.format(message=message.content.get("text", ""))
             
-            # Get response from Ollama
             logger.info(f"(analyst_agent) Sending prompt to Ollama: {prompt}")
-            with OllamaClient() as client:
-                response = client.generate(
+            try:
+                response = await self._generate_response(
                     prompt=prompt,
                     model=self.config["model"],
-                    parameters={
-                        "temperature": self.config["temperature"],
-                        "num_ctx": 4096,  # Larger context window
-                        "num_predict": 1024,  # Longer responses
-                        "top_p": 0.9,
-                        "top_k": 40
-                    }
+                    parameters=None
+                    # {
+                    #     "temperature": self.config["temperature"]
+                    #     #,
+                    #     # "num_ctx": 4096,  # Larger context window
+                    #     # "num_predict": 1024,  # Longer responses
+                    #     # "top_p": 0.9,
+                    #     # "top_k": 40
+                    # }
+                )
+            except Exception as e:
+                logger.error(f"(process message) Error generating response: {e}", exc_info=True)
+                return Message(
+                    sender_id=self.id,
+                    receiver_id=message.sender_id,
+                    content={
+                        "text": "Sorry, I encountered an error while processing your message.",
+                        "error": str(e),
+                        "details": "An error occurred while generating the response",
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    message_type="error"
                 )
             
             logger.info(f"(Analyst Agent) Ollama response: {response}")
