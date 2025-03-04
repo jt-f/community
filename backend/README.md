@@ -10,6 +10,9 @@ The backend server for the Agent Community system, providing WebSocket and REST 
 - Structured logging with color support
 - Async/await based architecture
 - FastAPI for high performance
+- Multi-agent communication system with specialized agent types
+- Agent Manager for coordinated agent processing
+- LLM integration via Ollama
 
 ## Project Structure
 
@@ -20,11 +23,18 @@ backend/
 │   │   ├── rest.py      # REST API endpoints
 │   │   └── websocket.py # WebSocket endpoints
 │   ├── core/
-│   │   ├── agent.py     # Base agent implementation
+│   │   ├── agents/      # Agent implementations
+│   │   │   ├── base.py  # Base agent class
+│   │   │   ├── analyst.py # Analyst agent implementation
+│   │   │   ├── human.py # Human agent implementation
+│   │   │   ├── system.py # System agent implementation
+│   │   │   └── config.py # Agent configuration
+│   │   ├── agent_manager.py # Agent coordination and processing
 │   │   ├── models.py    # Data models
 │   │   └── server.py    # Agent server implementation
 │   ├── utils/
-│   │   └── logger.py    # Logging utilities
+│   │   ├── logger.py    # Logging utilities
+│   │   └── ollama.py    # Ollama integration
 │   └── main.py          # Application entry point
 ├── tests/               # Test suite
 ├── pyproject.toml       # Dependencies and config
@@ -74,12 +84,12 @@ poetry run ruff check app
 ## API Documentation
 
 Once the server is running, visit:
-- OpenAPI docs: http://172.19.36.55:8000/docs
-- ReDoc: http://172.19.36.55:8000/redoc
+- OpenAPI docs: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ## WebSocket API
 
-Connect to `ws://172.19.36.55:8000/ws` for real-time updates.
+Connect to `ws://localhost:8000/ws` for real-time updates.
 
 Message format:
 ```json
@@ -89,6 +99,9 @@ Message format:
     "id": "unique-id",
     "timestamp": "2024-02-14T12:00:00Z",
     "sender_id": "agent-id",
+    "sender_name": "Agent Name",
+    "receiver_id": "recipient-id",
+    "receiver_name": "Recipient Name",
     "content": {
       "text": "message content"
     },
@@ -110,10 +123,56 @@ Example message POST:
 {
   "sender_id": "human",
   "sender_name": "Human",
-  "content": "Hello, World!",
-  "recipient_id": null,
-  "recipient_name": null
+  "content": {
+    "text": "Hello, World!"
+  },
+  "receiver_id": null,
+  "receiver_name": null,
+  "message_type": "text"
 }
+```
+
+## Agent System Architecture
+
+The system uses an agent-based architecture where different specialized agents can process messages and communicate with each other.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Server
+    participant AgentManager
+    participant HumanAgent
+    participant AnalystAgent
+    participant SystemAgent
+    participant OllamaLLM
+    
+    Client->>Server: Send message via WebSocket/REST
+    Server->>AgentManager: Route message
+    
+    alt Message for Human Agent
+        AgentManager->>HumanAgent: Process message
+        HumanAgent->>AgentManager: Response message
+    else Message for Analyst Agent
+        AgentManager->>AnalystAgent: Process message
+        AnalystAgent->>OllamaLLM: Generate analysis
+        OllamaLLM->>AnalystAgent: Return analysis
+        AnalystAgent->>AgentManager: Analysis response
+    else System Event
+        AgentManager->>SystemAgent: Process system event
+        SystemAgent->>AgentManager: System notification
+    end
+    
+    AgentManager->>Server: Route response
+    Server->>Client: Broadcast via WebSocket
+    
+    loop Agent Thinking Cycle
+        AgentManager->>AnalystAgent: Run thinking cycle
+        AnalystAgent->>OllamaLLM: Generate thought
+        OllamaLLM->>AnalystAgent: Return thought
+        AnalystAgent->>AgentManager: Generated thought
+        AgentManager->>Server: Broadcast thought
+        Server->>Client: Send to WebSocket clients
+    end
 ```
 
 ## Environment Variables
@@ -123,6 +182,7 @@ Create a `.env` file:
 LOG_LEVEL=INFO
 HOST=0.0.0.0
 PORT=8000
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 ## Contributing
