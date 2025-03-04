@@ -4,13 +4,16 @@ Main FastAPI application entry point.
 import signal
 import asyncio
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.websocket import router as ws_router
 from .api.rest import router as rest_router
 from .core.server import agent_server
 from .utils.logger import get_logger
+from .core.agent_manager import AgentManager
+
+from .core.models import Message
 
 logger = get_logger(__name__)
 
@@ -34,6 +37,13 @@ app.add_middleware(
 # Include routers
 app.include_router(ws_router)
 app.include_router(rest_router)
+
+# Create agent manager
+agent_manager = AgentManager()
+
+
+# Store active websocket connections
+active_connections = set()
 
 async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
@@ -79,13 +89,50 @@ async def startup_event():
     
     # Start the agent server
     await agent_server.start()
+
+    # Start the agent manager in the background
+    asyncio.create_task(agent_manager.run())
+
     logger.info("Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop the agent server on application shutdown."""
     await agent_server.stop()
+    agent_manager.stop()
     logger.info("Application shutdown complete")
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    active_connections.add(websocket)
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_json()
+            
+            # Create message object
+            message = Message(
+                sender_id=data.get("sender_id", "user"),
+                message_type=data.get("message_type", "user_message"),
+                content=data.get("content", {})
+            )
+            
+            # Send to appropriate agent
+            agent_id = data.get("agent_id", "analyst")
+            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
+                if agent.agent_id == agent_id:
+                    await agent.enqueue_message(message)
+                    break
+    
+    except WebSocketDisconnect:
+        active_connections.remove(websocket)
+
+# Function to broadcast messages to all connected clients
+async def broadcast_message(message: Message):
+    for connection in active_connections:
+        await connection.send_json(message.dict())
 
 if __name__ == "__main__":
     import uvicorn

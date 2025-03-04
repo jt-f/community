@@ -5,10 +5,15 @@ from typing import Dict, Set
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
+import uuid
 
 from .models import Message, WebSocketMessage
 from .agents.base import BaseAgent
-from .agents.default import SystemAgent, HumanAgent, AnalystAgent
+from .agents.system import SystemAgent
+from .agents.human import HumanAgent
+from .agents.analyst import AnalystAgent
+from .agent_manager import AgentManager
+
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -18,6 +23,8 @@ class AgentServer:
     
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
+        self.agent_manager = AgentManager()
+        self.agent_manager.set_server(self)  # Set server reference
         self.agents: Dict[str, BaseAgent] = {}
         self._running = False
         
@@ -134,42 +141,43 @@ class AgentServer:
         logger.debug('Finished broadcasting')
         
     async def register_agent(self, agent: BaseAgent):
-        """Register a new agent with the server."""
-        self.agents[agent.id] = agent
-        logger.debug(f"(register_agent) Registered agent {agent.id}")
+        """Register an agent with the server and manager."""
+        self.agents[agent.agent_id] = agent
+        self.agent_manager.register_agent(agent)
+        logger.debug(f"(register_agent) Registered agent {agent.agent_id}")
         logger.debug(f"(register_agent) Broadcasting state to all clients")
         await self.broadcast_state()
         
     async def remove_agent(self, agent_id: str):
         """Remove an agent from the server."""
         if agent_id in self.agents:
+            agent = self.agents[agent_id]
+            self.agent_manager.unregister_agent(agent)
             del self.agents[agent_id]
             logger.debug(f"(remove_agent) Removed agent {agent_id}")
             logger.debug(f"(remove_agent) Broadcasting state to all clients")
             await self.broadcast_state()
 
     async def start(self):
-        """Start the agent server."""
+        """Start the agent manager and server."""
         if self._running:
             return
             
         logger.debug("Starting agent server...")
         self._running = True
-        
+                
         # Create default agents
         system_agent = SystemAgent()
         human_agent = HumanAgent()
         analyst_agent = AnalystAgent()
-        
         # Register default agents
         await self.register_agent(system_agent)
         await self.register_agent(human_agent)
-        await self.register_agent(analyst_agent)
-        
+        await self.register_agent(analyst_agent)    
         logger.debug(f"Created default agents: System, Human, and Analyst")
         
-        # Start background tasks
-        asyncio.create_task(self._run_agents())
+        # Start the agent manager
+        asyncio.create_task(self.agent_manager.run())
 
     async def stop(self):
         """Stop the agent server."""
