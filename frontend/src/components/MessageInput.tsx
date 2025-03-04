@@ -19,6 +19,7 @@ export const MessageInput: React.FC = () => {
   const [message, setMessage] = useState('');
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
+  const [humanAgentId, setHumanAgentId] = useState<string>('');
 
   // Ensure connection is established
   useEffect(() => {
@@ -27,10 +28,24 @@ export const MessageInput: React.FC = () => {
     }
   }, [isConnected, connect]);
 
-  // Update loading state based on agents
+  // Update loading state based on agents and find human agent ID
   useEffect(() => {
     if (Object.keys(agents).length > 0) {
       setIsLoading(false);
+      
+      // Find the human agent by name
+      const humanAgent = Object.values(agents).find(agent => 
+        agent.name.toLowerCase() === 'human' || 
+        agent.name.toLowerCase().includes('human')
+      );
+      
+      if (humanAgent) {
+        setHumanAgentId(humanAgent.id);
+        console.log('Found human agent ID:', humanAgent.id);
+      } else {
+        console.warn('Human agent not found, using default ID');
+        setHumanAgentId('human');
+      }
     }
   }, [agents]);
 
@@ -38,7 +53,7 @@ export const MessageInput: React.FC = () => {
     e.preventDefault();
     if (message.trim()) {
       sendMessage({
-        sender_id: 'human',
+        sender_id: humanAgentId || 'human', // Use the found human agent ID or fallback to 'human'
         receiver_id: selectedAgent === 'all' ? undefined : selectedAgent,
         content: {
           text: message,
