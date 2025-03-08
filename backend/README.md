@@ -76,18 +76,19 @@ poetry run isort app tests
 poetry run mypy app
 ```
 
-5. Run linting:
-```bash
-poetry run ruff check app
-```
-
-## API Documentation
-
-Once the server is running, visit:
-- OpenAPI docs: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-## WebSocket API
+{
+  "type": "message",
+  "data": {
+    "id": "unique-id",
+    "timestamp": "2024-02-14T12:00:00Z",
+    "sender_id": "agent-id",
+    "receiver_id": "recipient-id",
+    "content": {
+      "text": "message content"
+    },
+    "message_type": "text"
+  }
+}
 
 Connect to `ws://localhost:8000/ws` for real-time updates.
 
