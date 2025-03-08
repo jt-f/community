@@ -20,6 +20,7 @@ export const MessageInput: React.FC = () => {
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [humanAgentId, setHumanAgentId] = useState<string>('');
+  const [nonHumanAgents, setNonHumanAgents] = useState<Record<string, any>>({});
 
   // Ensure connection is established
   useEffect(() => {
@@ -42,12 +43,23 @@ export const MessageInput: React.FC = () => {
       if (humanAgent) {
         setHumanAgentId(humanAgent.id);
         console.log('Found human agent ID:', humanAgent.id);
+        
+        // Filter out the human agent from the list of available recipients
+        const filteredAgents = { ...agents };
+        delete filteredAgents[humanAgent.id];
+        setNonHumanAgents(filteredAgents);
       } else {
         console.warn('Human agent not found, using default ID');
         setHumanAgentId('human');
+        setNonHumanAgents(agents);
+      }
+      
+      // Reset selected agent if it's the human agent
+      if (selectedAgent === humanAgentId) {
+        setSelectedAgent('all');
       }
     }
-  }, [agents]);
+  }, [agents, humanAgentId, selectedAgent]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,7 +121,7 @@ export const MessageInput: React.FC = () => {
           label="Send to"
         >
           <MenuItem value="all">All Agents</MenuItem>
-          {Object.entries(agents).map(([id, agent]) => (
+          {Object.entries(nonHumanAgents).map(([id, agent]) => (
             <MenuItem key={id} value={id}>
               {agent.name} ({id})
             </MenuItem>
