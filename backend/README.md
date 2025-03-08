@@ -99,9 +99,7 @@ Message format:
     "id": "unique-id",
     "timestamp": "2024-02-14T12:00:00Z",
     "sender_id": "agent-id",
-    "sender_name": "Agent Name",
     "receiver_id": "recipient-id",
-    "receiver_name": "Recipient Name",
     "content": {
       "text": "message content"
     },
@@ -122,12 +120,10 @@ Example message POST:
 ```json
 {
   "sender_id": "human",
-  "sender_name": "Human",
   "content": {
     "text": "Hello, World!"
   },
   "receiver_id": null,
-  "receiver_name": null,
   "message_type": "text"
 }
 ```

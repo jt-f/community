@@ -129,7 +129,6 @@ class AnalystAgent(BaseAgent):
         # Create thought message
         thought_message = Message(
             sender_id=self.agent_id,
-            sender_name=self.name,
             message_type="thought",
             content={"text": thought if isinstance(thought, str) else str(thought)},
             timestamp=datetime.now().isoformat()
