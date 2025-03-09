@@ -10,7 +10,7 @@ from datetime import datetime
 from .base import BaseAgent
 from ..models import Message, WebSocketMessage
 from ...utils.logger import get_logger
-from ...utils.ollama import ollama_client
+from ...utils.model_client import model_client, ModelProvider, GenerationParameters
 
 # Import ANALYST_CONFIG instead of settings
 from .config import ANALYST_CONFIG
@@ -21,37 +21,51 @@ class AnalystAgent(BaseAgent):
     """Analyst agent for processing analysis requests and generating insights."""
     
     def __init__(self,  name: str = "Analyst"):
-        super().__init__( name=name)
+        super().__init__(name=name)
         self.agent_server = None  # Will be set by the agent_manager
         
-        # Get parameters from ANALYST_CONFIG
-        self.parameters = {
-            "temperature": ANALYST_CONFIG.get("temperature", 0.7),
-            "num_ctx": 4096,
-            "num_predict": 2048,
-            "top_p": 0.9,
-            "top_k": 40
-        }
-        
-        # Get model from ANALYST_CONFIG
+        # Get model configuration from ANALYST_CONFIG
         self.default_model = ANALYST_CONFIG.get("model", "deepseek-r1:1.5b")
-        self.default_parameters = {
-            "temperature": ANALYST_CONFIG.get("temperature", 0.7),
-            "top_p": 0.9,
-            "max_tokens": 500
-        }
+        self.model_provider = ModelProvider(ANALYST_CONFIG.get("provider", "ollama"))
+        
+        # Default parameters
+        self.default_parameters = GenerationParameters(
+            temperature=ANALYST_CONFIG.get("temperature", 0.7),
+            top_p=0.9,
+            max_tokens=500,
+            provider=self.model_provider  # Set the provider from config
+        )
+        
         self.capabilities = [
             "data_analysis",
             "insight_generation",
             "llm_inference"
         ]
         
-    async def _generate_response(self, prompt: str, model: str = None, parameters: dict = None) -> Union[str, dict]:
+    async def _generate_response(self, prompt: str, model: str = None, parameters: Union[GenerationParameters, dict] = None) -> Union[str, dict]:
         """Generate a response using the LLM."""
         model = model or self.default_model
-        parameters = parameters or self.default_parameters
+        
+        # If parameters is None, use default parameters with the configured provider
+        if parameters is None:
+            parameters = self.default_parameters
+        # If parameters is a dict, ensure it includes the provider
+        elif isinstance(parameters, dict):
+            if "provider" not in parameters:
+                parameters["provider"] = self.model_provider
+            parameters = GenerationParameters(**parameters)
+        # If parameters is a GenerationParameters object, ensure provider is set
+        else:
+            if parameters.provider is None:
+                parameters.provider = self.model_provider
+        
         logger.info(f"Generating response on behalf of {self.name}")
-        async with ollama_client as client:
+        logger.info(f"Using model: {model}")
+        logger.info(f"Using parameters: {parameters}")
+        logger.info(f"Using provider: {parameters.provider}")
+        
+        # Use the model client with the specified provider
+        async with model_client as client:
             return await client.generate(prompt=prompt, model=model, parameters=parameters)
             
     async def process_message(self, message: Message) -> Optional[Message]:
@@ -59,12 +73,17 @@ class AnalystAgent(BaseAgent):
         try:
             logger.info(f"Analyst agent processing message: {message}")
             
+            # Safely get sender_name with a default value
+            sender_name = getattr(message, 'sender_name', 'Unknown User')
+            
             # Determine which prompt to use based on the message content
             prompt_key = "default"
-            if "technical" in message.content["text"].lower():
-                prompt_key = "technical"
-            elif "data" in message.content["text"].lower():
+            if message.content["text"].lower().startswith("chat-"):
+                prompt_key = "chat"
+            elif message.content["text"].lower().startswith("data-"):
                 prompt_key = "data"
+            elif message.content["text"].lower().startswith("technical-"):
+                prompt_key = "technical"
             
             # Format the prompt using the template from ANALYST_CONFIG
             prompts = ANALYST_CONFIG.get("prompts", {})
@@ -73,22 +92,30 @@ class AnalystAgent(BaseAgent):
             
             logger.info(f"Using prompt key: {prompt_key}")
             
-            # Generate a response using the existing ollama_client
-            ollama_response = await self._generate_response(
-                prompt=formatted_prompt,
-                model=self.default_model,
-                parameters=self.parameters
+            # Get parameters from ANALYST_CONFIG with the configured provider
+            parameters = GenerationParameters(
+                temperature=ANALYST_CONFIG.get("temperature", 0.7),
+                provider=self.model_provider
             )
             
-            if not ollama_response or (isinstance(ollama_response, dict) and "error" in ollama_response):
-                error_msg = ollama_response.get("error", "Unknown error") if isinstance(ollama_response, dict) else "Empty response"
-                raise ValueError(f"Error from Ollama: {error_msg}")
+            # Generate a response using the model client
+            llm_response = await self._generate_response(
+                prompt=formatted_prompt,
+                model=self.default_model,
+                parameters=parameters
+            )
+            
+            if not llm_response or (isinstance(llm_response, dict) and "error" in llm_response):
+                error_msg = llm_response.get("error", "Unknown error") if isinstance(llm_response, dict) else "Empty response"
+                raise ValueError(f"Error from LLM: {error_msg}")
             
             # Create a response message
             response = Message(
                 sender_id=self.agent_id,
+                sender_name=self.name,
                 receiver_id=message.sender_id,
-                content={"text": ollama_response if isinstance(ollama_response, str) else str(ollama_response)},
+                receiver_name=sender_name,
+                content={"text": llm_response if isinstance(llm_response, str) else str(llm_response)},
                 message_type="response",
                 timestamp=datetime.now().isoformat()
             )
@@ -98,9 +125,13 @@ class AnalystAgent(BaseAgent):
             
         except Exception as e:
             logger.error(f"Error processing message in AnalystAgent: {str(e)}")
+            # Safely get sender_name for error message
+            sender_name = getattr(message, 'sender_name', 'Unknown User')
             error_message = Message(
                 sender_id=self.agent_id,
+                sender_name=self.name,
                 receiver_id=message.sender_id,
+                receiver_name=sender_name,
                 content={"text": f"Error generating analysis: {str(e)}"},
                 message_type="error",
                 timestamp=datetime.now().isoformat()
@@ -111,7 +142,6 @@ class AnalystAgent(BaseAgent):
 
     def should_think(self) -> bool:
         """Determine if the agent should run a thinking cycle."""
-
         return False
 
     async def think_once(self) -> Optional[Message]:

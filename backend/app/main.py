@@ -6,7 +6,7 @@ import asyncio
 import sys
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-
+from dotenv import load_dotenv
 from .api.websocket import router as ws_router
 from .api.rest import router as rest_router
 from .core.server import agent_server
@@ -16,6 +16,8 @@ from .core.agent_manager import AgentManager
 from .core.models import Message
 
 logger = get_logger(__name__)
+
+
 
 app = FastAPI(
     title="Agent Community API",
@@ -136,6 +138,9 @@ async def broadcast_message(message: Message):
 
 if __name__ == "__main__":
     import uvicorn
+
+
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

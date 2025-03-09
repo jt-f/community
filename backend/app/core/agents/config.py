@@ -1,37 +1,26 @@
+
 #Configuration for agent prompts and settings.
-
-
 ANALYST_CONFIG = {
-    "model": "deepseek-r1:1.5b",  # default model to use
-    #"model": "mistral",  # default model to use
-    "temperature": 0.7,
-    "timeout": 60.0,  # timeout in seconds for model operations
+    "model": "mistral-large-latest",  # Default model
+    "provider": "mistral",         # Default provider (ollama, mistral, anthropic, openai, together)
+    "temperature": 0.7,           # Default temperature
     "prompts": {
-        "default": (
-            "You are an analytical AI assistant. Analyze the following message and provide insights:\n"
-            "{message}\n\n"
-            "Provide your analysis in the following format:\n"
-            "- Main points\n"
-            "- Key insights\n"
-            "- Recommendations"
-        ),
-        "technical": (
-            "You are a technical analyst. Review the following technical content and provide detailed analysis:\n"
-            "{message}\n\n"
-            "Focus on:\n"
-            "- Technical accuracy\n"
-            "- Potential improvements\n"
-            "- Best practices\n"
-            "- Security considerations"
-        ),
-        "data": (
-            "You are a data analyst. Analyze the following data and extract meaningful insights:\n"
-            "{message}\n\n"
-            "Provide:\n"
-            "- Data patterns\n"
-            "- Statistical observations\n"
-            "- Actionable insights\n"
-            "- Visualization recommendations"
-        )
+        "default": "You are a helpful assistant. Please respond to the following: {message}",
+        "technical": "You are a technical expert. Analyze the following technical question: {message}",
+        "data": "You are a data analyst. Analyze the following data question: {message}",
+        "chat": "You are a friendly conversational agent. Respond to: {message}"
     }
+}
+
+SYSTEM_CONFIG = {
+    "think_interval": 300,  # 5 minutes between system status updates
+}
+
+HUMAN_CONFIG = {
+    "capabilities": [
+        "user_interaction",
+        "message_sending",
+        "command_execution",
+        "task_delegation"
+    ]
 }

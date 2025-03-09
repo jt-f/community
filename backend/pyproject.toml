@@ -19,6 +19,7 @@ structlog = "^24.1.0"
 httptools = "^0.6.1"
 slowapi = "^0.1.9"
 ollama = "^0.4.7"
+mistralai = "^1.5.1"
 
 
 [tool.poetry.dev-dependencies]
