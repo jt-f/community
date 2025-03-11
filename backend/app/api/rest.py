@@ -1,20 +1,23 @@
 """
 REST API router for HTTP endpoints.
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from datetime import datetime
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Body
 from pydantic import BaseModel, validator
 from fastapi import Request  # Add this import
 
 from ..core.server import agent_server
-from ..core.models import Message
+from ..core.models import Message, AgentConfig
 from ..utils.logger import get_logger
 from fastapi import Depends, Security
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from ..utils.model_client import ModelProvider
+from ..core.instances import agent_manager  # Import from instances instead
+from ..core.agents.config import ANALYST_CONFIG
 
 logger = get_logger(__name__)
 
@@ -22,10 +25,8 @@ logger = get_logger(__name__)
 class MessageAPI(BaseModel):
     """API model for HTTP message endpoints."""
     sender_id: str
-    sender_name: str
     content: str
     recipient_id: Optional[str] = None
-    recipient_name: Optional[str] = None
     timestamp: Optional[datetime] = None
     metadata: Optional[Dict] = None
 
@@ -33,10 +34,8 @@ class MessageAPI(BaseModel):
         json_schema_extra = {
             "example": {
                 "sender_id": "human",
-                "sender_name": "Human",
                 "content": "Hello, World!",
                 "recipient_id": None,
-                "recipient_name": None,
                 "timestamp": datetime.now().isoformat(),
                 "metadata": {}
             }
@@ -49,7 +48,7 @@ class APIResponse(BaseModel):
     error: Optional[str] = None
 
 # Create router instance
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", tags=["api"])
 
 # Setup rate limiter and API key
 limiter = Limiter(key_func=get_remote_address)
@@ -109,3 +108,68 @@ async def post_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+@router.get("/agent-options")
+async def get_agent_options():
+    """Get available options for creating new agents."""
+    
+    # Available agent types
+    agent_types = [
+        {"id": "analyst", "name": "Analyst Agent", "description": "Processes analysis requests and generates insights"}
+    ]
+    
+    # Available model providers
+    providers = [{"id": p.value, "name": p.name.capitalize()} for p in ModelProvider]
+    
+    # Available models per provider
+    models = {
+        "ollama": ["deepseek-r1:1.5b", "llama3:8b", "mistral:7b", "phi3:mini"],
+        "mistral": ["mistral-tiny", "mistral-small", "mistral-medium", "mistral-large-latest"],
+        "anthropic": ["claude-3-haiku-20240307", "claude-3-sonnet-20240229", "claude-3-opus-20240229"],
+        "openai": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
+        "together": ["mistralai/Mistral-7B-Instruct-v0.2", "meta-llama/Llama-2-70b-chat-hf"]
+    }
+    
+    # Available capabilities
+    capabilities = [
+        {"id": "data_analysis", "name": "Data Analysis", "description": "Analyze data and extract insights"},
+        {"id": "insight_generation", "name": "Insight Generation", "description": "Generate insights from information"},
+        {"id": "llm_inference", "name": "LLM Inference", "description": "Run inference using language models"},
+        {"id": "code_generation", "name": "Code Generation", "description": "Generate code based on requirements"},
+        {"id": "text_summarization", "name": "Text Summarization", "description": "Summarize long texts"},
+        {"id": "question_answering", "name": "Question Answering", "description": "Answer questions based on knowledge"}
+    ]
+    
+    return {
+        "agent_types": agent_types,
+        "providers": providers,
+        "models": models,
+        "capabilities": capabilities
+    }
+
+@router.post("/agents")
+async def create_agent(agent_config: AgentConfig = Body(...)):
+    """Create a new agent with the specified configuration."""
+    try:
+        # Create the agent based on the type
+        if agent_config.agent_type == "analyst":
+            from ..core.agents.analyst import AnalystAgent
+            
+            # Create a new analyst agent with the specified configuration
+            agent = AnalystAgent(name=agent_config.name)
+            
+            # Set the model and provider
+            agent.default_model = agent_config.model
+            agent.model_provider = ModelProvider(agent_config.provider)
+            
+            # Set capabilities
+            agent.capabilities = agent_config.capabilities
+            
+            # Add the agent to the agent manager
+            agent_manager.add_agent(agent)
+            
+            return {"status": "success", "agent_id": agent.agent_id, "message": f"Agent {agent_config.name} created successfully"}
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported agent type: {agent_config.agent_type}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create agent: {str(e)}")

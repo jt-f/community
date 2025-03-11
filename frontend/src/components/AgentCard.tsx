@@ -7,106 +7,70 @@ import {
   Box,
   LinearProgress,
   Tooltip,
+  IconButton,
+  CardActions,
+  Divider
 } from '@mui/material';
 import {
   Memory as MemoryIcon,
   Queue as QueueIcon,
   Update as UpdateIcon,
+  Message as MessageIcon,
+  Delete as DeleteIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
+import { useAgentStore } from '../store/agentStore';
 
-interface AgentState {
+// Update the interface to match what we have in the store
+interface Agent {
   id: string;
   name: string;
-  status: string;
-  queue_size: number;
-  last_activity: string;
+  type: string;
+  status: 'active' | 'busy' | 'offline';
   capabilities: string[];
-  metadata?: Record<string, unknown>;
+  model?: string;
+  provider?: string;
 }
 
 interface AgentCardProps {
-  agent: AgentState;
+  agent: Agent;
 }
 
-const getStatusColor = (status: string): "success" | "info" | "warning" | "error" | "default" => {
-  switch (status.toLowerCase()) {
-    case 'active':
-      return 'success';
-    case 'idle':
-      return 'info';
-    case 'busy':
-      return 'warning';
-    case 'error':
-      return 'error';
-    default:
-      return 'default';
-  }
-};
-
-const formatTimestamp = (timestamp: string): string => {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString();
-};
-
 export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
+  const { sendMessage } = useAgentStore();
+  
+  const handleMessageClick = () => {
+    // Implement message sending logic
+    console.log(`Send message to ${agent.name}`);
+  };
+  
+  const handleDeleteClick = () => {
+    // Implement agent deletion logic
+    console.log(`Delete agent ${agent.name}`);
+  };
+  
+  const handleRefreshClick = () => {
+    // Implement agent refresh logic
+    console.log(`Refresh agent ${agent.name}`);
+  };
+  
   return (
-    <Card
-      sx={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-        overflow: 'visible',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          transition: 'transform 0.2s ease-in-out',
-        },
-      }}
-    >
-      <CardContent>
-        <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <MemoryIcon color="primary" />
-          <Typography variant="h6" component="div">
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <CardContent sx={{ flexGrow: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="h6" component="h2">
             {agent.name}
           </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: -0.5 }}>
-            ID: {agent.id}
-          </Typography>
-        </Box>
-
-        <Chip
-          label={agent.status}
-          color={getStatusColor(agent.status)}
-          size="small"
-          sx={{ mb: 2 }}
-        />
-
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <QueueIcon fontSize="small" sx={{ mr: 1 }} />
-            <Typography variant="body2" color="text.secondary">
-              Queue Size
-            </Typography>
-          </Box>
-          <LinearProgress
-            variant="determinate"
-            value={Math.min((agent.queue_size / 10) * 100, 100)}
-            sx={{ height: 8, borderRadius: 4 }}
+          <Chip 
+            label={agent.status} 
+            color={
+              agent.status === 'active' ? 'success' : 
+              agent.status === 'busy' ? 'warning' : 'error'
+            }
+            size="small"
           />
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-            {agent.queue_size} messages
-          </Typography>
         </Box>
-
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <UpdateIcon fontSize="small" />
-          <Tooltip title={agent.last_activity}>
-            <Typography variant="caption" color="text.secondary">
-              Last Active: {formatTimestamp(agent.last_activity)}
-            </Typography>
-          </Tooltip>
-        </Box>
-
+        
         <Box sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.secondary">
             Capabilities:
@@ -123,7 +87,35 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             ))}
           </Box>
         </Box>
+
+        <Typography color="text.secondary" gutterBottom>
+          Type: {agent.type}
+        </Typography>
+        
+        {agent.model && (
+          <Typography variant="body2" color="text.secondary">
+            Model: {agent.model}
+          </Typography>
+        )}
+        
+        {agent.provider && (
+          <Typography variant="body2" color="text.secondary">
+            Provider: {agent.provider}
+          </Typography>
+        )}
       </CardContent>
+      
+      <CardActions sx={{ justifyContent: 'flex-end' }}>
+        <IconButton size="small" onClick={handleMessageClick} title="Send Message">
+          <MessageIcon />
+        </IconButton>
+        <IconButton size="small" onClick={handleRefreshClick} title="Refresh Agent">
+          <RefreshIcon />
+        </IconButton>
+        <IconButton size="small" onClick={handleDeleteClick} title="Delete Agent">
+          <DeleteIcon />
+        </IconButton>
+      </CardActions>
     </Card>
   );
 }; 

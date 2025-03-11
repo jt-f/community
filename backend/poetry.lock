@@ -440,6 +440,18 @@ optional = false
 python-versions = ">=3.9"
 
 [[package]]
+name = "psutil"
+version = "7.0.0"
+description = "Cross-platform lib for process and system monitoring in Python.  NOTE: the syntax of this script MUST be kept compatible with Python 2.7."
+category = "main"
+optional = false
+python-versions = ">=3.6"
+
+[package.extras]
+dev = ["pytest", "pytest-xdist", "setuptools", "abi3audit", "black (==24.10.0)", "check-manifest", "coverage", "packaging", "pylint", "pyperf", "pypinfo", "pytest-cov", "requests", "rstcheck", "ruff", "sphinx", "sphinx-rtd-theme", "toml-sort", "twine", "virtualenv", "vulture", "wheel"]
+test = ["pytest", "pytest-xdist", "setuptools"]
+
+[[package]]
 name = "pydantic"
 version = "2.10.6"
 description = "Data validation using Python type hints"
@@ -704,7 +716,7 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "055298550b10740ba4b465020b34175a4a627d67c4b5687bd60c095350035d66"
+content-hash = "3ea6045d1edcb43c19c6114dbf9898c396ab5064cc06e6b455e31b5320f06515"
 
 [metadata.files]
 aiohappyeyeballs = []
@@ -742,6 +754,7 @@ pathspec = []
 platformdirs = []
 pluggy = []
 propcache = []
+psutil = []
 pydantic = []
 pydantic-core = []
 pytest = []

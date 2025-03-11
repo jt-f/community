@@ -11,13 +11,11 @@ from .api.websocket import router as ws_router
 from .api.rest import router as rest_router
 from .core.server import agent_server
 from .utils.logger import get_logger
-from .core.agent_manager import AgentManager
+from .core.instances import agent_manager  # Import from instances instead
 
 from .core.models import Message
 
 logger = get_logger(__name__)
-
-
 
 app = FastAPI(
     title="Agent Community API",
@@ -39,10 +37,6 @@ app.add_middleware(
 # Include routers
 app.include_router(ws_router)
 app.include_router(rest_router)
-
-# Create agent manager
-agent_manager = AgentManager()
-
 
 # Store active websocket connections
 active_connections = set()
@@ -91,6 +85,31 @@ async def startup_event():
     
     # Start the agent server
     await agent_server.start()
+    
+    # Ensure agent_manager has server reference
+    if agent_manager.server is None:
+        agent_manager.server = agent_server
+
+    # Create and register default agents
+    from .core.agents.human import HumanAgent
+    from .core.agents.system import SystemAgent
+    from .core.agents.analyst import AnalystAgent
+    
+    # Create default agents
+    human_agent = HumanAgent(name="Human")
+    agent_manager.register_agent(human_agent)
+    agent_server.agents[human_agent.agent_id] = human_agent
+    logger.info(f"Created default Human agent: {human_agent.agent_id}")
+    
+    system_agent = SystemAgent(name="System")
+    agent_manager.register_agent(system_agent)
+    agent_server.agents[system_agent.agent_id] = system_agent
+    logger.info(f"Created default System agent: {system_agent.agent_id}")
+    
+    analyst_agent = AnalystAgent(name="Analyst")
+    agent_manager.register_agent(analyst_agent)
+    agent_server.agents[analyst_agent.agent_id] = analyst_agent
+    logger.info(f"Created default Analyst agent: {analyst_agent.agent_id}")
 
     # Start the agent manager in the background
     asyncio.create_task(agent_manager.run())
@@ -104,33 +123,6 @@ async def shutdown_event():
     agent_manager.stop()
     logger.info("Application shutdown complete")
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    active_connections.add(websocket)
-    
-    try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_json()
-            
-            # Create message object
-            message = Message(
-                sender_id=data.get("sender_id", "user"),
-                message_type=data.get("message_type", "user_message"),
-                content=data.get("content", {})
-            )
-            
-            # Send to appropriate agent
-            agent_id = data.get("agent_id", "analyst")
-            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
-                if agent.agent_id == agent_id:
-                    await agent.enqueue_message(message)
-                    break
-    
-    except WebSocketDisconnect:
-        active_connections.remove(websocket)
-
 # Function to broadcast messages to all connected clients
 async def broadcast_message(message: Message):
     for connection in active_connections:
@@ -138,8 +130,6 @@ async def broadcast_message(message: Message):
 
 if __name__ == "__main__":
     import uvicorn
-
-
 
     uvicorn.run(
         "app.main:app",

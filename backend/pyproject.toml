@@ -20,6 +20,7 @@ httptools = "^0.6.1"
 slowapi = "^0.1.9"
 ollama = "^0.4.7"
 mistralai = "^1.5.1"
+psutil = "^7.0.0"
 
 
 [tool.poetry.dev-dependencies]

@@ -7,6 +7,7 @@ import asyncio
 from ..core.server import agent_server
 from ..core.models import Message, WebSocketMessage
 from ..utils.logger import get_logger
+from ..core.instances import agent_manager
 
 logger = get_logger(__name__)
 
@@ -19,9 +20,35 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
         logger.info("New WebSocket connection established")
         
-        # Register with agent server after accepting the connection
-        await agent_server.connect(websocket)
-        logger.info("Connected to agent server")
+        # Register the WebSocket with the agent server
+        agent_server.register_websocket(websocket)
+        
+        # Send initial agent list
+        agent_list = []
+        all_agents = list(agent_manager.available_agents) + list(agent_manager.busy_agents)
+        logger.info(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
+        
+        for agent in all_agents:
+            agent_data = {
+                "id": agent.agent_id,
+                "name": agent.name,
+                "type": agent.__class__.__name__.replace("Agent", "").lower(),
+                "status": "busy" if agent in agent_manager.busy_agents else "active",
+                "capabilities": agent.capabilities if hasattr(agent, "capabilities") else [],
+                "model": getattr(agent, "default_model", None),
+                "provider": getattr(agent, "model_provider", None)
+            }
+            agent_list.append(agent_data)
+            logger.debug(f"Adding agent to list: {agent_data}")
+        
+        message = {
+            "type": "agent_list",
+            "data": {
+                "agents": agent_list
+            }
+        }
+        logger.debug(f"Sending agent list: {message}")
+        await websocket.send_json(message)
         
         # Ensure the connection is properly established
         if websocket.application_state != WebSocketState.CONNECTED:
@@ -49,33 +76,48 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.error(f"Invalid message format: {data}")
                         continue
                         
-                    if 'type' not in data or 'data' not in data:
-                        logger.error(f"Missing required fields in message: {data}")
-                        continue
-                    
-                    # Create WebSocket message
-                    message = None
-                    try:
-                        message = WebSocketMessage(
-                            type=data['type'],
-                            data=data['data']
-                        )
-                        
-                        if message.type == "message":
-                            # Handle agent messages
-                            msg_data = Message(**message.data)
-                            # Route the message to appropriate agents
-                            await agent_server.route_message(msg_data)
-                            # Broadcast the message to all WebSocket clients
-                            await agent_server.broadcast(message)
-                            logger.info("Message processed and broadcast complete")
+                    # Check if the message has the expected structure
+                    if 'type' in data and 'data' in data:
+                        # Handle the message based on its type
+                        if data['type'] == 'message':
+                            # Extract the message data
+                            message_data = data['data']
                             
-                    except Exception as e:
-                        error_msg = f"Error processing message: {e}"
-                        if message:
-                            error_msg += f" for message: {message.data}"
-                        logger.error(error_msg)
-                        continue
+                            # Create a Message object
+                            message = Message(
+                                sender_id=message_data.get('sender_id', 'unknown'),
+                                receiver_id=message_data.get('receiver_id'),
+                                message_type=message_data.get('message_type', 'text'),
+                                content=message_data.get('content', {})
+                            )
+                            
+                            # Route the message to the appropriate agent
+                            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
+                                if agent.agent_id == message.receiver_id:
+                                    await agent.enqueue_message(message)
+                                    logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")
+                                    break
+                    else:
+                        # For backward compatibility, try to handle the old format
+                        logger.warning(f"Message missing 'type' or 'data' fields: {data}")
+                        
+                        # Try to create a Message object directly from the data
+                        try:
+                            message = Message(
+                                sender_id=data.get('sender_id', 'unknown'),
+                                receiver_id=data.get('receiver_id'),
+                                message_type=data.get('message_type', 'text'),
+                                content=data.get('content', {})
+                            )
+                            
+                            # Route the message to the appropriate agent
+                            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
+                                if agent.agent_id == message.receiver_id:
+                                    await agent.enqueue_message(message)
+                                    logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")
+                                    break
+                        except Exception as e:
+                            logger.error(f"Error handling legacy message format: {e}")
 
                 except asyncio.TimeoutError:
                     # This is expected, just continue the loop
@@ -99,12 +141,10 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
     finally:
-        # Always ensure we clean up the connection
+        logger.info("Cleaning up WebSocket connection")
         try:
-            logger.info("Cleaning up WebSocket connection")
-            await agent_server.disconnect(websocket)
-            if websocket.application_state == WebSocketState.CONNECTED:
-                await websocket.close()
-            logger.info("WebSocket connection cleaned up")
+            # Unregister the WebSocket from the agent server
+            agent_server.unregister_websocket(websocket)
+            # Don't try to close the connection here, it's already closed or will be closed by FastAPI
         except Exception as e:
             logger.error(f"Error during WebSocket cleanup: {e}") 

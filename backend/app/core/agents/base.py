@@ -8,7 +8,7 @@ from uuid import uuid4
 import asyncio
 import time
 
-from ..models import Message, AgentState, AgentConfig
+from ..models import Message, WebSocketMessage, AgentState, AgentConfig
 from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -105,6 +105,7 @@ class BaseAgent(ABC):
         if message:
             try:
                 response = await self.process_message(message)
+                logger.info(f"{self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
                 if response:
                     yield response
             except Exception as e:
@@ -156,4 +157,33 @@ class BaseAgent(ABC):
     def clear_registries(cls):
         """Clear the registries of used IDs and names (mainly for testing)."""
         _used_agent_ids.clear()
-        _used_agent_names.clear() 
+        _used_agent_names.clear()
+
+    def has_messages(self) -> bool:
+        """Check if the agent has messages in its queue."""
+        return not self.message_queue.empty()
+    
+    async def process_messages(self):
+        """Process all messages in the queue."""
+        while not self.message_queue.empty():
+            message = await self.message_queue.get()
+            response = await self.process_message(message)
+            logger.info(f"(process_messages) {self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
+            # If there's a response and we have a server, route and broadcast it
+            if response and self.agent_server:
+                # Route the message to the appropriate agent
+                if response.receiver_id:
+                    logger.info(f"(process_messages) {self.agent_id} Routing message to {response.receiver_id}")
+                    await self.agent_server.route_message(response)
+                    logger.info(f"(process_messages) {self.agent_id} Message routed to {response.receiver_id}")
+                
+                # Broadcast the message to all WebSocket clients
+                if self.agent_server:
+                    # Create a proper WebSocketMessage object
+                    ws_message = WebSocketMessage(
+                        type="message",
+                        data=response.dict()
+                    )
+                    logger.info(f"(process_messages) {self.agent_id} Broadcasting message to all clients")
+                    await self.agent_server.broadcast(ws_message) 
+                    logger.info(f"(process_messages) {self.agent_id} Message broadcasted to all clients")
