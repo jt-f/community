@@ -10,17 +10,25 @@ import {
   Typography,
   CircularProgress,
   Divider,
+  IconButton,
+  Paper,
 } from '@mui/material';
 import { Send as SendIcon } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
 
 export const MessageInput: React.FC = () => {
-  const { agents, sendMessage, isConnected, connect } = useAgentStore();
+  const { 
+    agents, 
+    sendMessage, 
+    isConnected, 
+    connect, 
+    addMessage,
+    socket
+  } = useAgentStore();
   const [message, setMessage] = useState('');
-  const [selectedAgent, setSelectedAgent] = useState<string>('all');
+  const [selectedAgent, setSelectedAgent] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [humanAgentId, setHumanAgentId] = useState<string>('');
-  const [nonHumanAgents, setNonHumanAgents] = useState<Record<string, any>>({});
 
   // Ensure connection is established
   useEffect(() => {
@@ -34,24 +42,17 @@ export const MessageInput: React.FC = () => {
     if (Object.keys(agents).length > 0) {
       setIsLoading(false);
       
-      // Find the human agent by name
+      // Find the human agent by type
       const humanAgent = Object.values(agents).find(agent => 
-        agent.name.toLowerCase() === 'human' || 
-        agent.name.toLowerCase().includes('human')
+        agent.type.toLowerCase() === 'human'
       );
       
       if (humanAgent) {
         setHumanAgentId(humanAgent.id);
         console.log('Found human agent ID:', humanAgent.id);
-        
-        // Filter out the human agent from the list of available recipients
-        const filteredAgents = { ...agents };
-        delete filteredAgents[humanAgent.id];
-        setNonHumanAgents(filteredAgents);
       } else {
         console.warn('Human agent not found, using default ID');
         setHumanAgentId('human');
-        setNonHumanAgents(agents);
       }
       
       // Reset selected agent if it's the human agent
@@ -64,16 +65,31 @@ export const MessageInput: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim()) {
-      sendMessage({
-        sender_id: humanAgentId || 'human', // Use the found human agent ID or fallback to 'human'
-        receiver_id: selectedAgent === 'all' ? undefined : selectedAgent,
-        content: {
-          text: message,
-          timestamp: new Date().toISOString()
-        },
-        message_type: 'text'
-      });
-      setMessage('');
+      if (selectedAgent === 'all') {
+        // Send to all non-human agents
+        const nonHumanAgents = Object.values(agents).filter(agent => 
+          agent.type.toLowerCase() !== 'human'
+        );
+        
+        if (nonHumanAgents.length > 0) {
+          // Add the message to the UI only once with the first agent
+          const firstAgent = nonHumanAgents[0];
+          sendMessage(message, firstAgent.id, true);
+          
+          // Send to the rest of the agents without adding to UI
+          for (let i = 1; i < nonHumanAgents.length; i++) {
+            sendMessage(message, nonHumanAgents[i].id, false);
+          }
+          
+          setMessage('');
+        } else {
+          console.error('No non-human agents available');
+        }
+      } else {
+        // Send to the selected agent
+        sendMessage(message, selectedAgent, true);
+        setMessage('');
+      }
     }
   };
 
@@ -100,53 +116,39 @@ export const MessageInput: React.FC = () => {
   }
 
   return (
-    <Box
-      component="form"
-      onSubmit={handleSubmit}
-      sx={{
-        p: 2,
-        display: 'flex',
-        gap: 1,
-        borderTop: 1,
-        borderColor: 'divider',
-        backgroundColor: 'background.paper'
-      }}
-    >
-      <FormControl size="small" sx={{ minWidth: 200 }}>
-        <InputLabel id="send-to-label">Send to</InputLabel>
+    <Paper component="form" onSubmit={handleSubmit} sx={{ p: 1, display: 'flex', alignItems: 'center' }}>
+      <FormControl variant="outlined" size="small" sx={{ minWidth: 120, mr: 1 }}>
+        <InputLabel id="agent-select-label">Send to</InputLabel>
         <Select
-          labelId="send-to-label"
+          labelId="agent-select-label"
           value={selectedAgent}
           onChange={(e) => setSelectedAgent(e.target.value)}
           label="Send to"
         >
           <MenuItem value="all">All Agents</MenuItem>
-          {Object.entries(nonHumanAgents).map(([id, agent]) => (
-            <MenuItem key={id} value={id}>
-              {agent.name} ({id})
-            </MenuItem>
-          ))}
+          {Object.values(agents)
+            .filter(agent => agent.type.toLowerCase() !== 'human') // Filter out human agents
+            .map(agent => (
+              <MenuItem key={agent.id} value={agent.id}>
+                {agent.name}
+              </MenuItem>
+            ))}
         </Select>
       </FormControl>
-
+      
       <TextField
         fullWidth
-        size="small"
+        variant="outlined"
+        placeholder="Type a message..."
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Type your message..."
-        variant="outlined"
-        disabled={!isConnected}
+        size="small"
+        sx={{ mr: 1 }}
       />
-
-      <Button 
-        type="submit" 
-        variant="contained" 
-        disabled={!message.trim() || !isConnected}
-        endIcon={<SendIcon />}
-      >
-        Send
-      </Button>
-    </Box>
+      
+      <IconButton color="primary" type="submit" disabled={!message.trim()}>
+        <SendIcon />
+      </IconButton>
+    </Paper>
   );
 };

@@ -2,7 +2,7 @@
 Analyst agent implementation.
 """
 import asyncio
-from typing import Optional, AsyncGenerator, Union
+from typing import Optional, AsyncGenerator, Union, Dict, Any
 import time
 import logging
 from datetime import datetime
@@ -18,31 +18,70 @@ from .config import ANALYST_CONFIG
 logger = get_logger(__name__)
 
 class AnalystAgent(BaseAgent):
-    """Analyst agent for processing analysis requests and generating insights."""
+    """Agent that analyzes data and provides insights."""
     
-    def __init__(self,  name: str = "Analyst"):
+    def __init__(self, name: str = "Analyst"):
         super().__init__(name=name)
-        self.agent_server = None  # Will be set by the agent_manager
-        
-        # Get model configuration from ANALYST_CONFIG
-        self.default_model = ANALYST_CONFIG.get("model", "deepseek-r1:1.5b")
-        self.model_provider = ModelProvider(ANALYST_CONFIG.get("provider", "ollama"))
-        
-        # Default parameters
+        self.capabilities = [
+            "data_analysis",
+            "insight_generation",
+            "llm_inference"
+        ]
+        self.default_model = ANALYST_CONFIG.get("model", "mistral-large-latest")
+        self.model_provider = ModelProvider(ANALYST_CONFIG.get("provider", "mistral"))
         self.default_parameters = GenerationParameters(
             temperature=ANALYST_CONFIG.get("temperature", 0.7),
             top_p=0.9,
             max_tokens=500,
             provider=self.model_provider  # Set the provider from config
         )
-        
-        self.capabilities = [
-            "data_analysis",
-            "insight_generation",
-            "llm_inference"
-        ]
-        
-    async def _generate_response(self, prompt: str, model: str = None, parameters: Union[GenerationParameters, dict] = None) -> Union[str, dict]:
+        self.prompts = ANALYST_CONFIG.get("prompts", {})
+        self.agent_server = None  # Will be set by the agent_manager
+    
+    async def process_message(self, message: Message) -> Optional[Message]:
+        """Process a message and generate an analyst response."""
+        try:
+            logger.info(f"Analyst agent processing message: {message.content}")
+            
+            # Extract the message text
+            message_text = message.content.get("text", "")
+            
+            # Select the appropriate prompt template based on message type
+            prompt_template = self.prompts.get(
+                message.message_type, 
+                self.prompts.get("default", "You are a helpful assistant. Please respond to the following: {message}")
+            )
+            
+            # Format the prompt with the message text
+            prompt = prompt_template.format(message=message_text)
+            
+            # Generate a response using the LLM
+            response_text = await self._generate_response(prompt)
+            logger.info(f"Analyst agent response: {response_text}")
+            # Create a response message
+            response = Message(
+                sender_id=self.agent_id,
+                receiver_id=message.sender_id,
+                content={"text": response_text},
+                message_type="response",
+                timestamp=datetime.now().isoformat()
+            )
+            logger.info(f"Analyst agent response Message: {response}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing message in AnalystAgent: {str(e)}")
+            error_message = Message(
+                sender_id=self.agent_id,
+                receiver_id=message.sender_id,
+                content={"text": f"Error processing your request: {str(e)}"},
+                message_type="error",
+                timestamp=datetime.now().isoformat()
+            )
+            
+            return error_message
+    
+    async def _generate_response(self, prompt: str, model: str = None, parameters: Union[Dict[str, Any], GenerationParameters] = None) -> str:
         """Generate a response using the LLM."""
         model = model or self.default_model
         
@@ -67,89 +106,13 @@ class AnalystAgent(BaseAgent):
         # Use the model client with the specified provider
         async with model_client as client:
             return await client.generate(prompt=prompt, model=model, parameters=parameters)
-            
-    async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message and generate an analysis response."""
-        try:
-            logger.info(f"Analyst agent processing message: {message}")
-            
-            # Safely get sender_name with a default value
-            sender_name = getattr(message, 'sender_name', 'Unknown User')
-            
-            # Determine which prompt to use based on the message content
-            prompt_key = "default"
-            if message.content["text"].lower().startswith("chat-"):
-                prompt_key = "chat"
-            elif message.content["text"].lower().startswith("data-"):
-                prompt_key = "data"
-            elif message.content["text"].lower().startswith("technical-"):
-                prompt_key = "technical"
-            
-            # Format the prompt using the template from ANALYST_CONFIG
-            prompts = ANALYST_CONFIG.get("prompts", {})
-            prompt_template = prompts.get(prompt_key, prompts.get("default", "Analyze this: {message}"))
-            formatted_prompt = prompt_template.format(message=message.content["text"])
-            
-            logger.info(f"Using prompt key: {prompt_key}")
-            
-            # Get parameters from ANALYST_CONFIG with the configured provider
-            parameters = GenerationParameters(
-                temperature=ANALYST_CONFIG.get("temperature", 0.7),
-                provider=self.model_provider
-            )
-            
-            # Generate a response using the model client
-            llm_response = await self._generate_response(
-                prompt=formatted_prompt,
-                model=self.default_model,
-                parameters=parameters
-            )
-            
-            if not llm_response or (isinstance(llm_response, dict) and "error" in llm_response):
-                error_msg = llm_response.get("error", "Unknown error") if isinstance(llm_response, dict) else "Empty response"
-                raise ValueError(f"Error from LLM: {error_msg}")
-            
-            # Create a response message
-            response = Message(
-                sender_id=self.agent_id,
-                sender_name=self.name,
-                receiver_id=message.sender_id,
-                receiver_name=sender_name,
-                content={"text": llm_response if isinstance(llm_response, str) else str(llm_response)},
-                message_type="response",
-                timestamp=datetime.now().isoformat()
-            )
-            
-            # Return the response - routing and broadcasting will be handled by the agent_manager
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error processing message in AnalystAgent: {str(e)}")
-            # Safely get sender_name for error message
-            sender_name = getattr(message, 'sender_name', 'Unknown User')
-            error_message = Message(
-                sender_id=self.agent_id,
-                sender_name=self.name,
-                receiver_id=message.sender_id,
-                receiver_name=sender_name,
-                content={"text": f"Error generating analysis: {str(e)}"},
-                message_type="error",
-                timestamp=datetime.now().isoformat()
-            )
-            
-            # Return the error message - routing and broadcasting will be handled by the agent_manager
-            return error_message
-
-    def should_think(self) -> bool:
-        """Determine if the agent should run a thinking cycle."""
-        return False
-
-    async def think_once(self) -> Optional[Message]:
-        """Run a thinking cycle for the agent."""
-        self.last_think_time = time.time()
+    
+    async def generate_thought(self, context: str) -> Message:
+        """Generate a thought based on the current context."""
+        # Create a thinking prompt
+        thinking_prompt = f"As an analyst, think about the following context and share your thoughts: {context}"
         
-        # Example thinking prompt
-        thinking_prompt = "What are some interesting topics to explore today?"
+        # Generate a thought using the LLM
         thought = await self._generate_response(
             prompt=thinking_prompt,
             model=self.default_model,

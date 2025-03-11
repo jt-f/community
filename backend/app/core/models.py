@@ -2,19 +2,18 @@
 Core data models for the agent system.
 """
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from uuid import uuid4
 from pydantic import BaseModel, Field, model_validator
 
 class Message(BaseModel):
-    """Message model for agent communication."""
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    """Message model for communication between agents."""
     sender_id: str
     receiver_id: Optional[str] = None
-    content: Dict
-    message_type: str
-    metadata: Optional[Dict] = None
+    content: Dict[str, Any]
+    message_type: str = "text"
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    message_id: str = Field(default_factory=lambda: str(uuid4()))
 
     @model_validator(mode='before')
     @classmethod
@@ -61,16 +60,18 @@ class AgentState(BaseModel):
         return data
 
 class AgentConfig(BaseModel):
-    """Agent configuration model."""
+    """Configuration for creating a new agent."""
     name: str
+    agent_type: str
+    model: str
+    provider: str
     capabilities: List[str]
-    llm_config: Dict
-    metadata: Optional[Dict] = None
+    parameters: Optional[Dict[str, Any]] = None
 
 class WebSocketMessage(BaseModel):
-    """WebSocket message format."""
+    """WebSocket message model for client-server communication."""
     type: str
-    data: Dict
+    data: Dict[str, Any]
 
     @model_validator(mode='before')
     @classmethod

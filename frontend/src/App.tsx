@@ -1,43 +1,61 @@
-import React from 'react';
-import { CssBaseline, Container, Box, Paper } from '@mui/material';
+import React, { useEffect } from 'react';
+import { CssBaseline, ThemeProvider, createTheme, Container, Box, Paper } from '@mui/material';
+import { AgentDashboard } from './components/AgentDashboard';
 import { MessageInput } from './components/MessageInput';
 import { MessageList } from './components/MessageList';
-import { AgentCard } from './components/AgentCard';
-import { useWebSocket } from './hooks/useWebSocket';
+import { useAgentStore } from './store/agentStore';
 
-const App: React.FC = () => {
-  const { agents } = useWebSocket();
+const theme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: {
+      main: '#1976d2',
+    },
+    secondary: {
+      main: '#dc004e',
+    },
+  },
+});
+
+function App() {
+  const { connect, isConnected, agents } = useAgentStore();
+  
+  // Connect to WebSocket when the app loads
+  useEffect(() => {
+    connect();
+    console.log('Connecting to WebSocket...');
+    
+    // Log connection status and agents for debugging
+    return () => {
+      console.log('App unmounting, WebSocket status:', isConnected);
+    };
+  }, [connect]);
+  
+  // Log when agents change
+  useEffect(() => {
+    console.log('Agents updated:', agents);
+  }, [agents]);
 
   return (
-    <>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Container maxWidth="lg" sx={{ height: '100vh', display: 'flex', flexDirection: 'column', py: 2 }}>
-        {/* Agent Cards */}
-        <Box sx={{ mb: 2 }}>
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: 2,
-            }}
-          >
-            {Object.values(agents).map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
-            ))}
-          </Box>
+      <Container maxWidth="xl" sx={{ py: 3, display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        {/* Agent Dashboard */}
+        <Box sx={{ mb: 3 }}>
+          <AgentDashboard />
         </Box>
-
-        {/* Chat Container */}
+        
+        {/* Chat Interface */}
         <Paper 
           elevation={3}
           sx={{ 
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
-            minHeight: 0,
             overflow: 'hidden',
             border: 1,
             borderColor: 'divider',
+            minHeight: '50vh',
           }}
         >
           <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -46,8 +64,8 @@ const App: React.FC = () => {
           <MessageInput />
         </Paper>
       </Container>
-    </>
+    </ThemeProvider>
   );
-};
+}
 
 export default App; 

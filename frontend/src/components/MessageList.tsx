@@ -7,6 +7,8 @@ import {
   List,
   ListItem,
   Stack,
+  Avatar,
+  Divider,
 } from '@mui/material';
 import { useAgentStore } from '../store/agentStore';
 
@@ -22,6 +24,7 @@ interface Message {
     [key: string]: any;
   };
   message_type: string;
+  type: string;
 }
 
 export const MessageList: React.FC = () => {
@@ -34,12 +37,11 @@ export const MessageList: React.FC = () => {
     console.log('Current messages:', messages);
   }, [agents, messages]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Scroll to bottom when messages change
   useEffect(() => {
-    scrollToBottom();
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   const formatTimestamp = (timestamp: string) => {
@@ -47,19 +49,30 @@ export const MessageList: React.FC = () => {
     return date.toLocaleTimeString();
   };
 
-  const getAgentName = (id: string) => {
-    console.log('Getting agent name for id:', id, 'Available agents:', agents);
-
-    if (id === 'human') {
-      return 'Human User';
-    } else if (id === 'all') {
-      return 'All agents';
+  // Function to get agent name from ID
+  const getAgentName = (agentId: string): string => {
+    // Check if the agent exists in our store
+    if (agents[agentId]) {
+      return agents[agentId].name;
     }
-    const agent = agents[id];
-    if (agent) {
-      return `${agent.name} (${id})`;
+    
+    // If not found in agents, check if it's a user ID from localStorage
+    const userId = localStorage.getItem('userId');
+    if (userId === agentId) {
+      return 'You';
     }
-    return `Unknown Agent (${id})`;
+    
+    // If it's a human agent (might have a different ID format)
+    const humanAgent = Object.values(agents).find(agent => 
+      agent.type.toLowerCase() === 'human'
+    );
+    
+    if (humanAgent && humanAgent.id === agentId) {
+      return 'You';
+    }
+    
+    // Default fallback
+    return `Agent (${agentId.substring(0, 8)}...)`;
   };
 
   const getMessageColor = (senderId: string) => {
@@ -138,60 +151,62 @@ export const MessageList: React.FC = () => {
       sx={{
         flex: 1,
         overflow: 'auto',
+        p: 2,
         display: 'flex',
         flexDirection: 'column',
+        gap: 2,
       }}
     >
-      <List sx={{ flex: 1, p: 2 }}>
-        {messages.map((message: Message) => (
-          <ListItem key={message.id} sx={{ mb: 1 }}>
-            <Paper
+      {messages.length === 0 ? (
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '100%' 
+        }}>
+          <Typography variant="body1" color="text.secondary">
+            No messages yet. Start a conversation!
+          </Typography>
+        </Box>
+      ) : (
+        messages.map((message, index) => {
+          const isOutgoing = message.sender_id === localStorage.getItem('userId') || 
+                            message.type === 'outgoing' ||
+                            Object.values(agents).find(a => a.type === 'human')?.id === message.sender_id;
+          
+          const senderName = getAgentName(message.sender_id);
+          
+          return (
+            <Paper 
+              key={index} 
               elevation={1}
-              sx={{
-                p: 2,
-                width: '100%',
-                backgroundColor: getMessageColor(message.sender_id),
-                borderRadius: 2,
+              sx={{ 
+                p: 2, 
+                maxWidth: '80%', 
+                alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
+                backgroundColor: isOutgoing ? 'primary.light' : 'background.paper',
+                color: isOutgoing ? 'primary.contrastText' : 'text.primary',
+                borderRadius: 2
               }}
             >
-              <Stack spacing={1}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <Chip
-                    label={getAgentName(message.sender_id)}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                  />
-                  →
-                  <Chip
-                    label={message.receiver_id ? getAgentName(message.receiver_id) : 'all'}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                  />
-                  <Box
-                    component="span"
-                    sx={{ 
-                      ml: 'auto',
-                      color: 'text.secondary',
-                      fontSize: '0.75rem',
-                    }}
-                  >
-                    {formatTimestamp(message.timestamp)}
-                  </Box>
-                </Box>
-                <Box>
-                  <Box component="div" sx={{ fontSize: '1rem' }}>
-                    {renderMessageContent(message.content)}
-                  </Box>
-                  {renderSecondaryContent(message.content)}
-                </Box>
-              </Stack>
+              <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                {senderName}
+              </Typography>
+              
+              <Typography variant="body1">
+                {typeof message.content === 'string' 
+                  ? message.content 
+                  : message.content.text || JSON.stringify(message.content)}
+              </Typography>
+              
+              <Typography variant="caption" color={isOutgoing ? 'primary.contrastText' : 'text.secondary'} sx={{ opacity: 0.7, display: 'block', textAlign: 'right', mt: 1 }}>
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </Typography>
             </Paper>
-          </ListItem>
-        ))}
-        <div ref={messagesEndRef} />
-      </List>
+          );
+        })
+      )}
+      <div ref={messagesEndRef} />
     </Box>
   );
 }; 

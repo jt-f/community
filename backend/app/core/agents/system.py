@@ -3,6 +3,7 @@ import asyncio
 import time
 from datetime import datetime
 import logging
+import psutil
 
 from ..models import Message, WebSocketMessage
 from .base import BaseAgent
@@ -10,13 +11,12 @@ from .base import BaseAgent
 logger = logging.getLogger(__name__)
 
 class SystemAgent(BaseAgent):
-    """System agent for monitoring and system-level operations."""
+    """System agent for monitoring and managing the agent community."""
     
     def __init__(self, name: str = "System"):
         super().__init__(name=name)
-        self.last_think_time = time.time()
-        # Increase the think interval from default (likely 5-10 seconds) to 60 seconds
-        self.think_interval = 300  # seconds between thinking cycles
+        self.last_status_update = time.time()
+        self.status_interval = 300  # 5 minutes between status updates
         self.capabilities = [
             "system_monitoring",
             "status_reporting",
@@ -26,56 +26,65 @@ class SystemAgent(BaseAgent):
         self.agent_server = None  # Will be set by the agent_manager
     
     async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message and generate a system response."""
-        try:
-            logger.info(f"System agent processing message: {message.content}")
-            
-            # Simple response for now
-            response = Message(
-                sender_id=self.agent_id,
-                receiver_id=message.sender_id,
-                content={"text": f"System received your message: {message.content['text']}"},
-                message_type="response",
-                timestamp=datetime.now().isoformat()
-            )
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error processing message in SystemAgent: {str(e)}")
-            error_message = Message(
-                sender_id=self.agent_id,
-                receiver_id=message.sender_id,
-                content={"text": f"Error processing system message: {str(e)}"},
-                message_type="error",
-                timestamp=datetime.now().isoformat()
-            )
-            
-            return error_message
+        """Process a message sent to the system agent."""
+        # Handle system commands
+        if message.message_type == "command":
+            command = message.content.get("command")
+            if command == "status":
+                return await self._generate_status_message()
+            elif command == "restart":
+                # Implement restart logic
+                return Message(
+                    sender_id=self.agent_id,
+                    message_type="system_response",
+                    content={"text": "System restart initiated"}
+                )
+        
+        # Default response for unhandled messages
+        return Message(
+            sender_id=self.agent_id,
+            message_type="system_response",
+            content={"text": f"Received message: {message.content}"}
+        )
+    
+    async def _generate_status_message(self) -> Message:
+        """Generate a status message with system information."""
+        # Get system stats
+        cpu_percent = psutil.cpu_percent()
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        return Message(
+            sender_id=self.agent_id,
+            message_type="system_status",
+            content={
+                "cpu": cpu_percent,
+                "memory": {
+                    "total": memory.total,
+                    "available": memory.available,
+                    "percent": memory.percent
+                },
+                "disk": {
+                    "total": disk.total,
+                    "free": disk.free,
+                    "percent": disk.percent
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+        )
     
     def should_think(self) -> bool:
-        """Determine if the agent should run a thinking cycle."""
-        current_time = time.time()
-        # Check if enough time has passed since the last thinking cycle
-        return (current_time - self.last_think_time) > self.think_interval
+        """Determine if the system agent should run a status update."""
+        return time.time() - self.last_status_update > self.status_interval
     
     async def think_once(self) -> Optional[Message]:
-        """Run a thinking cycle for the agent."""
-        self.last_think_time = time.time()
-        
-        # For now, just a simple status update
-        status_message = Message(
-            sender_id=self.agent_id,
-            message_type="status",
-            content={"text": f"System status: All systems operational at {datetime.now().isoformat()}"},
-            timestamp=datetime.now().isoformat()
-        )
-        
-        return status_message
+        """Generate a system status update."""
+        self.last_status_update = time.time()
+        return await self._generate_status_message()
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
-        """Generate system status updates periodically."""
+        """Periodically generate system status updates."""
         while True:
             if self.should_think():
                 yield await self.think_once()
-            await asyncio.sleep(5)  # Check if we should think every 5 seconds 
+            await asyncio.sleep(10)  # Check every 10 seconds 

@@ -1,47 +1,44 @@
 """
 Human agent implementation.
 """
-import asyncio
 from typing import Optional, AsyncGenerator
-from datetime import datetime
-import logging
+import asyncio
 import time
+from datetime import datetime
 
 from .base import BaseAgent
 from ..models import Message, WebSocketMessage
 from ...utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class HumanAgent(BaseAgent):
-    """Human agent for representing user interactions."""
+    """Human agent representing a user in the system."""
     
     def __init__(self, name: str = "Human"):
         super().__init__(name=name)
-        self.agent_server = None  # Will be set by the agent_manager
         self.capabilities = [
             "user_interaction",
             "message_sending",
             "command_execution",
             "task_delegation"
         ]
-    
-    def should_think(self) -> bool:
-        """Human agents don't need to think autonomously."""
-        return False
+        self.agent_server = None  # Will be set by the agent_manager
     
     async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message sent to the human agent.
+        """Process a message sent to the human agent."""
+        # Human agents don't automatically respond to messages
+        # They just receive them and the UI displays them
         
-        For human agents, we don't need to automatically acknowledge messages.
-        The human will respond naturally through the UI when they want to.
-        """
-        # Log that we received a message
-        logger.info(f"Human agent received message: {message.content}")
+        # Log the message for debugging
+        logger.info(f"Human agent {self.name} received message: {message.content}")
         
-        # Don't automatically send an acknowledgment
-        # Just return None to indicate no automatic response
+        # Return None since humans respond manually through the UI
         return None
+    
+    def should_think(self) -> bool:
+        """Human agents don't think autonomously."""
+        return False
     
     async def think_once(self) -> Optional[Message]:
         """Human agents don't think autonomously."""
@@ -49,4 +46,6 @@ class HumanAgent(BaseAgent):
     
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
         """Human agents don't think autonomously."""
-        yield None
+        while True:
+            yield None
+            await asyncio.sleep(60)  # Just sleep, humans don't think autonomously
