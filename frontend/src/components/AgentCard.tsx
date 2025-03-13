@@ -57,10 +57,17 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardContent sx={{ flexGrow: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="h6" component="h2">
-            {agent.name}
-          </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+          <Box>
+            <Typography variant="h6" component="h2">
+              {agent.name}
+            </Typography>
+            {(agent.model || agent.provider) && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
+              </Typography>
+            )}
+          </Box>
           <Chip 
             label={agent.status} 
             color={
@@ -91,18 +98,6 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         <Typography color="text.secondary" gutterBottom>
           Type: {agent.type}
         </Typography>
-        
-        {agent.model && (
-          <Typography variant="body2" color="text.secondary">
-            Model: {agent.model}
-          </Typography>
-        )}
-        
-        {agent.provider && (
-          <Typography variant="body2" color="text.secondary">
-            Provider: {agent.provider}
-          </Typography>
-        )}
       </CardContent>
       
       <CardActions sx={{ justifyContent: 'flex-end' }}>
