@@ -53,29 +53,13 @@ interface AgentStore {
 // Use secure WebSocket if the page is served over HTTPS
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const defaultPort = 8000;
-// Use window.location.hostname to get the current host
-const host = process.env.REACT_APP_WS_URL || `${protocol}//${window.location.hostname}:${defaultPort}/ws`;
 
 console.log('WebSocket configuration:', {
   protocol,
   hostname: window.location.hostname,
   port: defaultPort,
-  fullUrl: host
+  fullUrl: process.env.REACT_APP_WS_URL || `${protocol}//${window.location.hostname}:${defaultPort}/ws`
 });
-
-let reconnectTimeout: NodeJS.Timeout | null = null;
-const MAX_RECONNECT_ATTEMPTS = 5;
-let reconnectAttempts = 0;
-
-// Add UUID generator function at the top of the file
-function generateUUID(): string {
-  // This is a simple UUID v4 generator
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
 
 export const useAgentStore = create<AgentStore>((set, get) => {
   let socket: WebSocket | null = null;
@@ -90,17 +74,10 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     connect: () => {
       if (socket !== null) return;
       
-      // Use the correct WebSocket URL based on the environment
-      let wsUrl: string;
-      
-      if (process.env.NODE_ENV === 'development') {
-        // In development, connect to the backend server directly
-        wsUrl = 'ws://localhost:8000/ws';
-      } else {
-        // In production, use relative URL
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/ws`;
-      }
+      // Simplified WebSocket URL construction
+      const wsUrl = process.env.NODE_ENV === 'development' 
+        ? 'ws://localhost:8000/ws' 
+        : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
       
       console.log('Connecting to WebSocket at:', wsUrl);
       socket = new WebSocket(wsUrl);

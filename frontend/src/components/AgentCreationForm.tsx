@@ -51,13 +51,18 @@ export const AgentCreationForm: React.FC = () => {
     const fetchOptions = async () => {
       try {
         setLoading(true);
-        const response = await fetch('/api/agent-options');
+        // Use a direct URL for testing
+        console.log('Fetching agent options from: http://localhost:8000/api/agent-options');
+        const response = await fetch('http://localhost:8000/api/agent-options');
+        console.log('Response status:', response.status);
         if (!response.ok) {
-          throw new Error('Failed to fetch agent options');
+          throw new Error(`Failed to fetch agent options: ${response.status} ${response.statusText}`);
         }
         const data = await response.json();
+        console.log('Received agent options:', data);
         setOptions(data);
       } catch (err) {
+        console.error('Error fetching agent options:', err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred');
       } finally {
         setLoading(false);
@@ -102,7 +107,9 @@ export const AgentCreationForm: React.FC = () => {
         }
       };
       
-      const response = await fetch('/api/agents', {
+      // Use a direct URL for testing
+      console.log('Submitting agent to: http://localhost:8000/api/agents');
+      const response = await fetch('http://localhost:8000/api/agents', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

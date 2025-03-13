@@ -109,9 +109,17 @@ async def post_message(
             detail=str(e)
         )
 
+@router.get("/test")
+async def test_endpoint():
+    """Simple test endpoint to verify the API server is working."""
+    return {"status": "ok", "message": "API server is working"}
+
 @router.get("/agent-options")
 async def get_agent_options():
     """Get available options for creating new agents."""
+    
+    # Log that this endpoint was called
+    logger.info("Agent options endpoint called")
     
     # Available agent types
     agent_types = [
@@ -139,6 +147,9 @@ async def get_agent_options():
         {"id": "text_summarization", "name": "Text Summarization", "description": "Summarize long texts"},
         {"id": "question_answering", "name": "Question Answering", "description": "Answer questions based on knowledge"}
     ]
+    
+    # Log the response
+    logger.info(f"Returning agent options: {len(agent_types)} agent types, {len(providers)} providers, {len(models)} model groups, {len(capabilities)} capabilities")
     
     return {
         "agent_types": agent_types,

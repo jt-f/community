@@ -43,7 +43,8 @@ module.exports = {
     // Define environment variables that will be available in the browser
     new webpack.DefinePlugin({
       'process.env': {
-        'REACT_APP_WS_URL': JSON.stringify(process.env.REACT_APP_WS_URL || 'ws://172.19.36.55:8000/ws')
+        'REACT_APP_WS_URL': JSON.stringify(process.env.REACT_APP_WS_URL || 'ws://172.19.36.55:8000/ws'),
+        'REACT_APP_API_URL': JSON.stringify(process.env.REACT_APP_API_URL || 'http://172.19.36.55:8000/api')
       }
     }),
     new webpack.HotModuleReplacementPlugin()
@@ -64,6 +65,13 @@ module.exports = {
     },
     static: {
       directory: path.join(__dirname, 'public')
+    },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        secure: false,
+        changeOrigin: true
+      }
     }
   },
   cache: {

@@ -64,33 +64,31 @@ export const MessageInput: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (message.trim()) {
-      if (selectedAgent === 'all') {
-        // Send to all non-human agents
-        const nonHumanAgents = Object.values(agents).filter(agent => 
-          agent.type.toLowerCase() !== 'human'
-        );
+    if (!message.trim()) return;
+    
+    if (selectedAgent === 'all') {
+      // Send to all non-human agents
+      const nonHumanAgents = Object.values(agents).filter(agent => 
+        agent.type.toLowerCase() !== 'human'
+      );
+      
+      if (nonHumanAgents.length > 0) {
+        // Add the message to the UI only once with the first agent
+        sendMessage(message, nonHumanAgents[0].id, true);
         
-        if (nonHumanAgents.length > 0) {
-          // Add the message to the UI only once with the first agent
-          const firstAgent = nonHumanAgents[0];
-          sendMessage(message, firstAgent.id, true);
-          
-          // Send to the rest of the agents without adding to UI
-          for (let i = 1; i < nonHumanAgents.length; i++) {
-            sendMessage(message, nonHumanAgents[i].id, false);
-          }
-          
-          setMessage('');
-        } else {
-          console.error('No non-human agents available');
+        // Send to the rest of the agents without adding to UI
+        for (let i = 1; i < nonHumanAgents.length; i++) {
+          sendMessage(message, nonHumanAgents[i].id, false);
         }
       } else {
-        // Send to the selected agent
-        sendMessage(message, selectedAgent, true);
-        setMessage('');
+        console.error('No non-human agents available');
       }
+    } else {
+      // Send to the selected agent
+      sendMessage(message, selectedAgent, true);
     }
+    
+    setMessage('');
   };
 
   if (!isConnected || isLoading) {
