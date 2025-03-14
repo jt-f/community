@@ -7,8 +7,27 @@ module.exports = {
   entry: './src/index.tsx',
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: 'bundle.js',
+    filename: '[name].[contenthash].js',
+    chunkFilename: '[name].[contenthash].chunk.js',
     publicPath: '/'
+  },
+  optimization: {
+    splitChunks: {
+      chunks: 'all',
+      name: false, // This prevents naming conflicts
+      cacheGroups: {
+        vendors: {
+          test: /[\\/]node_modules[\\/]/,
+          priority: -10,
+          reuseExistingChunk: true
+        },
+        default: {
+          minChunks: 2,
+          priority: -20,
+          reuseExistingChunk: true
+        }
+      }
+    }
   },
   module: {
     rules: [
@@ -53,6 +72,36 @@ module.exports = {
     extensions: ['.ts', '.tsx', '.js', '.jsx'],
     modules: ['node_modules']
   },
+  // Update optimization settings
+  optimization: {
+    removeAvailableModules: true,
+    removeEmptyChunks: true,
+    splitChunks: {
+      chunks: 'all',
+      minSize: 20000,
+      maxSize: 244000,
+      cacheGroups: {
+        vendor: {
+          test: /[\\/]node_modules[\\/]/,
+          name: 'vendors',
+          chunks: 'all',
+        },
+      },
+    },
+  },
+  // Add performance hints
+  performance: {
+    hints: false
+  },
+  // Update cache settings
+  cache: {
+    type: 'filesystem',
+    buildDependencies: {
+      config: [__filename],
+    },
+    compression: 'gzip',
+  },
+  // Update devServer settings
   devServer: {
     host: '0.0.0.0',
     port: 3000,
@@ -60,8 +109,11 @@ module.exports = {
     historyApiFallback: true,
     open: false,
     client: {
-      overlay: true,
-      progress: true
+      overlay: {
+        errors: true,
+        warnings: false,
+      },
+      progress: true,
     },
     static: {
       directory: path.join(__dirname, 'public')
@@ -74,12 +126,4 @@ module.exports = {
       }
     }
   },
-  cache: {
-    type: 'filesystem'
-  },
-  optimization: {
-    removeAvailableModules: false,
-    removeEmptyChunks: false,
-    splitChunks: false,
-  }
-}; 
+};

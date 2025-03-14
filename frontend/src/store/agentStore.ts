@@ -7,6 +7,8 @@ interface Agent {
   type: string;
   status: 'active' | 'busy' | 'offline';
   capabilities: string[];
+  model?: string;
+  provider?: string;
 }
 
 interface Message {
@@ -114,10 +116,11 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                 agentMap[agent.id] = {
                   id: agent.id,
                   name: agent.name,
-                  // Ensure type is lowercase for consistent comparison
                   type: (agent.type || 'unknown').toLowerCase(),
                   status: agent.status || 'active',
                   capabilities: agent.capabilities || [],
+                  model: agent.model || undefined,
+                  provider: agent.provider || undefined
                 };
               });
               console.log('Setting agents:', agentMap);

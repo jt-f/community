@@ -53,29 +53,29 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
     // Implement agent refresh logic
     console.log(`Refresh agent ${agent.name}`);
   };
-  
+  console.log('provider:'+agent.provider);
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardContent sx={{ flexGrow: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-          <Box>
-            <Typography variant="h6" component="h2">
-              {agent.name}
-            </Typography>
+          <Typography variant="h6" component="h2">
+            {agent.name}
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <Chip 
+              label={agent.status} 
+              color={
+                agent.status === 'active' ? 'success' : 
+                agent.status === 'busy' ? 'warning' : 'error'
+              }
+              size="small"
+            />
             {(agent.model || agent.provider) && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, textAlign: 'right' }}>
                 {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
               </Typography>
             )}
           </Box>
-          <Chip 
-            label={agent.status} 
-            color={
-              agent.status === 'active' ? 'success' : 
-              agent.status === 'busy' ? 'warning' : 'error'
-            }
-            size="small"
-          />
         </Box>
         
         <Box sx={{ mt: 2 }}>
