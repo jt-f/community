@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Card,
   CardContent,
@@ -9,7 +9,8 @@ import {
   Tooltip,
   IconButton,
   CardActions,
-  Divider
+  Divider,
+  keyframes
 } from '@mui/material';
 import {
   Memory as MemoryIcon,
@@ -17,7 +18,8 @@ import {
   Update as UpdateIcon,
   Message as MessageIcon,
   Delete as DeleteIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Code as CodeIcon
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
 
@@ -36,8 +38,40 @@ interface AgentCardProps {
   agent: Agent;
 }
 
+// Define keyframes for animations
+const flicker = keyframes`
+  0%, 100% { opacity: 1; }
+  3% { opacity: 0.8; }
+  6% { opacity: 1; }
+  9% { opacity: 0.9; }
+  12% { opacity: 1; }
+  15% { opacity: 0.9; }
+  18% { opacity: 1; }
+  33% { opacity: 1; }
+  36% { opacity: 0.9; }
+  39% { opacity: 1; }
+  100% { opacity: 1; }
+`;
+
+const pulse = keyframes`
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+`;
+
+const scanline = keyframes`
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+`;
+
 export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   const { sendMessage } = useAgentStore();
+  const [isHovered, setIsHovered] = useState(false);
+  const [randomDelay, setRandomDelay] = useState(0);
+  
+  useEffect(() => {
+    // Set a random delay for animations to create a more organic feel
+    setRandomDelay(Math.random() * 5);
+  }, []);
   
   const handleMessageClick = () => {
     // Implement message sending logic
@@ -53,12 +87,71 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
     // Implement agent refresh logic
     console.log(`Refresh agent ${agent.name}`);
   };
+  
   console.log('provider:'+agent.provider);
+  
   return (
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <CardContent sx={{ flexGrow: 1 }}>
+    <Card 
+      sx={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        position: 'relative',
+        backgroundColor: 'rgba(10, 10, 10, 0.8)',
+        backdropFilter: 'blur(5px)',
+        border: '1px solid #003B00',
+        boxShadow: isHovered 
+          ? '0 0 20px rgba(0, 255, 65, 0.4), inset 0 0 15px rgba(0, 255, 65, 0.2)' 
+          : '0 0 15px rgba(0, 255, 65, 0.2), inset 0 0 10px rgba(0, 255, 65, 0.1)',
+        transition: 'all 0.3s ease',
+        overflow: 'hidden',
+        transform: isHovered ? 'translateY(-2px)' : 'none',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          background: 'repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.03) 0px, rgba(0, 255, 65, 0.03) 1px, transparent 1px, transparent 2px)',
+          pointerEvents: 'none',
+          opacity: 0.5,
+          zIndex: 1,
+        },
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          top: '-100%',
+          left: 0,
+          width: '100%',
+          height: '200%',
+          background: 'linear-gradient(180deg, transparent 0%, rgba(0, 255, 65, 0.1) 50%, transparent 100%)',
+          animation: `${scanline} 4s linear infinite`,
+          animationDelay: `${randomDelay}s`,
+          pointerEvents: 'none',
+          zIndex: 2,
+        }
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <CardContent sx={{ flexGrow: 1, position: 'relative', zIndex: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-          <Typography variant="h6" component="h2">
+          <Typography 
+            variant="h6" 
+            component="h2"
+            sx={{ 
+              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+              color: '#00FF41',
+              textShadow: isHovered ? '0 0 10px #00FF41' : '0 0 5px #00FF41',
+              letterSpacing: '0.05em',
+              animation: `${flicker} ${5 + randomDelay}s infinite`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <CodeIcon sx={{ fontSize: '0.9em', opacity: 0.8 }} />
             {agent.name}
           </Typography>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
@@ -69,9 +162,37 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 agent.status === 'busy' ? 'warning' : 'error'
               }
               size="small"
+              sx={{
+                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                letterSpacing: '0.05em',
+                animation: agent.status === 'active' ? `${pulse} 2s infinite` : 'none',
+                textShadow: '0 0 5px #00FF41',
+                border: '1px solid #003B00',
+                background: agent.status === 'active' 
+                  ? 'linear-gradient(to right, #003B00, rgba(0, 59, 0, 0.7))' 
+                  : agent.status === 'busy'
+                    ? 'linear-gradient(to right, #3A2F0B, rgba(58, 47, 11, 0.7))'
+                    : 'linear-gradient(to right, #3A0B0B, rgba(58, 11, 11, 0.7))',
+                boxShadow: agent.status === 'active' 
+                  ? '0 0 5px #00FF41' 
+                  : agent.status === 'busy'
+                    ? '0 0 5px #FF9800'
+                    : '0 0 5px #FF073A',
+              }}
             />
             {(agent.model || agent.provider) && (
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, textAlign: 'right' }}>
+              <Typography 
+                variant="caption" 
+                color="text.secondary" 
+                sx={{ 
+                  mt: 0.5, 
+                  textAlign: 'right',
+                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                  color: 'rgba(0, 255, 65, 0.7)',
+                  textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
+                  letterSpacing: '0.05em',
+                }}
+              >
                 {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
               </Typography>
             )}
@@ -79,7 +200,16 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         </Box>
         
         <Box sx={{ mt: 2 }}>
-          <Typography variant="caption" color="text.secondary">
+          <Typography 
+            variant="caption" 
+            color="text.secondary"
+            sx={{ 
+              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+              color: 'rgba(0, 255, 65, 0.7)',
+              textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
+              letterSpacing: '0.05em',
+            }}
+          >
             Capabilities:
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
@@ -89,25 +219,110 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 label={cap}
                 size="small"
                 variant="outlined"
-                sx={{ fontSize: '0.7rem' }}
+                sx={{ 
+                  fontSize: '0.7rem',
+                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                  letterSpacing: '0.05em',
+                  border: '1px solid #003B00',
+                  background: 'transparent',
+                  color: '#00FF41',
+                  textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    boxShadow: '0 0 5px #00FF41',
+                    borderColor: '#00FF41',
+                  }
+                }}
               />
             ))}
           </Box>
         </Box>
 
-        <Typography color="text.secondary" gutterBottom>
+        <Typography 
+          color="text.secondary" 
+          gutterBottom
+          sx={{ 
+            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+            color: 'rgba(0, 255, 65, 0.7)',
+            textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
+            letterSpacing: '0.05em',
+            mt: 1,
+          }}
+        >
           Type: {agent.type}
         </Typography>
+        
+        {/* Add a subtle progress bar for visual effect */}
+        <Box sx={{ mt: 2, mb: 0 }}>
+          <LinearProgress 
+            variant="indeterminate" 
+            sx={{
+              height: '2px',
+              borderRadius: '1px',
+              backgroundColor: '#003B00',
+              '.MuiLinearProgress-bar': {
+                background: 'linear-gradient(90deg, #003B00, #00FF41, #39FF14)',
+                boxShadow: '0 0 5px #00FF41',
+              }
+            }}
+          />
+        </Box>
       </CardContent>
       
-      <CardActions sx={{ justifyContent: 'flex-end' }}>
-        <IconButton size="small" onClick={handleMessageClick} title="Send Message">
+      <CardActions sx={{ 
+        justifyContent: 'flex-end', 
+        borderTop: '1px solid rgba(0, 59, 0, 0.5)',
+        background: 'rgba(0, 10, 0, 0.3)',
+        position: 'relative',
+        zIndex: 3,
+      }}>
+        <IconButton 
+          size="small" 
+          onClick={handleMessageClick} 
+          title="Send Message"
+          sx={{
+            color: '#00FF41',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              backgroundColor: 'rgba(0, 255, 65, 0.1)',
+              transform: 'scale(1.1)',
+              boxShadow: '0 0 10px #00FF41',
+            }
+          }}
+        >
           <MessageIcon />
         </IconButton>
-        <IconButton size="small" onClick={handleRefreshClick} title="Refresh Agent">
+        <IconButton 
+          size="small" 
+          onClick={handleRefreshClick} 
+          title="Refresh Agent"
+          sx={{
+            color: '#00FF41',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              backgroundColor: 'rgba(0, 255, 65, 0.1)',
+              transform: 'scale(1.1)',
+              boxShadow: '0 0 10px #00FF41',
+            }
+          }}
+        >
           <RefreshIcon />
         </IconButton>
-        <IconButton size="small" onClick={handleDeleteClick} title="Delete Agent">
+        <IconButton 
+          size="small" 
+          onClick={handleDeleteClick} 
+          title="Delete Agent"
+          sx={{
+            color: '#00FF41',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              backgroundColor: 'rgba(255, 7, 58, 0.1)',
+              transform: 'scale(1.1)',
+              boxShadow: '0 0 10px #FF073A',
+              color: '#FF073A',
+            }
+          }}
+        >
           <DeleteIcon />
         </IconButton>
       </CardActions>
