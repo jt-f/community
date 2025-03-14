@@ -53,22 +53,29 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
     // Implement agent refresh logic
     console.log(`Refresh agent ${agent.name}`);
   };
-  
+  console.log('provider:'+agent.provider);
   return (
     <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <CardContent sx={{ flexGrow: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
           <Typography variant="h6" component="h2">
             {agent.name}
           </Typography>
-          <Chip 
-            label={agent.status} 
-            color={
-              agent.status === 'active' ? 'success' : 
-              agent.status === 'busy' ? 'warning' : 'error'
-            }
-            size="small"
-          />
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <Chip 
+              label={agent.status} 
+              color={
+                agent.status === 'active' ? 'success' : 
+                agent.status === 'busy' ? 'warning' : 'error'
+              }
+              size="small"
+            />
+            {(agent.model || agent.provider) && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, textAlign: 'right' }}>
+                {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
+              </Typography>
+            )}
+          </Box>
         </Box>
         
         <Box sx={{ mt: 2 }}>
@@ -91,18 +98,6 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         <Typography color="text.secondary" gutterBottom>
           Type: {agent.type}
         </Typography>
-        
-        {agent.model && (
-          <Typography variant="body2" color="text.secondary">
-            Model: {agent.model}
-          </Typography>
-        )}
-        
-        {agent.provider && (
-          <Typography variant="body2" color="text.secondary">
-            Provider: {agent.provider}
-          </Typography>
-        )}
       </CardContent>
       
       <CardActions sx={{ justifyContent: 'flex-end' }}>

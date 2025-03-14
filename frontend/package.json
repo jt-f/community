@@ -34,7 +34,7 @@
     "webpack-dev-server": "^4.15.1"
   },
   "scripts": {
-    "start": "FAST_REFRESH=true webpack serve --mode development --hot",
+    "start": "webpack serve --mode development --hot --progress",
     "build": "webpack --mode production"
   }
 }
