@@ -47,6 +47,15 @@ class BaseAgent(ABC):
         self.think_interval = think_interval
         self._think_counter = 0  # Initialize the think counter
         self.agent_server = None  # Reference to the agent server, set by the agent manager
+        self._state = AgentState(
+            id=self.agent_id,
+            name=self.name,
+            type=self.__class__.__name__.lower().replace('agent', ''),  # Extract type from class name
+            status="idle",
+            queue_size=0,
+            last_activity=datetime.now().isoformat(),
+            capabilities=[]
+        )
         
         # Register the agent's ID and name
         _used_agent_ids.add(self.agent_id)
@@ -62,14 +71,7 @@ class BaseAgent(ABC):
     @property
     def state(self) -> AgentState:
         """Get the current agent state."""
-        return AgentState(
-            id=self.agent_id,
-            name=self.name,
-            status="idle",
-            queue_size=0,
-            last_activity=datetime.now().isoformat(),
-            capabilities=[]
-        )
+        return self._state
     
     async def add_message(self, message: Message) -> None:
         """Add a message to the agent's queue."""
@@ -167,23 +169,42 @@ class BaseAgent(ABC):
         """Process all messages in the queue."""
         while not self.message_queue.empty():
             message = await self.message_queue.get()
-            response = await self.process_message(message)
-            logger.info(f"(process_messages) {self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
-            # If there's a response and we have a server, route and broadcast it
-            if response and self.agent_server:
-                # Route the message to the appropriate agent
-                if response.receiver_id:
-                    logger.info(f"(process_messages) {self.agent_id} Routing message to {response.receiver_id}")
-                    await self.agent_server.route_message(response)
-                    logger.info(f"(process_messages) {self.agent_id} Message routed to {response.receiver_id}")
-                
-                # Broadcast the message to all WebSocket clients
+            
+            try:
+                # Update state to 'thinking' when starting to process a message
+                self._state.status = "thinking"
                 if self.agent_server:
-                    # Create a proper WebSocketMessage object
-                    ws_message = WebSocketMessage(
-                        type="message",
-                        data=response.dict()
-                    )
-                    logger.info(f"(process_messages) {self.agent_id} Broadcasting message to all clients")
-                    await self.agent_server.broadcast(ws_message) 
-                    logger.info(f"(process_messages) {self.agent_id} Message broadcasted to all clients")
+                    logger.info(f"Agent {self.agent_id} state changed to 'thinking' - broadcasting state update")
+                    await self.agent_server.broadcast_state()
+                
+                # Process the message
+                response = await self.process_message(message)
+                
+                # Update state to 'responding' when sending a response
+                self._state.status = "responding"
+                if self.agent_server:
+                    logger.info(f"Agent {self.agent_id} state changed to 'responding' - broadcasting state update")
+                    await self.agent_server.broadcast_state()
+                
+                # If there's a response, route it
+                if response:
+                    await self.agent_server.route_message(response)
+                    
+                # Mark the task as done
+                self.message_queue.task_done()
+                
+                # Set state back to 'idle' after processing is complete
+                self._state.status = "idle"
+                if self.agent_server:
+                    logger.info(f"Agent {self.agent_id} state changed to 'idle' after processing - broadcasting state update")
+                    await self.agent_server.broadcast_state()
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                self.message_queue.task_done()
+                
+                # Update state to 'idle' if there was an error
+                self._state.status = "idle"
+                if self.agent_server:
+                    logger.info(f"Agent {self.agent_id} state changed to 'idle' after error - broadcasting state update")
+                    await self.agent_server.broadcast_state()

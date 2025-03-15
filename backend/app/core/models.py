@@ -39,11 +39,30 @@ class AgentState(BaseModel):
     """Agent state model."""
     id: str
     name: str
-    status: str
-    queue_size: int
-    last_activity: str
-    capabilities: List[str]
+    type: str
+    status: str  # Now supports 'idle', 'responding', 'thinking'
+    capabilities: List[str] = []
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    queue_size: int = 0
+    last_activity: str = Field(default_factory=lambda: datetime.now().isoformat())
     metadata: Optional[Dict] = None
+    
+    class Config:
+        """Pydantic config."""
+        schema_extra = {
+            "example": {
+                "id": "agent-123",
+                "name": "Assistant",
+                "type": "assistant",
+                "status": "idle",
+                "capabilities": ["conversation", "search"],
+                "model": "gpt-4",
+                "provider": "openai",
+                "queue_size": 0,
+                "last_activity": "2023-01-01T00:00:00.000000"
+            }
+        }
 
     @model_validator(mode='before')
     @classmethod
