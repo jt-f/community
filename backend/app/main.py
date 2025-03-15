@@ -87,8 +87,8 @@ async def startup_event():
     await agent_server.start()
     
     # Ensure agent_manager has server reference
-    if agent_manager.server is None:
-        agent_manager.server = agent_server
+    if agent_manager.agent_server is None:
+        agent_manager.agent_server = agent_server
 
     # Create and register default agents
     from .core.agents.human import HumanAgent

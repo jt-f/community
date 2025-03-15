@@ -5,7 +5,7 @@ interface Agent {
   id: string;
   name: string;
   type: string;
-  status: 'active' | 'busy' | 'offline';
+  status: 'idle' | 'responding' | 'thinking';
   capabilities: string[];
   model?: string;
   provider?: string;
@@ -215,7 +215,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                   id: agent.id,
                   name: agent.name,
                   type: (agent.type || 'unknown').toLowerCase(),
-                  status: agent.status || 'active',
+                  status: agent.status || 'idle',
                   capabilities: agent.capabilities || [],
                   model: agent.model || undefined,
                   provider: agent.provider || undefined
@@ -264,7 +264,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                   id: agentId,
                   name: agentState.name || 'Unknown Agent',
                   type: (agentState.type || 'unknown').toLowerCase(),
-                  status: agentState.status || 'active',
+                  status: agentState.status || 'idle',
                   capabilities: agentState.capabilities || [],
                   model: agentState.model,
                   provider: agentState.provider

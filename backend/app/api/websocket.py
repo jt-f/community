@@ -25,7 +25,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Send initial agent list
         agent_list = []
-        all_agents = list(agent_manager.available_agents) + list(agent_manager.busy_agents)
+        all_agents = list(agent_manager.available_agents) + list(agent_manager.thinking_agents)
         logger.info(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
         
         for agent in all_agents:
@@ -33,7 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "id": agent.agent_id,
                 "name": agent.name,
                 "type": agent.__class__.__name__.replace("Agent", "").lower(),
-                "status": "busy" if agent in agent_manager.busy_agents else "active",
+                "status": "thinking" if agent in agent_manager.thinking_agents else "idle",
                 "capabilities": agent.capabilities if hasattr(agent, "capabilities") else [],
                 "model": getattr(agent, "default_model", None),
                 "provider": getattr(agent, "model_provider", None)
@@ -92,7 +92,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             )
                             
                             # Route the message to the appropriate agent
-                            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
+                            for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
                                 if agent.agent_id == message.receiver_id:
                                     await agent.enqueue_message(message)
                                     logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")
@@ -111,7 +111,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             )
                             
                             # Route the message to the appropriate agent
-                            for agent in list(agent_manager.available_agents) + list(agent_manager.busy_agents):
+                            for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
                                 if agent.agent_id == message.receiver_id:
                                     await agent.enqueue_message(message)
                                     logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")

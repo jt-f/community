@@ -137,7 +137,7 @@ export const AgentCreationForm: React.FC = () => {
         id: result.agent_id,
         name,
         type: agentType,
-        status: 'active',
+        status: 'idle',
         capabilities: selectedCapabilities,
       });
       

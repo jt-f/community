@@ -28,7 +28,7 @@ interface Agent {
   id: string;
   name: string;
   type: string;
-  status: 'active' | 'busy' | 'offline';
+  status: 'idle' | 'responding' | 'thinking';
   capabilities: string[];
   model?: string;
   provider?: string;
@@ -58,10 +58,54 @@ const pulse = keyframes`
   50% { opacity: 1; }
 `;
 
+const thinkingPulse = keyframes`
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+`;
+
+const respondingPulse = keyframes`
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+`;
+
 const scanline = keyframes`
   0% { transform: translateY(-100%); }
   100% { transform: translateY(100%); }
 `;
+
+// Function to get animation settings based on status
+const getStatusAnimation = (status: string) => {
+  switch (status) {
+    case 'thinking':
+      return {
+        animation: thinkingPulse,
+        color: '#FF9800',
+        scanlineColor: 'rgba(255, 152, 0, 0.1)',
+        showAnimation: true
+      };
+    case 'responding':
+      return {
+        animation: respondingPulse,
+        color: '#00FF41',
+        scanlineColor: 'rgba(0, 255, 65, 0.1)',
+        showAnimation: true
+      };
+    case 'idle':
+      return {
+        animation: 'none',
+        color: '#00BB41',
+        scanlineColor: 'rgba(0, 187, 65, 0.1)',
+        showAnimation: false
+      };
+    default:
+      return {
+        animation: 'none',
+        color: '#00BB41',
+        scanlineColor: 'rgba(0, 187, 65, 0.1)',
+        showAnimation: false
+      };
+  }
+};
 
 export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   const { sendMessage } = useAgentStore();
@@ -89,6 +133,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   };
   
   console.log('provider:'+agent.provider);
+  
+  const statusSettings = getStatusAnimation(agent.status);
   
   return (
     <Card 
@@ -118,19 +164,19 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           opacity: 0.5,
           zIndex: 1,
         },
-        '&::after': {
+        '&::after': statusSettings.showAnimation ? {
           content: '""',
           position: 'absolute',
           top: '-100%',
           left: 0,
           width: '100%',
           height: '200%',
-          background: 'linear-gradient(180deg, transparent 0%, rgba(0, 255, 65, 0.1) 50%, transparent 100%)',
+          background: `linear-gradient(180deg, transparent 0%, ${statusSettings.scanlineColor} 50%, transparent 100%)`,
           animation: `${scanline} 4s linear infinite`,
           animationDelay: `${randomDelay}s`,
           pointerEvents: 'none',
           zIndex: 2,
-        }
+        } : {}
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -166,26 +212,22 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             <Chip 
               label={agent.status} 
               color={
-                agent.status === 'active' ? 'success' : 
-                agent.status === 'busy' ? 'warning' : 'error'
+                agent.status === 'responding' ? 'success' : 
+                agent.status === 'thinking' ? 'warning' : 'default'
               }
               size="small"
               sx={{
                 fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
                 letterSpacing: '0.05em',
-                animation: agent.status === 'active' ? `${pulse} 2s infinite` : 'none',
-                textShadow: '0 0 5px #00FF41',
+                animation: agent.status !== 'idle' ? `${statusSettings.animation} 2s infinite` : 'none',
+                textShadow: `0 0 5px ${statusSettings.color}`,
                 border: '1px solid #003B00',
-                background: agent.status === 'active' 
+                background: agent.status === 'responding' 
                   ? 'linear-gradient(to right, #003B00, rgba(0, 59, 0, 0.7))' 
-                  : agent.status === 'busy'
+                  : agent.status === 'thinking'
                     ? 'linear-gradient(to right, #3A2F0B, rgba(58, 47, 11, 0.7))'
-                    : 'linear-gradient(to right, #3A0B0B, rgba(58, 11, 11, 0.7))',
-                boxShadow: agent.status === 'active' 
-                  ? '0 0 5px #00FF41' 
-                  : agent.status === 'busy'
-                    ? '0 0 5px #FF9800'
-                    : '0 0 5px #FF073A',
+                    : 'linear-gradient(to right, #002B00, rgba(0, 43, 0, 0.7))',
+                boxShadow: `0 0 5px ${statusSettings.color}`,
                 height: '20px', // Smaller height
                 '& .MuiChip-label': {
                   padding: '0 6px', // Reduced padding
