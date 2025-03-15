@@ -135,10 +135,16 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <CardContent sx={{ flexGrow: 1, position: 'relative', zIndex: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+      <CardContent sx={{ 
+        flexGrow: 1, 
+        position: 'relative', 
+        zIndex: 3, 
+        p: 1.5, // Reduced padding
+        '&:last-child': { pb: 1.5 } // Override default padding
+      }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
           <Typography 
-            variant="h6" 
+            variant="subtitle1" // Smaller font size
             component="h2"
             sx={{ 
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -148,7 +154,9 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               animation: `${flicker} ${5 + randomDelay}s infinite`,
               display: 'flex',
               alignItems: 'center',
-              gap: '8px'
+              gap: '4px', // Reduced gap
+              fontSize: '0.9rem', // Smaller font size
+              lineHeight: 1.2 // Tighter line height
             }}
           >
             <CodeIcon sx={{ fontSize: '0.9em', opacity: 0.8 }} />
@@ -178,6 +186,11 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                   : agent.status === 'busy'
                     ? '0 0 5px #FF9800'
                     : '0 0 5px #FF073A',
+                height: '20px', // Smaller height
+                '& .MuiChip-label': {
+                  padding: '0 6px', // Reduced padding
+                  fontSize: '0.65rem' // Smaller font
+                }
               }}
             />
             {(agent.model || agent.provider) && (
@@ -185,12 +198,14 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 variant="caption" 
                 color="text.secondary" 
                 sx={{ 
-                  mt: 0.5, 
+                  mt: 0.25, // Reduced margin
                   textAlign: 'right',
                   fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
                   color: 'rgba(0, 255, 65, 0.7)',
                   textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
                   letterSpacing: '0.05em',
+                  fontSize: '0.65rem', // Smaller font
+                  lineHeight: 1.1 // Tighter line height
                 }}
               >
                 {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
@@ -199,7 +214,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           </Box>
         </Box>
         
-        <Box sx={{ mt: 2 }}>
+        <Box sx={{ mt: 1 }}>
           <Typography 
             variant="caption" 
             color="text.secondary"
@@ -208,11 +223,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               color: 'rgba(0, 255, 65, 0.7)',
               textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
               letterSpacing: '0.05em',
+              fontSize: '0.65rem', // Smaller font
+              lineHeight: 1.1 // Tighter line height
             }}
           >
             Capabilities:
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.25, mt: 0.25 }}>
             {agent.capabilities.map((cap, index) => (
               <Chip
                 key={index}
@@ -220,7 +237,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 size="small"
                 variant="outlined"
                 sx={{ 
-                  fontSize: '0.7rem',
+                  fontSize: '0.6rem', // Smaller font
                   fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
                   letterSpacing: '0.05em',
                   border: '1px solid #003B00',
@@ -228,6 +245,10 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                   color: '#00FF41',
                   textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
                   transition: 'all 0.3s ease',
+                  height: '18px', // Smaller height
+                  '& .MuiChip-label': {
+                    padding: '0 4px', // Reduced padding
+                  },
                   '&:hover': {
                     boxShadow: '0 0 5px #00FF41',
                     borderColor: '#00FF41',
@@ -240,20 +261,21 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
 
         <Typography 
           color="text.secondary" 
-          gutterBottom
           sx={{ 
             fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
             color: 'rgba(0, 255, 65, 0.7)',
             textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
             letterSpacing: '0.05em',
-            mt: 1,
+            mt: 0.5, // Reduced margin
+            fontSize: '0.65rem', // Smaller font
+            lineHeight: 1.1 // Tighter line height
           }}
         >
           Type: {agent.type}
         </Typography>
         
         {/* Add a subtle progress bar for visual effect */}
-        <Box sx={{ mt: 2, mb: 0 }}>
+        <Box sx={{ mt: 1, mb: 0 }}>
           <LinearProgress 
             variant="indeterminate" 
             sx={{
@@ -275,6 +297,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         background: 'rgba(0, 10, 0, 0.3)',
         position: 'relative',
         zIndex: 3,
+        p: 0.5, // Reduced padding
+        minHeight: '36px' // Smaller height
       }}>
         <IconButton 
           size="small" 
@@ -283,6 +307,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: '#00FF41',
             transition: 'all 0.3s ease',
+            padding: '4px', // Smaller padding
             '&:hover': {
               backgroundColor: 'rgba(0, 255, 65, 0.1)',
               transform: 'scale(1.1)',
@@ -290,7 +315,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <MessageIcon />
+          <MessageIcon fontSize="small" />
         </IconButton>
         <IconButton 
           size="small" 
@@ -299,6 +324,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: '#00FF41',
             transition: 'all 0.3s ease',
+            padding: '4px', // Smaller padding
             '&:hover': {
               backgroundColor: 'rgba(0, 255, 65, 0.1)',
               transform: 'scale(1.1)',
@@ -306,7 +332,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <RefreshIcon />
+          <RefreshIcon fontSize="small" />
         </IconButton>
         <IconButton 
           size="small" 
@@ -315,6 +341,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: '#00FF41',
             transition: 'all 0.3s ease',
+            padding: '4px', // Smaller padding
             '&:hover': {
               backgroundColor: 'rgba(255, 7, 58, 0.1)',
               transform: 'scale(1.1)',
@@ -323,7 +350,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <DeleteIcon />
+          <DeleteIcon fontSize="small" />
         </IconButton>
       </CardActions>
     </Card>
