@@ -8,4 +8,4 @@ from .server import agent_server
 agent_manager = AgentManager()
 
 # Set the server reference after creation
-agent_manager.server = agent_server 
+agent_manager.agent_server = agent_server 

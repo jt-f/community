@@ -52,7 +52,7 @@ class ModelClient:
         }
         
         # Log available keys (without showing the actual keys)
-        logger.info(f"API keys available for: {[k for k, v in self.api_keys.items() if v]}")
+        logger.debug(f"API keys available for: {[k for k, v in self.api_keys.items() if v]}")
         
         self.base_urls = {
             ModelProvider.OLLAMA: os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
@@ -86,8 +86,8 @@ class ModelClient:
         
         # Log the API key availability (without showing the actual key)
         api_key = self.api_keys.get(provider, "")
-        logger.info(f"Using provider: {provider}")
-        logger.info(f"API key for {provider} is {'available' if api_key else 'NOT available'}")
+        logger.debug(f"Using provider: {provider}")
+        logger.debug(f"API key for {provider} is {'available' if api_key else 'NOT available'}")
         
         # Validate API key if using a remote provider
         if provider != ModelProvider.OLLAMA and not api_key:
@@ -95,7 +95,7 @@ class ModelClient:
             logger.error(error_msg)
             return {"error": error_msg}
         
-        logger.info(f"Generating with {provider} using model {model}")
+        logger.debug(f"Generating with {provider} using model {model}")
         
         if provider == ModelProvider.OLLAMA:
             return await self._generate_ollama(prompt, model, parameters)
@@ -140,8 +140,8 @@ class ModelClient:
     
     async def _generate_mistral(self, prompt: str, model: str, parameters: GenerationParameters) -> str:
         """Generate text using Mistral AI."""
-        logger.info(f"Generating with Mistral using model {model}")
-        logger.info(f"API key: {self.api_keys[ModelProvider.MISTRAL]}")
+        logger.debug(f"Generating with Mistral using model {model}")
+        logger.debug(f"API key: {self.api_keys[ModelProvider.MISTRAL]}")
         client = Mistral(api_key=self.api_keys[ModelProvider.MISTRAL])
         try:
             chat_response = client.chat.complete(
@@ -154,7 +154,7 @@ class ModelClient:
                 ]
             )
 
-            logger.info(chat_response.choices[0].message.content)
+            logger.debug(chat_response.choices[0].message.content)
             return chat_response.choices[0].message.content
         except Exception as e:
             logger.error(f"Error generating with Mistral: {str(e)}")

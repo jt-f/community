@@ -62,7 +62,7 @@ function App() {
     
     // Log connection status and agents for debugging
     return () => {
-      console.log('App unmounting, WebSocket status:', isConnected);
+      console.log('WebSocket status:', isConnected);
     };
   }, [connect]);
   

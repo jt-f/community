@@ -279,7 +279,7 @@ export const matrixTheme = createTheme({
           '&:nth-of-type(3n+1)': {
             borderLeft: `2px solid ${accentOrange}`,
             '&::before': {
-              background: `linear-gradient(90deg, ${accentOrange}, ${matrixGreen}, transparent)`,
+              background: `linear-gradient(90deg, ${accentCobaltBlue}, ${matrixGreen}, transparent)`,
             },
           },
           '&:nth-of-type(3n+2)': {

@@ -15,8 +15,24 @@ logger = get_logger(__name__)
 class HumanAgent(BaseAgent):
     """Human agent representing a user in the system."""
     
-    def __init__(self, name: str = "Human"):
+    def __init__(self, name: str = "Human", agent_id: Optional[str] = None):
+        """Initialize a human agent."""
         super().__init__(name=name)
+        
+        # Override the agent_id if provided
+        if agent_id:
+            # Remove the old ID from the registry
+            _used_agent_ids.discard(self.agent_id)
+            # Set the new ID
+            self.agent_id = agent_id
+            # Add the new ID to the registry
+            _used_agent_ids.add(self.agent_id)
+            # Update the state with the new ID
+            self._state.id = agent_id
+        
+        # Set human-specific capabilities
+        self._state.capabilities = ["text_input", "file_upload", "human_feedback"]
+        self._state.type = "human"  # Explicitly set type to "human"
         self.capabilities = [
             "user_interaction",
             "message_sending",
@@ -31,7 +47,7 @@ class HumanAgent(BaseAgent):
         # They just receive them and the UI displays them
         
         # Log the message for debugging
-        logger.info(f"Human agent {self.name} received message: {message.content}")
+        logger.debug(f"Human agent {self.name} received message: {message.content}")
         
         # Return None since humans respond manually through the UI
         return None

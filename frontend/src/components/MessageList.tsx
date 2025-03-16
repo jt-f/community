@@ -19,6 +19,7 @@ import {
   Memory as MemoryIcon
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
+import { getAgentName } from '../utils/agentUtils';
 
 // Define keyframes for animations
 const typing = keyframes`
@@ -69,18 +70,35 @@ const glitch = keyframes`
 `;
 
 interface Message {
-  id: string;
-  timestamp: string;
-  sender_id: string;
+  id?: string;
+  message_id?: string;
+  timestamp?: string;
+  sender_id?: string;
   receiver_id?: string;
-  content: {
-    text?: string;
-    status?: string;
-    insights?: string[];
-    [key: string]: any;
+  content?: any;
+  message_type?: string;
+  type?: string;
+  // Add fields for nested message structure
+  message?: {
+    sender_id?: string;
+    receiver_id?: string;
+    content?: any;
+    timestamp?: string;
+    message_id?: string;
   };
-  message_type: string;
-  type: string;
+  data?: {
+    message?: {
+      sender_id?: string;
+      receiver_id?: string;
+      content?: any;
+      timestamp?: string;
+      message_id?: string;
+    };
+    timestamp?: string;
+    sender_id?: string;
+    receiver_id?: string;
+    content?: any;
+  };
 }
 
 export const MessageList: React.FC = () => {
@@ -89,9 +107,16 @@ export const MessageList: React.FC = () => {
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
 
   // Debug logging
-  useEffect(() => {
-    console.log('Current agents:', agents);
-    console.log('Current messages:', messages);
+  useEffect(() => {    
+    // More detailed message structure debugging
+    if (messages && messages.length > 0) {
+      const firstMsg = messages[0] as any; // Use type assertion to avoid TypeScript errors
+      
+      // Check for nested message structure
+      if (firstMsg.data && firstMsg.data.message) {
+        console.log('Nested message found in data.message:', JSON.stringify(firstMsg.data.message, null, 2));
+      }
+    }
   }, [agents, messages]);
 
   // Scroll to bottom when messages change
@@ -101,47 +126,35 @@ export const MessageList: React.FC = () => {
     }
   }, [messages]);
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const formatTimestamp = (timestamp?: string) => {
+    if (!timestamp) return 'Unknown time';
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch (e) {
+      console.error('Error formatting timestamp:', e);
+      return 'Invalid time';
+    }
   };
 
-  // Function to get agent name from ID
-  const getAgentName = (agentId: string): string => {
-    // Check if the agent exists in our store
-    if (agents[agentId]) {
-      return agents[agentId].name;
-    }
+  const getAgentIcon = (senderId?: string) => {
+    if (!senderId) return <ComputerIcon sx={{ color: '#00FF41' }} />;
     
-    // If not found in agents, check if it's a user ID from localStorage
-    const userId = localStorage.getItem('userId');
-    if (userId === agentId) {
-      return 'OPERATOR';
-    }
-    
-    // If it's a human agent (might have a different ID format)
-    const humanAgent = Object.values(agents).find(agent => 
-      agent.type.toLowerCase() === 'human'
-    );
-    
-    if (humanAgent && humanAgent.id === agentId) {
-      return 'OPERATOR';
-    }
-    
-    // Default fallback
-    return `AGENT-${agentId.substring(0, 6)}`;
-  };
-
-  const getAgentIcon = (senderId: string) => {
     // Check if it's a human/user
     const userId = localStorage.getItem('userId');
     if (userId === senderId) {
       return <PersonIcon sx={{ color: '#00FFFF' }} />;
     }
     
-    const humanAgent = Object.values(agents).find(agent => 
-      agent.type.toLowerCase() === 'human'
-    );
+    // Find human agent
+    let humanAgent = null;
+    if (typeof agents === 'object') {
+      // If agents is an object with values
+      const agentValues = Object.values(agents);
+      humanAgent = agentValues.find((agent: any) => 
+        agent && agent.type && agent.type.toLowerCase() === 'human'
+      );
+    }
     
     if (humanAgent && humanAgent.id === senderId) {
       return <PersonIcon sx={{ color: '#00FFFF' }} />;
@@ -151,7 +164,7 @@ export const MessageList: React.FC = () => {
     const agent = agents[senderId];
     if (!agent) return <ComputerIcon sx={{ color: '#00FF41' }} />;
     
-    switch (agent.type.toLowerCase()) {
+    switch (agent.type && agent.type.toLowerCase()) {
       case 'system':
         return <MemoryIcon sx={{ color: '#00FF41' }} />;
       case 'analyst':
@@ -162,18 +175,23 @@ export const MessageList: React.FC = () => {
   };
 
   const renderMessageContent = (content: Message['content']) => {
+    if (!content) return 'No content';
+    
+    // If content is a string, return it directly
     if (typeof content === 'string') {
       return content;
     }
-
+    
+    // If content has a text property, return just the text value
     if (content.text) {
       return content.text;
     }
-
+    
     if (content.status) {
       return `Status: ${content.status}`;
     }
-
+    
+    // For other object structures, stringify them
     return JSON.stringify(content);
   };
 
@@ -331,19 +349,104 @@ export const MessageList: React.FC = () => {
           position: 'relative',
           zIndex: 2
         }}>
-          {messages.map((message, index) => {
-            const isOutgoing = message.sender_id === localStorage.getItem('userId') || 
-                              message.type === 'outgoing' ||
-                              Object.values(agents).find(a => a.type === 'human')?.id === message.sender_id;
+          {messages.map((msg: any, index: number) => {
+            // Get a unique ID for the message
+            const messageId = msg.id || msg.message_id || `msg-${index}`;
             
-            const senderName = getAgentName(message.sender_id);
-            const isHovered = hoveredMessage === message.id;
+            // Safely extract sender and receiver IDs
+            let senderId;
+            let receiverId;
+            
+            // Check for WebSocket message format (data.message structure)
+            if (msg.data && msg.data.message) {
+              senderId = msg.data.message.sender_id;
+              receiverId = msg.data.message.receiver_id;
+            } 
+            // Check for nested message format
+            else if (msg.message) {
+              senderId = msg.message.sender_id;
+              receiverId = msg.message.receiver_id;
+            } 
+            // Check for direct format
+            else {
+              senderId = msg.sender_id;
+              receiverId = msg.receiver_id;
+            }
+            
+            // Get agent names safely
+            const senderName = getAgentName(senderId, agents);
+            const receiverName = getAgentName(receiverId, agents);
+
+            // Extract message content safely
+            let content;
+            try {
+              // Check for WebSocket message format
+              if (msg.data && msg.data.message && msg.data.message.content) {
+                const rawContent = msg.data.message.content;
+
+                if (typeof rawContent === 'string') {
+                  content = rawContent;
+                } else if (typeof rawContent === 'object') {
+                  if (rawContent.text) {
+                    content = rawContent.text;
+                  } else {
+                    content = JSON.stringify(rawContent);
+                  }
+                }
+              } 
+              // Check for nested message format
+              else if (msg.message && msg.message.content) {
+                const rawContent = msg.message.content;
+
+                if (typeof rawContent === 'string') {
+                  content = rawContent;
+                } else if (typeof rawContent === 'object') {
+                  if (rawContent.text) {
+                    content = rawContent.text;
+                  } else {
+                    content = JSON.stringify(rawContent);
+                  }
+                }
+              } 
+              // Check for direct format
+              else if (msg.content) {
+                const rawContent = msg.content;
+                
+                if (typeof rawContent === 'string') {
+                  content = rawContent;
+                } else if (typeof rawContent === 'object') {
+                  if (rawContent.text) {
+                    content = rawContent.text;
+                  } else {
+                    content = JSON.stringify(rawContent);
+                  }
+                }
+              } else {
+                console.log(`Message ${index} has no recognizable content structure`);
+                content = 'No content';
+              }
+            } catch (e) {
+              console.error(`Error extracting content for message ${index}:`, e);
+              content = 'Error displaying message';
+            }
+            
+            // Get timestamp
+            const timestamp = msg.timestamp || 
+              (msg.message && msg.message.timestamp) || 
+              (msg.data && msg.data.timestamp) ||
+              (msg.data && msg.data.message && msg.data.message.timestamp);
+            
+            const isOutgoing = senderId === localStorage.getItem('userId') || 
+                              msg.type === 'outgoing' ||
+                              Object.values(agents).find((a: any) => a.type === 'human')?.id === senderId;
+            
+            const isHovered = hoveredMessage === messageId;
             
             return (
               <Paper 
                 key={index} 
                 elevation={1}
-                onMouseEnter={() => setHoveredMessage(message.id)}
+                onMouseEnter={() => setHoveredMessage(messageId)}
                 onMouseLeave={() => setHoveredMessage(null)}
                 sx={{ 
                   p: 2, 
@@ -440,7 +543,7 @@ export const MessageList: React.FC = () => {
                       } : {}),
                     }}
                   >
-                    {getAgentIcon(message.sender_id)}
+                    {getAgentIcon(senderId)}
                   </Box>
                   <Typography 
                     variant="subtitle2" 
@@ -498,15 +601,13 @@ export const MessageList: React.FC = () => {
                       } : {}),
                     }}
                   >
-                    {typeof message.content === 'string' 
-                      ? message.content 
-                      : message.content.text || JSON.stringify(message.content)}
+                    {content}
                   </Typography>
                   
                   {/* Render any secondary content like insights */}
-                  {message.content && typeof message.content === 'object' && 
-                    (message.content.insights || message.content.status) && 
-                    renderSecondaryContent(message.content)}
+                  {msg.content && typeof msg.content === 'object' && 
+                    (msg.content.insights || msg.content.status) && 
+                    renderSecondaryContent(msg.content)}
                 </Box>
                 
                 <Typography 
@@ -529,7 +630,7 @@ export const MessageList: React.FC = () => {
                     } : {}),
                   }}
                 >
-                  {formatTimestamp(message.timestamp)}
+                  {formatTimestamp(timestamp)}
                 </Typography>
               </Paper>
             );
