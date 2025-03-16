@@ -233,69 +233,72 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         p: 1.5, // Reduced padding
         '&:last-child': { pb: 1.5 } // Override default padding
       }}>
+        {/* Agent Name at the top */}
+        <Typography 
+          variant="h6" 
+          component="h2"
+          sx={{ 
+            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+            color: statusSettings.textColor,
+            textShadow: isHovered ? `0 0 10px ${statusSettings.color}` : `0 0 5px ${statusSettings.color}`,
+            letterSpacing: '0.05em',
+            animation: `${flicker} ${5 + randomDelay}s infinite`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px', // Reduced gap
+            fontSize: '1rem', // Slightly larger for emphasis
+            lineHeight: 1.2, // Tighter line height
+            mb: 1, // Add margin below name
+            textAlign: 'center',
+            width: '100%',
+            justifyContent: 'center'
+          }}
+        >
+          <CodeIcon sx={{ fontSize: '0.9em', opacity: 0.8 }} />
+          {agent.name}
+        </Typography>
+
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+          {/* Model and Provider info */}
           <Typography 
-            variant="subtitle1" // Smaller font size
-            component="h2"
+            variant="caption" 
+            color="text.secondary" 
             sx={{ 
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              color: statusSettings.textColor,
-              textShadow: isHovered ? `0 0 10px ${statusSettings.color}` : `0 0 5px ${statusSettings.color}`,
+              color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
+              textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
               letterSpacing: '0.05em',
-              animation: `${flicker} ${5 + randomDelay}s infinite`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px', // Reduced gap
-              fontSize: '0.9rem', // Smaller font size
-              lineHeight: 1.2 // Tighter line height
+              fontSize: '0.65rem', // Smaller font
+              lineHeight: 1.1 // Tighter line height
             }}
           >
-            <CodeIcon sx={{ fontSize: '0.9em', opacity: 0.8 }} />
-            {agent.name}
+            {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
           </Typography>
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-            <Chip 
-              label={agent.status} 
-              color={
-                agent.status === 'idle' ? 'primary' :
-                agent.status === 'responding' ? 'success' : 
-                agent.status === 'thinking' ? 'warning' : 'default'
+          
+          {/* Status Chip */}
+          <Chip 
+            label={agent.status} 
+            color={
+              agent.status === 'idle' ? 'primary' :
+              agent.status === 'responding' ? 'success' : 
+              agent.status === 'thinking' ? 'warning' : 'default'
+            }
+            size="small"
+            sx={{
+              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+              letterSpacing: '0.05em',
+              animation: agent.status !== 'idle' ? `${statusSettings.animation} 2s infinite` : 'none',
+              textShadow: `0 0 5px ${statusSettings.color}`,
+              border: `1px solid ${statusSettings.borderColor}`,
+              background: `linear-gradient(to right, ${statusSettings.gradientStart}, ${statusSettings.gradientEnd})`,
+              boxShadow: `0 0 5px ${statusSettings.color}`,
+              height: '20px', // Smaller height
+              '& .MuiChip-label': {
+                padding: '0 6px', // Reduced padding
+                fontSize: '0.65rem' // Smaller font
               }
-              size="small"
-              sx={{
-                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-                letterSpacing: '0.05em',
-                animation: agent.status !== 'idle' ? `${statusSettings.animation} 2s infinite` : 'none',
-                textShadow: `0 0 5px ${statusSettings.color}`,
-                border: `1px solid ${statusSettings.borderColor}`,
-                background: `linear-gradient(to right, ${statusSettings.gradientStart}, ${statusSettings.gradientEnd})`,
-                boxShadow: `0 0 5px ${statusSettings.color}`,
-                height: '20px', // Smaller height
-                '& .MuiChip-label': {
-                  padding: '0 6px', // Reduced padding
-                  fontSize: '0.65rem' // Smaller font
-                }
-              }}
-            />
-            {(agent.model || agent.provider) && (
-              <Typography 
-                variant="caption" 
-                color="text.secondary" 
-                sx={{ 
-                  mt: 0.25, // Reduced margin
-                  textAlign: 'right',
-                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-                  color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
-                  textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
-                  letterSpacing: '0.05em',
-                  fontSize: '0.65rem', // Smaller font
-                  lineHeight: 1.1 // Tighter line height
-                }}
-              >
-                {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
-              </Typography>
-            )}
-          </Box>
+            }}
+          />
         </Box>
         
         <Box sx={{ mt: 1 }}>

@@ -75,97 +75,95 @@ function App() {
     <ThemeProvider theme={matrixTheme}>
       <CssBaseline />
       {globalStyles}
-      <Container 
-        maxWidth="xl" 
-        sx={{ 
-          py: 3, 
-          display: 'flex', 
-          flexDirection: 'column', 
-          height: '100vh',
-          position: 'relative',
-        }}
-      >
+      <Container maxWidth="xl" sx={{ height: '100vh', py: 4, display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
-        <Box 
-          sx={{ 
-            mb: 3, 
-            display: 'flex', 
-            justifyContent: 'center',
-            position: 'relative',
-          }}
-        >
+        <Box sx={{ mb: 3 }}>
           <Typography 
-            variant="h3" 
+            variant="h4" 
             component="h1" 
-            align="center"
             sx={{ 
-              color: '#00FF41', 
-              textShadow: '0 0 10px #00FF41, 0 0 20px #00FF41',
+              color: '#00FF41',
+              textShadow: '0 0 10px #00FF41',
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
               letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              mb: 1,
+              textAlign: 'center',
+              mb: 1
+            }}
+          >
+            AGENT CONTROL INTERFACE
+          </Typography>
+          <Typography 
+            variant="subtitle1" 
+            sx={{ 
+              color: '#00BB41',
+              textShadow: '0 0 5px #00BB41',
+              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+              letterSpacing: '0.05em',
+              textAlign: 'center',
+              opacity: 0.8
+            }}
+          >
+            {isConnected ? '// CONNECTED' : '// CONNECTING...'}
+          </Typography>
+        </Box>
+
+        {/* Main Content - Side by Side Layout */}
+        <Box sx={{ 
+          display: 'flex', 
+          gap: 3, 
+          flex: 1,
+          minHeight: 0 // Important for proper scrolling
+        }}>
+          {/* Left Side - Chat Interface */}
+          <Paper 
+            elevation={3}
+            sx={{ 
+              flex: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              border: '1px solid #003B00',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(10, 10, 10, 0.8)',
+              backdropFilter: 'blur(5px)',
+              boxShadow: '0 0 15px rgba(0, 255, 65, 0.2), inset 0 0 10px rgba(0, 255, 65, 0.1)',
               position: 'relative',
               '&::before': {
                 content: '""',
                 position: 'absolute',
-                bottom: -8,
-                left: '10%',
-                width: '80%',
-                height: '1px',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '2px',
                 background: 'linear-gradient(90deg, transparent, #00FF41, transparent)',
               }
             }}
           >
-            Neural Network Command Center
-          </Typography>
-        </Box>
-        
-        {/* Agent Dashboard */}
-        <Box sx={{ mb: 3 }}>
-          <AgentDashboard />
-        </Box>
-        
-        {/* Chat Interface */}
-        <Paper 
-          elevation={3}
-          sx={{ 
+            <Box 
+              sx={{ 
+                flex: 1, 
+                overflow: 'hidden', 
+                display: 'flex', 
+                flexDirection: 'column',
+                position: 'relative',
+              }}
+            >
+              <MessageList />
+            </Box>
+            <MessageInput />
+          </Paper>
+
+          {/* Right Side - Agent Dashboard */}
+          <Box sx={{ 
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden',
-            border: '1px solid #003B00',
-            borderRadius: '4px',
-            minHeight: '50vh',
-            backgroundColor: 'rgba(10, 10, 10, 0.8)',
-            backdropFilter: 'blur(5px)',
-            boxShadow: '0 0 15px rgba(0, 255, 65, 0.2), inset 0 0 10px rgba(0, 255, 65, 0.1)',
-            position: 'relative',
-            '&::before': {
-              content: '""',
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '2px',
-              background: 'linear-gradient(90deg, transparent, #00FF41, transparent)',
-            }
-          }}
-        >
-          <Box 
-            sx={{ 
-              flex: 1, 
-              overflow: 'hidden', 
-              display: 'flex', 
-              flexDirection: 'column',
-              position: 'relative',
-            }}
-          >
-            <MessageList />
+            overflow: 'hidden'
+          }}>
+            <AgentDashboard />
           </Box>
-          <MessageInput />
-        </Paper>
-        
+        </Box>
+
         {/* Footer */}
         <Box 
           sx={{ 
