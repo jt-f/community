@@ -52,14 +52,11 @@ export const AgentCreationForm: React.FC = () => {
       try {
         setLoading(true);
         // Use a direct URL for testing
-        console.log('Fetching agent options from: http://localhost:8000/api/agent-options');
         const response = await fetch('http://localhost:8000/api/agent-options');
-        console.log('Response status:', response.status);
         if (!response.ok) {
           throw new Error(`Failed to fetch agent options: ${response.status} ${response.statusText}`);
         }
         const data = await response.json();
-        console.log('Received agent options:', data);
         setOptions(data);
       } catch (err) {
         console.error('Error fetching agent options:', err);

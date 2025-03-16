@@ -47,7 +47,7 @@ class HumanAgent(BaseAgent):
         # They just receive them and the UI displays them
         
         # Log the message for debugging
-        logger.info(f"Human agent {self.name} received message: {message.content}")
+        logger.debug(f"Human agent {self.name} received message: {message.content}")
         
         # Return None since humans respond manually through the UI
         return None

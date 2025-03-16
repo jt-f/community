@@ -13,7 +13,7 @@ class OllamaClient:
         self.max_retries = max_retries
         self.client = AsyncClient(host=base_url)
         self.DEFAULT_TIMEOUT = 300.0  # 5 minutes
-        logger.info(f"Initialized OllamaClient with base_url: {base_url}")
+        logger.debug(f"Initialized OllamaClient with base_url: {base_url}")
 
     async def __aenter__(self):
         # Asynchronous setup code here
@@ -28,14 +28,14 @@ class OllamaClient:
         try:
             # Check if model exists
             await self.client.show(model)
-            logger.info(f"Model {model} is available")
+            logger.debug(f"Model {model} is available")
             return True
         except Exception as e:
             if "model not found" in str(e).lower():
-                logger.info(f"Model {model} not found, pulling...")
+                logger.debug(f"Model {model} not found, pulling...")
                 try:
                     await self.client.pull(model)
-                    logger.info(f"Successfully pulled model {model}")
+                    logger.debug(f"Successfully pulled model {model}")
                     return True
                 except Exception as pull_error:
                     logger.error(f"Error pulling model {model}: {pull_error}")
@@ -47,7 +47,7 @@ class OllamaClient:
     async def generate(self, prompt: str = "Say a funny thing", model: str = "mistral", parameters: Optional[Dict] = None) -> Union[str, Dict[str, str]]:
         """Generate a response using the Ollama client."""
         try:
-            logger.info(f"Generating response for prompt: {prompt} {model} {parameters}")
+            logger.debug(f"Generating response for prompt: {prompt} {model} {parameters}")
             # First ensure model is loaded
             if not await self.ensure_model_loaded(model):
                 return {
@@ -55,13 +55,13 @@ class OllamaClient:
                     'details': 'Model could not be loaded or pulled'
                 }
 
-            logger.info(f"Sending request to Ollama")
+            logger.debug(f"Sending request to Ollama")
             response = await self.client.generate(
                 model=model,
                 prompt=prompt,
                 options=parameters or {}
             )
-            logger.info(f"Received response from Ollama {response}")
+            logger.debug(f"Received response from Ollama {response}")
             if not response or not response.response:
                 return {
                     'error': 'No response from Ollama',

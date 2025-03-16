@@ -43,28 +43,28 @@ active_connections = set()
 
 async def shutdown(signal, loop):
     """Cleanup tasks tied to the service's shutdown."""
-    logger.info(f"Received exit signal {signal.name}...")
+    logger.debug(f"Received exit signal {signal.name}...")
     
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     
-    logger.info(f"Cancelling {len(tasks)} outstanding tasks")
+    logger.debug(f"Cancelling {len(tasks)} outstanding tasks")
     for task in tasks:
         task.cancel()
     
-    logger.info("Stopping agent server...")
+    logger.debug("Stopping agent server...")
     await agent_server.stop()
     
-    logger.info(f"Waiting for {len(tasks)} tasks to cancel")
+    logger.debug(f"Waiting for {len(tasks)} tasks to cancel")
     await asyncio.gather(*tasks, return_exceptions=True)
     
     loop.stop()
-    logger.info("Shutdown complete.")
+    logger.debug("Shutdown complete.")
 
 def handle_exception(loop, context):
     """Handle exceptions that escape the async loop."""
     msg = context.get("exception", context["message"])
     logger.error(f"Caught exception: {msg}")
-    logger.info("Shutting down...")
+    logger.debug("Shutting down...")
     asyncio.create_task(shutdown(signal.SIGTERM, loop))
 
 @app.on_event("startup")
@@ -99,29 +99,29 @@ async def startup_event():
     human_agent = HumanAgent(name="Human")
     agent_manager.register_agent(human_agent)
     agent_server.agents[human_agent.agent_id] = human_agent
-    logger.info(f"Created default Human agent: {human_agent.agent_id}")
+    logger.debug(f"Created default Human agent: {human_agent.agent_id}")
     
     system_agent = SystemAgent(name="System")
     agent_manager.register_agent(system_agent)
     agent_server.agents[system_agent.agent_id] = system_agent
-    logger.info(f"Created default System agent: {system_agent.agent_id}")
+    logger.debug(f"Created default System agent: {system_agent.agent_id}")
     
     analyst_agent = AnalystAgent(name="Analyst")
     agent_manager.register_agent(analyst_agent)
     agent_server.agents[analyst_agent.agent_id] = analyst_agent
-    logger.info(f"Created default Analyst agent: {analyst_agent.agent_id}")
+    logger.debug(f"Created default Analyst agent: {analyst_agent.agent_id}")
 
     # Start the agent manager in the background
     asyncio.create_task(agent_manager.run())
 
-    logger.info("Application startup complete")
+    logger.debug("Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop the agent server on application shutdown."""
     await agent_server.stop()
     agent_manager.stop()
-    logger.info("Application shutdown complete")
+    logger.debug("Application shutdown complete")
 
 # Function to broadcast messages to all connected clients
 async def broadcast_message(message: Message):

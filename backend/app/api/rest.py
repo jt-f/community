@@ -119,7 +119,7 @@ async def get_agent_options():
     """Get available options for creating new agents."""
     
     # Log that this endpoint was called
-    logger.info("Agent options endpoint called")
+    logger.debug("Agent options endpoint called")
     
     # Available agent types
     agent_types = [
@@ -149,7 +149,7 @@ async def get_agent_options():
     ]
     
     # Log the response
-    logger.info(f"Returning agent options: {len(agent_types)} agent types, {len(providers)} providers, {len(models)} model groups, {len(capabilities)} capabilities")
+    logger.debug(f"Returning agent options: {len(agent_types)} agent types, {len(providers)} providers, {len(models)} model groups, {len(capabilities)} capabilities")
     
     return {
         "agent_types": agent_types,

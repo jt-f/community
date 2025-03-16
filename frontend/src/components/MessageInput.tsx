@@ -68,7 +68,6 @@ export const MessageInput: React.FC = () => {
       
       if (humanAgent) {
         setHumanAgentId(humanAgent.id);
-        console.log('Found human agent ID:', humanAgent.id);
       } else {
         console.warn('Human agent not found, using default ID');
         setHumanAgentId('human');

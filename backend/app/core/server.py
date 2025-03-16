@@ -37,7 +37,7 @@ class AgentServer:
             return
             
         self.running = True
-        logger.info("Agent server started")
+        logger.debug("Agent server started")
         
         # Start the message processing loop
         asyncio.create_task(self._process_messages())
@@ -48,7 +48,7 @@ class AgentServer:
             return
             
         self.running = False
-        logger.info("Agent server stopped")
+        logger.debug("Agent server stopped")
         
         # Close all WebSocket connections
         for websocket in list(self.websocket_clients):
@@ -93,7 +93,7 @@ class AgentServer:
             )
             
             # Broadcast the message to all clients
-            logger.info(f"Broadcasting message from queue to WebSocket clients")
+            logger.debug(f"Broadcasting message from queue to WebSocket clients")
             await self.broadcast(ws_message)
         except Exception as e:
             logger.error(f"Error broadcasting message from queue: {e}")
@@ -114,7 +114,7 @@ class AgentServer:
             )
             
             # Broadcast the message to all clients
-            logger.info(f"Broadcasting message from {message.sender_id} to WebSocket clients")
+            logger.debug(f"Broadcasting message from {message.sender_id} to WebSocket clients")
             await self.broadcast(ws_message)
         except Exception as e:
             logger.error(f"Error broadcasting message to WebSocket clients: {e}")
@@ -135,7 +135,7 @@ class AgentServer:
                 
                 # If no human agent exists for this user, create one
                 if not human_agent:
-                    logger.info(f"Creating new human agent for user {message.receiver}")
+                    logger.debug(f"Creating new human agent for user {message.receiver}")
                     human_agent = HumanAgent(agent_id=message.receiver)
                     await self.register_agent(human_agent)
                 
@@ -154,7 +154,7 @@ class AgentServer:
             # Try to find the agent by ID
             if message.receiver in self.agents:
                 agent = self.agents[message.receiver]
-                logger.info(f"Routing message to agent {message.receiver}")
+                logger.debug(f"Routing message to agent {message.receiver}")
                 await agent.receive_message(message)
                 
                 # Queue the message for broadcasting
@@ -190,26 +190,29 @@ class AgentServer:
         # Send to all connected clients
         for client in self.websocket_clients:
             try:
+                logger.info(f"Sending message to client: {data}")
                 await client.send_json(data)
+                logger.info(f"Message sent to client")
+                await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Error sending message to client: {e}")
         
     def register_websocket(self, websocket):
         """Register a WebSocket connection."""
         self.websocket_clients.add(websocket)
-        logger.info(f"WebSocket client registered. Total clients: {len(self.websocket_clients)}")
+        logger.debug(f"WebSocket client registered. Total clients: {len(self.websocket_clients)}")
         
     def unregister_websocket(self, websocket):
         """Unregister a WebSocket connection."""
         self.websocket_clients.discard(websocket)
-        logger.info(f"WebSocket client unregistered. Total clients: {len(self.websocket_clients)}")
+        logger.debug(f"WebSocket client unregistered. Total clients: {len(self.websocket_clients)}")
 
     async def register_agent(self, agent: BaseAgent):
         """Register an agent with the server and manager."""
         self.agents[agent.agent_id] = agent
         self.agent_manager.register_agent(agent)
-        logger.info(f"(register_agent) Registered agent {agent.agent_id}")
-        logger.info(f"(register_agent) Broadcasting state to all clients")
+        logger.debug(f"(register_agent) Registered agent {agent.agent_id}")
+        logger.debug(f"(register_agent) Broadcasting state to all clients")
         await self.broadcast_state()
         
     async def remove_agent(self, agent_id: str):
@@ -224,7 +227,7 @@ class AgentServer:
 
     async def broadcast_state(self):
         """Broadcast current agent states to all connected clients."""
-        logger.info("=== BROADCASTING AGENT STATES TO CLIENTS ===")
+        logger.debug("=== BROADCASTING AGENT STATES TO CLIENTS ===")
         if not self.websocket_clients:
             logger.warning("No WebSocket clients connected. Agent state update not sent.")
             return
@@ -235,12 +238,12 @@ class AgentServer:
                 for agent_id, agent in self.agents.items()
             }
             
-            logger.info(f"Sending state update for {len(states)} agents to {len(self.websocket_clients)} clients")
+            logger.debug(f"Sending state update for {len(states)} agents to {len(self.websocket_clients)} clients")
             
             # Log agent statuses
             for agent_id, state in states.items():
                 status = state.get('status', 'unknown')
-                logger.info(f"Agent {agent_id}: status={status}")
+                logger.debug(f"Agent {agent_id}: status={status}")
             
             message = WebSocketMessage(
                 type="state_update",
@@ -248,7 +251,7 @@ class AgentServer:
             )
             
             await self.broadcast(message)
-            logger.info("Agent state update successfully broadcast to all clients")
+            logger.debug("Agent state update successfully broadcast to all clients")
         except Exception as e:
             logger.error(f"Error broadcasting state: {e}")
 

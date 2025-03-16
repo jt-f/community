@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { WebSocketMessage } from '../types/WebSocketMessage';
+import { getAgentName } from '../utils/agentUtils';
 
 interface Agent {
   id: string;
@@ -79,7 +80,10 @@ interface AgentStore {
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const defaultPort = 8000;
 
-console.log('WebSocket configuration:', {
+// Add timestamp utility at the top of the file
+const getTimestamp = () => new Date().toISOString();
+
+console.log(`[${getTimestamp()}] WebSocket configuration:`, {
   protocol,
   hostname: window.location.hostname,
   port: defaultPort,
@@ -88,8 +92,7 @@ console.log('WebSocket configuration:', {
 
 // Add a function to normalize message structure
 const normalizeMessage = (message: any): Message => {
-  console.log('Normalizing message:', message);
-  
+
   // If it's already in the expected format with sender_id and content
   if (message.sender_id && (message.content !== undefined)) {
     return {
@@ -183,34 +186,42 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       socket = new WebSocket(wsUrl);
       
       socket.onopen = () => {
-        console.log('WebSocket connected');
+        console.log(`[${getTimestamp()}] WebSocket connected`);
         set({ isConnected: true });
       };
       
       socket.onclose = () => {
-        console.log('WebSocket disconnected');
+        console.log(`[${getTimestamp()}] WebSocket disconnected`);
         set({ isConnected: false });
         socket = null;
       };
       
       socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        console.error(`[${getTimestamp()}] WebSocket error:`, error);
       };
       
       socket.onmessage = (event) => {
         try {
-          console.log('WebSocket message received:', event.data);
+          const receiveTime = new Date().getTime();
+          console.log(`[${getTimestamp()}] WebSocket message received at ${receiveTime}ms:`, event.data);
+          
+          // Parse the message and extract its timestamp
           const data = JSON.parse(event.data) as WebSocketMessage;
+          const messageTimestamp = data.data?.timestamp ? new Date(data.data.timestamp).getTime() : null;
+          
+          if (messageTimestamp) {
+            const delay = receiveTime - messageTimestamp;
+            console.log(`[${getTimestamp()}] Message delay: ${delay}ms (Server timestamp: ${messageTimestamp}ms)`);
+          }
           
           if (data.type === 'agent_list') {
-            console.log('Received agent list:', data.data);
+            console.log(`[${getTimestamp()}] Received agent list:`, data.data);
             // Update agent list
             const agentMap: Record<string, Agent> = {};
             
             // Add null check for data.data.agents
             if (data.data && data.data.agents && Array.isArray(data.data.agents)) {
               data.data.agents.forEach((agent: any) => {
-                console.log('Processing agent:', agent);
                 agentMap[agent.id] = {
                   id: agent.id,
                   name: agent.name,
@@ -221,16 +232,12 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                   provider: agent.provider || undefined
                 };
               });
-              console.log('Setting agents:', agentMap);
               set({ agents: agentMap });
             }
           } else if (data.type === 'message') {
-            // Handle incoming messages
-            console.log('Received message data:', data);
-            
+
             // Use the normalizeMessage function to handle different message formats
             const normalizedMessage = normalizeMessage(data);
-            console.log('Normalized message:', normalizedMessage);
             
             // Check if we've already processed this message
             const messageId = normalizedMessage.id;
@@ -257,8 +264,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               
               // Process each agent in the state update
               Object.entries(data.data).forEach(([agentId, agentState]: [string, any]) => {
-                console.log('Processing agent state:', agentId, agentState);
-                
+
                 // Convert agent state to agent object
                 agentMap[agentId] = {
                   id: agentId,
@@ -277,7 +283,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           }
           
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          console.error(`[${getTimestamp()}] Error parsing WebSocket message:`, error);
         }
       };
     },
@@ -292,7 +298,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     
     sendMessage: (content: string, agentId: string, addToUI: boolean = true) => {
       if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.error('WebSocket not connected');
+        console.error(`[${getTimestamp()}] WebSocket not connected`);
         return;
       }
       
@@ -315,7 +321,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         }
       };
       
-      console.log('Sending message to agent:', agentId);
+      console.log(`[${getTimestamp()}] Sending message to agent:`, getAgentName(agentId, get().agents));
       socket.send(JSON.stringify(message));
       
       // Add the message to the local state only if addToUI is true
@@ -368,14 +374,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     },
     
     addMessage: (message) => {
-      console.log('Adding message to store:', message);
+      console.log(`[${getTimestamp()}] Adding message to store:`, message);
       const normalizedMessage = normalizeMessage(message);
-      console.log('Normalized message:', normalizedMessage);
+      console.log(`[${getTimestamp()}] Normalized message:`, normalizedMessage);
       
       // Check if we've already processed this message
       const messageId = normalizedMessage.id;
       if (messageId && get().processedMessageIds.has(messageId)) {
-        console.log('Skipping duplicate message with ID:', messageId);
+        console.log(`[${getTimestamp()}] Skipping duplicate message with ID:`, messageId);
         return;
       }
       

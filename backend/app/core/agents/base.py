@@ -107,7 +107,7 @@ class BaseAgent(ABC):
         if message:
             try:
                 response = await self.process_message(message)
-                logger.info(f"{self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
+                logger.debug(f"{self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
                 if response:
                     yield response
             except Exception as e:
@@ -165,46 +165,27 @@ class BaseAgent(ABC):
         """Check if the agent has messages in its queue."""
         return not self.message_queue.empty()
     
+    async def set_status(self, status: str):
+        """Set the status of the agent."""
+        self._state.status = status
+        if self.agent_server:
+            logger.info(f"Agent {self.name} ({self.agent_id}) state changed to '{status}' - broadcasting state update")
+            await self.agent_server.broadcast_state()
+
     async def process_messages(self):
         """Process all messages in the queue."""
         while not self.message_queue.empty():
             message = await self.message_queue.get()
             
             try:
-                # Update state to 'thinking' when starting to process a message
-                self._state.status = "thinking"
-                if self.agent_server:
-                    logger.info(f"Agent {self.agent_id} state changed to 'thinking' - broadcasting state update")
-                    await self.agent_server.broadcast_state()
-                
-                # Process the message
+                await self.set_status("thinking")
                 response = await self.process_message(message)
-                
-                # Update state to 'responding' when sending a response
-                self._state.status = "responding"
-                if self.agent_server:
-                    logger.info(f"Agent {self.agent_id} state changed to 'responding' - broadcasting state update")
-                    await self.agent_server.broadcast_state()
-                
-                # If there's a response, route it
-                if response:
-                    await self.agent_server.route_message(response)
-                    
-                # Mark the task as done
+                await self.set_status("responding")
+                await self.agent_server.route_message(response)
+                await self.set_status("idle")    
                 self.message_queue.task_done()
-                
-                # Set state back to 'idle' after processing is complete
-                self._state.status = "idle"
-                if self.agent_server:
-                    logger.info(f"Agent {self.agent_id} state changed to 'idle' after processing - broadcasting state update")
-                    await self.agent_server.broadcast_state()
-                
+
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
                 self.message_queue.task_done()
-                
-                # Update state to 'idle' if there was an error
-                self._state.status = "idle"
-                if self.agent_server:
-                    logger.info(f"Agent {self.agent_id} state changed to 'idle' after error - broadcasting state update")
-                    await self.agent_server.broadcast_state()
+                await self.set_status("idle")

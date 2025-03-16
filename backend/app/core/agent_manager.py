@@ -40,12 +40,12 @@ class AgentManager:
         # Broadcast state update if thinking agents list changed
         if state_changed and self.agent_server:
             asyncio.create_task(self.agent_server.broadcast_state())
-            logger.info(f"Agent {agent.agent_id} removed from thinking list - broadcasting state update")
+            logger.debug(f"Agent {agent.agent_id} removed from thinking list - broadcasting state update")
             
     async def run(self):
         """Run the agent manager loop."""
         self.running = True
-        logger.info("Agent manager started")
+        logger.debug("Agent manager started")
         
         while self.running:
             # Process available agents
@@ -65,17 +65,11 @@ class AgentManager:
         try:
             # Check if the agent has messages to process
             if agent.has_messages():
-                # Update agent state to 'responding' when it starts processing messages
-                if agent.state.status != 'responding':
-                    agent.state.status = 'responding'
-                    if self.agent_server:
-                        logger.info(f"Agent {agent.agent_id} state changed to 'responding' - broadcasting state update")
-                        await self.agent_server.broadcast_state()
                 
                 # Process the agent's messages
-                logger.info(f"Agent {agent.agent_id} has messages to process")
+                logger.info(f"Agent {agent.name} ({agent.agent_id}) has messages to process")
                 await agent.process_messages()
-                logger.info(f"Agent {agent.agent_id} has processed messages")
+                logger.info(f"Agent {agent.name} ({agent.agent_id}) has processed messages")
                 
                 # If the agent still has messages, keep it in the thinking list
                 if agent.has_messages():
@@ -87,14 +81,11 @@ class AgentManager:
             
             # Update agent state to 'idle' when it has no more messages to process
             if agent.state.status != 'idle':
-                agent.state.status = 'idle'
-                if self.agent_server:
-                    logger.info(f"Agent {agent.agent_id} state changed to 'idle' - broadcasting state update")
-                    await self.agent_server.broadcast_state()
+                await agent.set_status('idle')
             
         except Exception as e:
             # Handle errors, log them
-            logger.error(f"Error processing agent {agent.agent_id}: {e}", exc_info=True)
+            logger.error(f"Error processing agent {agent.name} ({agent.agent_id}): {e}", exc_info=True)
             
             # Remove from thinking list
             if agent in self.thinking_agents:  # Updated from busy_agents
@@ -102,10 +93,7 @@ class AgentManager:
                 
                 # Update agent state to 'idle' when an error occurs
                 if agent.state.status != 'idle':
-                    agent.state.status = 'idle'
-                    if self.agent_server:
-                        logger.info(f"Agent {agent.agent_id} state changed to 'idle' after error - broadcasting state update")
-                        await self.agent_server.broadcast_state()
+                    await agent.set_status('idle')
             
             # Add back to available after a short delay
             await asyncio.sleep(1)
@@ -117,7 +105,7 @@ class AgentManager:
 
     def add_agent(self, agent: BaseAgent):
         """Add a new agent to the available agents pool."""
-        logger.info(f"Adding new agent: {agent.name} ({agent.agent_id})")
+        logger.debug(f"Adding new agent: {agent.name} ({agent.agent_id})")
         
         # Set the agent server reference
         agent.agent_server = self.agent_server

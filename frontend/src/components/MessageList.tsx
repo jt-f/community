@@ -19,6 +19,7 @@ import {
   Memory as MemoryIcon
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
+import { getAgentName } from '../utils/agentUtils';
 
 // Define keyframes for animations
 const typing = keyframes`
@@ -106,14 +107,10 @@ export const MessageList: React.FC = () => {
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
 
   // Debug logging
-  useEffect(() => {
-    console.log('Current agents:', agents);
-    console.log('Current messages:', messages);
-    
+  useEffect(() => {    
     // More detailed message structure debugging
     if (messages && messages.length > 0) {
       const firstMsg = messages[0] as any; // Use type assertion to avoid TypeScript errors
-      console.log('First message structure:', JSON.stringify(firstMsg, null, 2));
       
       // Check for nested message structure
       if (firstMsg.data && firstMsg.data.message) {
@@ -138,36 +135,6 @@ export const MessageList: React.FC = () => {
       console.error('Error formatting timestamp:', e);
       return 'Invalid time';
     }
-  };
-
-  // Function to get agent name from ID
-  const getAgentName = (agentId?: string): string => {
-    if (!agentId) return 'Unknown';
-    
-    // Check if it's a user ID
-    if (agentId.startsWith('user-')) {
-      return 'You';
-    }
-    
-    // Find the agent in the agents object
-    if (agents && typeof agents === 'object') {
-      // If agents is an object with agent IDs as keys
-      if (agents[agentId] && agents[agentId].name) {
-        return agents[agentId].name;
-      }
-      
-      // If agents is an array-like object, try to find the agent by ID
-      if (Array.isArray(agents) || 'find' in agents) {
-        const agentArray = Array.isArray(agents) ? agents : Object.values(agents);
-        const agent = agentArray.find((a: any) => a.id === agentId);
-        if (agent && agent.name) {
-          return agent.name;
-        }
-      }
-    }
-    
-    // If we can't find the agent, return a formatted version of the ID
-    return `Agent ${agentId.substring(0, 6)}...`;
   };
 
   const getAgentIcon = (senderId?: string) => {
@@ -386,9 +353,6 @@ export const MessageList: React.FC = () => {
             // Get a unique ID for the message
             const messageId = msg.id || msg.message_id || `msg-${index}`;
             
-            // Debug this specific message
-            console.log(`Processing message ${index}:`, JSON.stringify(msg, null, 2));
-            
             // Safely extract sender and receiver IDs
             let senderId;
             let receiverId;
@@ -397,34 +361,29 @@ export const MessageList: React.FC = () => {
             if (msg.data && msg.data.message) {
               senderId = msg.data.message.sender_id;
               receiverId = msg.data.message.receiver_id;
-              console.log(`Message ${index} has WebSocket format with sender: ${senderId}`);
             } 
             // Check for nested message format
             else if (msg.message) {
               senderId = msg.message.sender_id;
               receiverId = msg.message.receiver_id;
-              console.log(`Message ${index} has nested format with sender: ${senderId}`);
             } 
             // Check for direct format
             else {
               senderId = msg.sender_id;
               receiverId = msg.receiver_id;
-              console.log(`Message ${index} has direct format with sender: ${senderId}`);
             }
             
             // Get agent names safely
-            const senderName = getAgentName(senderId);
-            const receiverName = getAgentName(receiverId);
-            console.log(`Message ${index} sender name: ${senderName}, receiver name: ${receiverName}`);
-            
+            const senderName = getAgentName(senderId, agents);
+            const receiverName = getAgentName(receiverId, agents);
+
             // Extract message content safely
             let content;
             try {
               // Check for WebSocket message format
               if (msg.data && msg.data.message && msg.data.message.content) {
                 const rawContent = msg.data.message.content;
-                console.log(`Message ${index} content from data.message:`, rawContent);
-                
+
                 if (typeof rawContent === 'string') {
                   content = rawContent;
                 } else if (typeof rawContent === 'object') {
@@ -438,8 +397,7 @@ export const MessageList: React.FC = () => {
               // Check for nested message format
               else if (msg.message && msg.message.content) {
                 const rawContent = msg.message.content;
-                console.log(`Message ${index} content from message:`, rawContent);
-                
+
                 if (typeof rawContent === 'string') {
                   content = rawContent;
                 } else if (typeof rawContent === 'object') {
@@ -453,7 +411,6 @@ export const MessageList: React.FC = () => {
               // Check for direct format
               else if (msg.content) {
                 const rawContent = msg.content;
-                console.log(`Message ${index} content direct:`, rawContent);
                 
                 if (typeof rawContent === 'string') {
                   content = rawContent;
@@ -472,8 +429,6 @@ export const MessageList: React.FC = () => {
               console.error(`Error extracting content for message ${index}:`, e);
               content = 'Error displaying message';
             }
-            
-            console.log(`Message ${index} final content:`, content);
             
             // Get timestamp
             const timestamp = msg.timestamp || 

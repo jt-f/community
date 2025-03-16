@@ -18,7 +18,7 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time communication."""
     try:
         await websocket.accept()
-        logger.info("New WebSocket connection established")
+        logger.debug("New WebSocket connection established")
         
         # Register the WebSocket with the agent server
         agent_server.register_websocket(websocket)
@@ -26,7 +26,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # Send initial agent list
         agent_list = []
         all_agents = list(agent_manager.available_agents) + list(agent_manager.thinking_agents)
-        logger.info(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
+        logger.debug(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
         
         for agent in all_agents:
             agent_data = {
@@ -69,7 +69,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         websocket.receive_json(),
                         timeout=0.1  # 100ms timeout
                     )
-                    logger.info(f"Received WebSocket message: {data}")
+                    logger.debug(f"Received WebSocket message: {data}")
                     
                     # Validate message structure
                     if not isinstance(data, dict):
@@ -95,7 +95,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
                                 if agent.agent_id == message.receiver_id:
                                     await agent.enqueue_message(message)
-                                    logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")
+                                    logger.debug(f"Routed message to agent {agent.name} ({agent.agent_id})")
                                     break
                     else:
                         # For backward compatibility, try to handle the old format
@@ -114,7 +114,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
                                 if agent.agent_id == message.receiver_id:
                                     await agent.enqueue_message(message)
-                                    logger.info(f"Routed message to agent {agent.name} ({agent.agent_id})")
+                                    logger.debug(f"Routed message to agent {agent.name} ({agent.agent_id})")
                                     break
                         except Exception as e:
                             logger.error(f"Error handling legacy message format: {e}")
@@ -123,25 +123,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     # This is expected, just continue the loop
                     continue
                 except WebSocketDisconnect:
-                    logger.info("WebSocket connection closed by client")
+                    logger.debug("WebSocket connection closed by client")
                     break
                         
             except WebSocketDisconnect:
-                logger.info("WebSocket connection closed by client")
+                logger.debug("WebSocket connection closed by client")
                 break
             except Exception as e:
                 logger.error(f"Error handling WebSocket message: {e}")
                 if websocket.application_state != WebSocketState.CONNECTED:
-                    logger.info("Connection lost during message handling")
+                    logger.debug("Connection lost during message handling")
                     break
                 continue
                 
     except WebSocketDisconnect:
-        logger.info("WebSocket connection closed during handshake")
+        logger.debug("WebSocket connection closed during handshake")
     except Exception as e:
         logger.error(f"WebSocket connection error: {e}")
     finally:
-        logger.info("Cleaning up WebSocket connection")
+        logger.debug("Cleaning up WebSocket connection")
         try:
             # Unregister the WebSocket from the agent server
             agent_server.unregister_websocket(websocket)

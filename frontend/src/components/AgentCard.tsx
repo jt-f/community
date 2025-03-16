@@ -22,21 +22,7 @@ import {
   Code as CodeIcon
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
-
-// Update the interface to match what we have in the store
-interface Agent {
-  id: string;
-  name: string;
-  type: string;
-  status: 'idle' | 'responding' | 'thinking';
-  capabilities: string[];
-  model?: string;
-  provider?: string;
-}
-
-interface AgentCardProps {
-  agent: Agent;
-}
+import { Agent } from '../types/agent';
 
 // Define keyframes for animations
 const flicker = keyframes`
@@ -79,43 +65,102 @@ const getStatusAnimation = (status: string) => {
     case 'thinking':
       return {
         animation: thinkingPulse,
-        color: '#FF9800',
-        scanlineColor: 'rgba(255, 152, 0, 0.1)',
-        showAnimation: true
+        color: '#FFA726',  // Warm orange
+        scanlineColor: 'rgba(255, 167, 38, 0.15)',
+        borderColor: '#FF9800',
+        gradientStart: '#2C1810',  // Deep warm brown
+        gradientEnd: 'rgba(44, 24, 16, 0.85)',
+        glowColor: 'rgba(255, 152, 0, 0.45)',
+        textColor: '#FFB74D',  // Light orange
+        progressBarColors: 'linear-gradient(90deg, #2C1810, #FFA726, #FFB74D)',
+        showAnimation: true,
+        backgroundOpacity: 0.92,
+        backgroundPattern: `repeating-linear-gradient(
+          45deg,
+          rgba(255, 167, 38, 0.1) 0px,
+          rgba(255, 167, 38, 0.1) 2px,
+          transparent 2px,
+          transparent 4px
+        )`
       };
     case 'responding':
       return {
         animation: respondingPulse,
-        color: '#00FF41',
-        scanlineColor: 'rgba(0, 255, 65, 0.1)',
-        showAnimation: true
+        color: '#00E676',  // Bright green
+        scanlineColor: 'rgba(0, 230, 118, 0.15)',
+        borderColor: '#00C853',
+        gradientStart: '#0A2615',  // Deep forest green
+        gradientEnd: 'rgba(10, 38, 21, 0.85)',
+        glowColor: 'rgba(0, 230, 118, 0.45)',
+        textColor: '#69F0AE',  // Light green
+        progressBarColors: 'linear-gradient(90deg, #0A2615, #00E676, #69F0AE)',
+        showAnimation: true,
+        backgroundOpacity: 0.92,
+        backgroundPattern: `repeating-linear-gradient(
+          -45deg,
+          rgba(0, 230, 118, 0.1) 0px,
+          rgba(0, 230, 118, 0.1) 2px,
+          transparent 2px,
+          transparent 4px
+        )`
       };
     case 'idle':
       return {
         animation: 'none',
-        color: '#00BB41',
-        scanlineColor: 'rgba(0, 187, 65, 0.1)',
-        showAnimation: false
+        color: '#4FC3F7',  // Light blue
+        scanlineColor: 'rgba(79, 195, 247, 0.1)',
+        borderColor: '#0288D1',
+        gradientStart: '#0A1926',  // Deep navy
+        gradientEnd: 'rgba(10, 25, 38, 0.85)',
+        glowColor: 'rgba(79, 195, 247, 0.3)',
+        textColor: '#81D4FA',  // Lighter blue
+        progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
+        showAnimation: false,
+        backgroundOpacity: 1,
+        backgroundPattern: 'none'  // Remove the pattern for idle state
       };
     default:
       return {
         animation: 'none',
-        color: '#00BB41',
-        scanlineColor: 'rgba(0, 187, 65, 0.1)',
-        showAnimation: false
+        color: '#4FC3F7',  // Light blue
+        scanlineColor: 'rgba(79, 195, 247, 0.1)',
+        borderColor: '#0288D1',
+        gradientStart: '#0A1926',  // Deep navy
+        gradientEnd: 'rgba(10, 25, 38, 0.85)',
+        glowColor: 'rgba(79, 195, 247, 0.3)',
+        textColor: '#81D4FA',  // Lighter blue
+        progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
+        showAnimation: false,
+        backgroundOpacity: 0.95,
+        backgroundPattern: `repeating-linear-gradient(
+          90deg,
+          rgba(79, 195, 247, 0.05) 0px,
+          rgba(79, 195, 247, 0.05) 1px,
+          transparent 1px,
+          transparent 4px
+        )`
       };
   }
 };
+
+interface AgentCardProps {
+  agent: Agent;
+}
 
 export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   const { sendMessage } = useAgentStore();
   const [isHovered, setIsHovered] = useState(false);
   const [randomDelay, setRandomDelay] = useState(0);
   
+  // Calculate statusSettings directly from agent.status instead of using state
+  const statusSettings = getStatusAnimation(agent.status);
+  
   useEffect(() => {
     // Set a random delay for animations to create a more organic feel
     setRandomDelay(Math.random() * 5);
   }, []);
+  
+  // Remove the useEffect for statusSettings since we're calculating it directly
   
   const handleMessageClick = () => {
     // Implement message sending logic
@@ -132,10 +177,6 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
     console.log(`Refresh agent ${agent.name}`);
   };
   
-  console.log('provider:'+agent.provider);
-  
-  const statusSettings = getStatusAnimation(agent.status);
-  
   return (
     <Card 
       sx={{ 
@@ -143,23 +184,23 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         display: 'flex', 
         flexDirection: 'column',
         position: 'relative',
-        backgroundColor: 'rgba(10, 10, 10, 0.8)',
+        backgroundColor: agent.status === 'idle' ? statusSettings.gradientStart : `rgba(0, 0, 0, ${statusSettings.backgroundOpacity})`,
         backdropFilter: 'blur(5px)',
-        border: '1px solid #003B00',
+        border: `1px solid ${statusSettings.borderColor}`,
         boxShadow: isHovered 
-          ? '0 0 20px rgba(0, 255, 65, 0.4), inset 0 0 15px rgba(0, 255, 65, 0.2)' 
-          : '0 0 15px rgba(0, 255, 65, 0.2), inset 0 0 10px rgba(0, 255, 65, 0.1)',
+          ? `0 0 20px ${statusSettings.glowColor}, inset 0 0 15px ${statusSettings.glowColor}` 
+          : `0 0 15px ${statusSettings.glowColor}, inset 0 0 10px ${statusSettings.glowColor}`,
         transition: 'all 0.3s ease',
         overflow: 'hidden',
         transform: isHovered ? 'translateY(-2px)' : 'none',
-        '&::before': {
+        '&::before': statusSettings.backgroundPattern === 'none' ? {} : {
           content: '""',
           position: 'absolute',
           top: 0,
           left: 0,
           width: '100%',
           height: '100%',
-          background: 'repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.03) 0px, rgba(0, 255, 65, 0.03) 1px, transparent 1px, transparent 2px)',
+          background: statusSettings.backgroundPattern,
           pointerEvents: 'none',
           opacity: 0.5,
           zIndex: 1,
@@ -171,7 +212,11 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           left: 0,
           width: '100%',
           height: '200%',
-          background: `linear-gradient(180deg, transparent 0%, ${statusSettings.scanlineColor} 50%, transparent 100%)`,
+          background: `linear-gradient(180deg, 
+            transparent 0%, 
+            ${statusSettings.scanlineColor} 50%, 
+            transparent 100%
+          )`,
           animation: `${scanline} 4s linear infinite`,
           animationDelay: `${randomDelay}s`,
           pointerEvents: 'none',
@@ -194,8 +239,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             component="h2"
             sx={{ 
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              color: '#00FF41',
-              textShadow: isHovered ? '0 0 10px #00FF41' : '0 0 5px #00FF41',
+              color: statusSettings.textColor,
+              textShadow: isHovered ? `0 0 10px ${statusSettings.color}` : `0 0 5px ${statusSettings.color}`,
               letterSpacing: '0.05em',
               animation: `${flicker} ${5 + randomDelay}s infinite`,
               display: 'flex',
@@ -212,6 +257,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             <Chip 
               label={agent.status} 
               color={
+                agent.status === 'idle' ? 'primary' :
                 agent.status === 'responding' ? 'success' : 
                 agent.status === 'thinking' ? 'warning' : 'default'
               }
@@ -221,12 +267,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 letterSpacing: '0.05em',
                 animation: agent.status !== 'idle' ? `${statusSettings.animation} 2s infinite` : 'none',
                 textShadow: `0 0 5px ${statusSettings.color}`,
-                border: '1px solid #003B00',
-                background: agent.status === 'responding' 
-                  ? 'linear-gradient(to right, #003B00, rgba(0, 59, 0, 0.7))' 
-                  : agent.status === 'thinking'
-                    ? 'linear-gradient(to right, #3A2F0B, rgba(58, 47, 11, 0.7))'
-                    : 'linear-gradient(to right, #002B00, rgba(0, 43, 0, 0.7))',
+                border: `1px solid ${statusSettings.borderColor}`,
+                background: `linear-gradient(to right, ${statusSettings.gradientStart}, ${statusSettings.gradientEnd})`,
                 boxShadow: `0 0 5px ${statusSettings.color}`,
                 height: '20px', // Smaller height
                 '& .MuiChip-label': {
@@ -243,8 +285,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                   mt: 0.25, // Reduced margin
                   textAlign: 'right',
                   fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-                  color: 'rgba(0, 255, 65, 0.7)',
-                  textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
+                  color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
+                  textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
                   letterSpacing: '0.05em',
                   fontSize: '0.65rem', // Smaller font
                   lineHeight: 1.1 // Tighter line height
@@ -262,8 +304,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             color="text.secondary"
             sx={{ 
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              color: 'rgba(0, 255, 65, 0.7)',
-              textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
+              color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
+              textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
               letterSpacing: '0.05em',
               fontSize: '0.65rem', // Smaller font
               lineHeight: 1.1 // Tighter line height
@@ -282,18 +324,18 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                   fontSize: '0.6rem', // Smaller font
                   fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
                   letterSpacing: '0.05em',
-                  border: '1px solid #003B00',
+                  border: `1px solid ${statusSettings.borderColor}`,
                   background: 'transparent',
-                  color: '#00FF41',
-                  textShadow: '0 0 3px rgba(0, 255, 65, 0.5)',
+                  color: statusSettings.textColor,
+                  textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
                   transition: 'all 0.3s ease',
                   height: '18px', // Smaller height
                   '& .MuiChip-label': {
                     padding: '0 4px', // Reduced padding
                   },
                   '&:hover': {
-                    boxShadow: '0 0 5px #00FF41',
-                    borderColor: '#00FF41',
+                    boxShadow: `0 0 5px ${statusSettings.color}`,
+                    borderColor: statusSettings.color,
                   }
                 }}
               />
@@ -305,8 +347,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           color="text.secondary" 
           sx={{ 
             fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-            color: 'rgba(0, 255, 65, 0.7)',
-            textShadow: '0 0 2px rgba(0, 255, 65, 0.3)',
+            color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
+            textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
             letterSpacing: '0.05em',
             mt: 0.5, // Reduced margin
             fontSize: '0.65rem', // Smaller font
@@ -316,27 +358,29 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           Type: {agent.type}
         </Typography>
         
-        {/* Add a subtle progress bar for visual effect */}
-        <Box sx={{ mt: 1, mb: 0 }}>
-          <LinearProgress 
-            variant="indeterminate" 
-            sx={{
-              height: '2px',
-              borderRadius: '1px',
-              backgroundColor: '#003B00',
-              '.MuiLinearProgress-bar': {
-                background: 'linear-gradient(90deg, #003B00, #00FF41, #39FF14)',
-                boxShadow: '0 0 5px #00FF41',
-              }
-            }}
-          />
-        </Box>
+        {/* Add a subtle progress bar for visual effect when not idle */}
+        {agent.status !== 'idle' && (
+          <Box sx={{ mt: 1, mb: 0 }}>
+            <LinearProgress 
+              variant="indeterminate" 
+              sx={{
+                height: '2px',
+                borderRadius: '1px',
+                backgroundColor: statusSettings.gradientStart,
+                '.MuiLinearProgress-bar': {
+                  background: statusSettings.progressBarColors,
+                  boxShadow: `0 0 5px ${statusSettings.color}`,
+                }
+              }}
+            />
+          </Box>
+        )}
       </CardContent>
       
       <CardActions sx={{ 
         justifyContent: 'flex-end', 
-        borderTop: '1px solid rgba(0, 59, 0, 0.5)',
-        background: 'rgba(0, 10, 0, 0.3)',
+        borderTop: `1px solid ${statusSettings.borderColor}`,
+        background: `rgba(${statusSettings.gradientStart.replace(/[^\d,]/g, '')}, 0.3)`,
         position: 'relative',
         zIndex: 3,
         p: 0.5, // Reduced padding
@@ -347,13 +391,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           onClick={handleMessageClick} 
           title="Send Message"
           sx={{
-            color: '#00FF41',
+            color: statusSettings.textColor,
             transition: 'all 0.3s ease',
             padding: '4px', // Smaller padding
             '&:hover': {
-              backgroundColor: 'rgba(0, 255, 65, 0.1)',
+              backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
               transform: 'scale(1.1)',
-              boxShadow: '0 0 10px #00FF41',
+              boxShadow: `0 0 10px ${statusSettings.color}`,
             }
           }}
         >
@@ -364,13 +408,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           onClick={handleRefreshClick} 
           title="Refresh Agent"
           sx={{
-            color: '#00FF41',
+            color: statusSettings.textColor,
             transition: 'all 0.3s ease',
             padding: '4px', // Smaller padding
             '&:hover': {
-              backgroundColor: 'rgba(0, 255, 65, 0.1)',
+              backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
               transform: 'scale(1.1)',
-              boxShadow: '0 0 10px #00FF41',
+              boxShadow: `0 0 10px ${statusSettings.color}`,
             }
           }}
         >
@@ -381,7 +425,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           onClick={handleDeleteClick} 
           title="Delete Agent"
           sx={{
-            color: '#00FF41',
+            color: statusSettings.textColor,
             transition: 'all 0.3s ease',
             padding: '4px', // Smaller padding
             '&:hover': {

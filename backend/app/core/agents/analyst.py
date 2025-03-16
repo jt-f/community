@@ -41,7 +41,7 @@ class AnalystAgent(BaseAgent):
     async def process_message(self, message: Message) -> Optional[Message]:
         """Process a message and generate an analyst response."""
         try:
-            logger.info(f"Analyst agent processing message: {message.content}")
+            logger.debug(f"Analyst agent processing message: {message.content}")
             
             # Extract the message text
             message_text = message.content.get("text", "")
@@ -57,7 +57,7 @@ class AnalystAgent(BaseAgent):
             
             # Generate a response using the LLM
             response_text = await self._generate_response(prompt)
-            logger.info(f"Analyst agent response: {response_text}")
+            logger.debug(f"Analyst agent response: {response_text}")
             # Create a response message
             response = Message(
                 sender_id=self.agent_id,
@@ -98,10 +98,10 @@ class AnalystAgent(BaseAgent):
             if parameters.provider is None:
                 parameters.provider = self.model_provider
         
-        logger.info(f"Generating response on behalf of {self.name}")
-        logger.info(f"Using model: {model}")
-        logger.info(f"Using parameters: {parameters}")
-        logger.info(f"Using provider: {parameters.provider}")
+        logger.debug(f"Generating response on behalf of {self.name}")
+        logger.debug(f"Using model: {model}")
+        logger.debug(f"Using parameters: {parameters}")
+        logger.debug(f"Using provider: {parameters.provider}")
         
         # Use the model client with the specified provider
         async with model_client as client:

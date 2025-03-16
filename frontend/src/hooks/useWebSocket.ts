@@ -82,6 +82,9 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
 
     socket.onmessage = (event) => {
       try {
+        const receiveTime = new Date().getTime();
+        console.log(`WebSocket message received at ${receiveTime}ms:`, event.data);
+        
         const data = JSON.parse(event.data) as WebSocketMessageData;
         
         switch (data.type) {
