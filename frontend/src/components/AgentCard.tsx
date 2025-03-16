@@ -230,8 +230,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         flexGrow: 1, 
         position: 'relative', 
         zIndex: 3, 
-        p: 1.5, // Reduced padding
-        '&:last-child': { pb: 1.5 } // Override default padding
+        p: 1, // Reduced padding further
+        '&:last-child': { pb: 1 } // Override default padding
       }}>
         {/* Agent Name at the top */}
         <Typography 
@@ -245,20 +245,20 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             animation: `${flicker} ${5 + randomDelay}s infinite`,
             display: 'flex',
             alignItems: 'center',
-            gap: '4px', // Reduced gap
-            fontSize: '1rem', // Slightly larger for emphasis
-            lineHeight: 1.2, // Tighter line height
-            mb: 1, // Add margin below name
+            gap: '2px', // Reduced gap
+            fontSize: '0.9rem', // Smaller font
+            lineHeight: 1.1, // Tighter line height
+            mb: 0.5, // Reduced margin
             textAlign: 'center',
             width: '100%',
             justifyContent: 'center'
           }}
         >
-          <CodeIcon sx={{ fontSize: '0.9em', opacity: 0.8 }} />
+          <CodeIcon sx={{ fontSize: '0.8em', opacity: 0.8 }} />
           {agent.name}
         </Typography>
 
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.5 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.25 }}>
           {/* Model and Provider info */}
           <Typography 
             variant="caption" 
@@ -268,8 +268,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
               textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
               letterSpacing: '0.05em',
-              fontSize: '0.65rem', // Smaller font
-              lineHeight: 1.1 // Tighter line height
+              fontSize: '0.6rem', // Smaller font
+              lineHeight: 1 // Tighter line height
             }}
           >
             {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
@@ -292,16 +292,16 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               border: `1px solid ${statusSettings.borderColor}`,
               background: `linear-gradient(to right, ${statusSettings.gradientStart}, ${statusSettings.gradientEnd})`,
               boxShadow: `0 0 5px ${statusSettings.color}`,
-              height: '20px', // Smaller height
+              height: '16px', // Smaller height
               '& .MuiChip-label': {
-                padding: '0 6px', // Reduced padding
-                fontSize: '0.65rem' // Smaller font
+                padding: '0 4px', // Reduced padding
+                fontSize: '0.6rem' // Smaller font
               }
             }}
           />
         </Box>
         
-        <Box sx={{ mt: 1 }}>
+        <Box sx={{ mt: 0.5 }}>
           <Typography 
             variant="caption" 
             color="text.secondary"
@@ -310,13 +310,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
               color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
               textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
               letterSpacing: '0.05em',
-              fontSize: '0.65rem', // Smaller font
-              lineHeight: 1.1 // Tighter line height
+              fontSize: '0.6rem', // Smaller font
+              lineHeight: 1 // Tighter line height
             }}
           >
             Capabilities:
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.25, mt: 0.25 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.2, mt: 0.2 }}>
             {agent.capabilities.map((cap, index) => (
               <Chip
                 key={index}
@@ -324,7 +324,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                 size="small"
                 variant="outlined"
                 sx={{ 
-                  fontSize: '0.6rem', // Smaller font
+                  fontSize: '0.55rem', // Smaller font
                   fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
                   letterSpacing: '0.05em',
                   border: `1px solid ${statusSettings.borderColor}`,
@@ -332,9 +332,9 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
                   color: statusSettings.textColor,
                   textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
                   transition: 'all 0.3s ease',
-                  height: '18px', // Smaller height
+                  height: '16px', // Smaller height
                   '& .MuiChip-label': {
-                    padding: '0 4px', // Reduced padding
+                    padding: '0 3px', // Reduced padding
                   },
                   '&:hover': {
                     boxShadow: `0 0 5px ${statusSettings.color}`,
@@ -353,9 +353,9 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
             textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
             letterSpacing: '0.05em',
-            mt: 0.5, // Reduced margin
-            fontSize: '0.65rem', // Smaller font
-            lineHeight: 1.1 // Tighter line height
+            mt: 0.25, // Reduced margin
+            fontSize: '0.6rem', // Smaller font
+            lineHeight: 1 // Tighter line height
           }}
         >
           Type: {agent.type}
@@ -363,11 +363,11 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         
         {/* Add a subtle progress bar for visual effect when not idle */}
         {agent.status !== 'idle' && (
-          <Box sx={{ mt: 1, mb: 0 }}>
+          <Box sx={{ mt: 0.5, mb: 0 }}>
             <LinearProgress 
               variant="indeterminate" 
               sx={{
-                height: '2px',
+                height: '1px',
                 borderRadius: '1px',
                 backgroundColor: statusSettings.gradientStart,
                 '.MuiLinearProgress-bar': {
@@ -386,8 +386,8 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         background: `rgba(${statusSettings.gradientStart.replace(/[^\d,]/g, '')}, 0.3)`,
         position: 'relative',
         zIndex: 3,
-        p: 0.5, // Reduced padding
-        minHeight: '36px' // Smaller height
+        p: 0.25, // Reduced padding
+        minHeight: '28px' // Smaller height
       }}>
         <IconButton 
           size="small" 
@@ -396,7 +396,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: statusSettings.textColor,
             transition: 'all 0.3s ease',
-            padding: '4px', // Smaller padding
+            padding: '2px', // Smaller padding
             '&:hover': {
               backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
               transform: 'scale(1.1)',
@@ -404,7 +404,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <MessageIcon fontSize="small" />
+          <MessageIcon sx={{ fontSize: '0.9rem' }} />
         </IconButton>
         <IconButton 
           size="small" 
@@ -413,7 +413,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: statusSettings.textColor,
             transition: 'all 0.3s ease',
-            padding: '4px', // Smaller padding
+            padding: '2px', // Smaller padding
             '&:hover': {
               backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
               transform: 'scale(1.1)',
@@ -421,7 +421,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <RefreshIcon fontSize="small" />
+          <RefreshIcon sx={{ fontSize: '0.9rem' }} />
         </IconButton>
         <IconButton 
           size="small" 
@@ -430,7 +430,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           sx={{
             color: statusSettings.textColor,
             transition: 'all 0.3s ease',
-            padding: '4px', // Smaller padding
+            padding: '2px', // Smaller padding
             '&:hover': {
               backgroundColor: 'rgba(255, 7, 58, 0.1)',
               transform: 'scale(1.1)',
@@ -439,7 +439,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
             }
           }}
         >
-          <DeleteIcon fontSize="small" />
+          <DeleteIcon sx={{ fontSize: '0.9rem' }} />
         </IconButton>
       </CardActions>
     </Card>

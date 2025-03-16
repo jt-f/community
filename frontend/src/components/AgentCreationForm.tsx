@@ -136,6 +136,8 @@ export const AgentCreationForm: React.FC = () => {
         type: agentType,
         status: 'idle',
         capabilities: selectedCapabilities,
+        model,
+        provider
       });
       
     } catch (err) {

@@ -257,16 +257,17 @@ export const useAgentStore = create<AgentStore>((set, get) => {
             }));
           } else if (data.type === 'state_update') {
             // Handle state updates
-            console.log('Received state update:', data.data);
+            console.log(`[${getTimestamp()}] Received state update:`, data.data);
             
             if (data.data) {
-              const agentMap: Record<string, Agent> = {};
+              // Get current agents to preserve any that aren't in the update
+              const currentAgents = get().agents;
+              const updatedAgents: Record<string, Agent> = { ...currentAgents };
               
               // Process each agent in the state update
               Object.entries(data.data).forEach(([agentId, agentState]: [string, any]) => {
-
                 // Convert agent state to agent object
-                agentMap[agentId] = {
+                updatedAgents[agentId] = {
                   id: agentId,
                   name: agentState.name || 'Unknown Agent',
                   type: (agentState.type || 'unknown').toLowerCase(),
@@ -277,8 +278,8 @@ export const useAgentStore = create<AgentStore>((set, get) => {
                 };
               });
               
-              console.log('Setting updated agents:', agentMap);
-              set({ agents: agentMap });
+              console.log(`[${getTimestamp()}] Setting updated agents:`, updatedAgents);
+              set({ agents: updatedAgents });
             }
           }
           
@@ -339,9 +340,28 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         // Add message ID to processed set
         get().processedMessageIds.add(messageId);
         
-        set((state) => ({
-          messages: [...state.messages, newMessage]
-        }));
+        // Update the agent status to 'thinking' when a message is sent to it
+        const currentAgents = get().agents;
+        if (currentAgents[agentId]) {
+          set((state) => ({
+            messages: [...state.messages, newMessage],
+            agents: {
+              ...state.agents,
+              [agentId]: {
+                ...state.agents[agentId],
+                status: 'thinking'
+              }
+            }
+          }));
+        } else {
+          // If the agent doesn't exist in the store, just add the message without updating agents
+          set((state) => ({
+            messages: [...state.messages, newMessage]
+          }));
+          
+          // Log a warning that the agent wasn't found
+          console.warn(`[${getTimestamp()}] Warning: Agent ${agentId} not found in store when sending message`);
+        }
       }
     },
     
@@ -396,12 +416,27 @@ export const useAgentStore = create<AgentStore>((set, get) => {
     },
     
     addAgent: (agent) => {
+      console.log(`[${getTimestamp()}] Adding agent to store:`, agent);
+      
+      // Ensure the agent has all required fields
+      const completeAgent: Agent = {
+        id: agent.id,
+        name: agent.name || 'Unknown Agent',
+        type: (agent.type || 'unknown').toLowerCase(),
+        status: agent.status || 'idle',
+        capabilities: agent.capabilities || [],
+        model: agent.model,
+        provider: agent.provider
+      };
+      
       set((state) => ({
         agents: {
           ...state.agents,
-          [agent.id]: agent
+          [agent.id]: completeAgent
         }
       }));
+      
+      console.log(`[${getTimestamp()}] Updated agents store:`, get().agents);
     }
   };
 }); 
