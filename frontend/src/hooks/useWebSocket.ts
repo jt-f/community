@@ -134,6 +134,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
         }
       };
       socket.send(JSON.stringify(fullMessage));
+      console.log(`WebSocket message sent to backend:`, fullMessage);
     } else {
       throw new Error('WebSocket not connected');
     }

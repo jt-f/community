@@ -32,12 +32,45 @@ interface AgentOptions {
   capabilities: AgentOption[];
 }
 
+// Error boundary component to catch rendering errors
+class ErrorBoundaryWrapper extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("Error caught by boundary:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Box p={3}>
+          <Typography color="error">
+            Something went wrong. Please try again later.
+          </Typography>
+        </Box>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export const AgentCreationForm: React.FC = () => {
   const { addAgent } = useAgentStore();
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<AgentOptions | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
   // Form state
   const [name, setName] = useState('');
@@ -60,7 +93,8 @@ export const AgentCreationForm: React.FC = () => {
         setOptions(data);
       } catch (err) {
         console.error('Error fetching agent options:', err);
-        setError(err instanceof Error ? err.message : 'An unknown error occurred');
+        const message = err instanceof Error ? err.message : 'An unknown error occurred';
+        setErrorMessage(message);
       } finally {
         setLoading(false);
       }
@@ -86,7 +120,7 @@ export const AgentCreationForm: React.FC = () => {
     event.preventDefault();
     
     if (!name || !agentType || !provider || !model || selectedCapabilities.length === 0) {
-      setError('Please fill in all required fields');
+      setErrorMessage('Please fill in all required fields');
       return;
     }
     
@@ -120,7 +154,7 @@ export const AgentCreationForm: React.FC = () => {
       }
       
       const result = await response.json();
-      setSuccess(`Agent ${name} created successfully!`);
+      setSuccessMessage(`Agent ${name} created successfully!`);
       
       // Reset form
       setName('');
@@ -141,7 +175,9 @@ export const AgentCreationForm: React.FC = () => {
       });
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      console.error('Error creating agent:', err);
+      const message = err instanceof Error ? err.message : 'An unknown error occurred';
+      setErrorMessage(message);
     } finally {
       setLoading(false);
     }
@@ -155,136 +191,173 @@ export const AgentCreationForm: React.FC = () => {
     );
   }
   
+  // Ensure we have valid data to render
+  const safeOptions = options || {
+    agent_types: [],
+    providers: [],
+    models: {},
+    capabilities: []
+  };
+  
   return (
-    <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-      <Typography variant="h5" gutterBottom>
-        Create New Agent
-      </Typography>
-      
-      <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
-        <TextField
-          fullWidth
-          label="Agent Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          margin="normal"
-          required
-        />
+    <ErrorBoundaryWrapper>
+      <Paper 
+        elevation={3} 
+        sx={{ 
+          p: 3, 
+          mb: 3, 
+          maxHeight: '80vh', 
+          overflow: 'auto',
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(0, 255, 65, 0.2)',
+            borderRadius: '4px',
+          },
+          '&::-webkit-scrollbar-track': {
+            backgroundColor: 'rgba(0, 0, 0, 0.1)',
+          }
+        }}
+      >
+        <Typography variant="h5" gutterBottom>
+          Create New Agent
+        </Typography>
         
-        <FormControl fullWidth margin="normal" required>
-          <InputLabel>Agent Type</InputLabel>
-          <Select
-            value={agentType}
-            onChange={(e) => setAgentType(e.target.value)}
-            label="Agent Type"
-          >
-            {options?.agent_types.map((type) => (
-              <MenuItem key={type.id} value={type.id}>
-                <Box>
-                  <Typography variant="body1">{type.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {type.description}
-                  </Typography>
+        <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
+          <TextField
+            fullWidth
+            label="Agent Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            margin="dense"
+            required
+            size="small"
+          />
+          
+          <FormControl fullWidth margin="dense" required size="small">
+            <InputLabel>Agent Type</InputLabel>
+            <Select
+              value={agentType}
+              onChange={(e) => setAgentType(e.target.value)}
+              label="Agent Type"
+            >
+              {safeOptions.agent_types.map((type) => (
+                <MenuItem key={type.id} value={type.id}>
+                  <Box>
+                    <Typography variant="body2">{type.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      {type.description}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <FormControl fullWidth margin="dense" required size="small">
+            <InputLabel>Provider</InputLabel>
+            <Select
+              value={provider}
+              onChange={handleProviderChange}
+              label="Provider"
+            >
+              {safeOptions.providers.map((p) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <FormControl fullWidth margin="dense" required disabled={!provider} size="small">
+            <InputLabel>Model</InputLabel>
+            <Select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              label="Model"
+            >
+              {provider && safeOptions.models[provider]?.map((m) => (
+                <MenuItem key={m} value={m}>
+                  {m}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <FormControl fullWidth margin="dense" required size="small">
+            <InputLabel>Capabilities</InputLabel>
+            <Select
+              multiple
+              value={selectedCapabilities}
+              onChange={handleCapabilityChange}
+              input={<OutlinedInput label="Capabilities" />}
+              renderValue={(selected) => (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                  {selected.map((value) => {
+                    const capability = safeOptions.capabilities.find(c => c.id === value);
+                    return (
+                      <Chip key={value} label={capability?.name || value} size="small" />
+                    );
+                  })}
                 </Box>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        
-        <FormControl fullWidth margin="normal" required>
-          <InputLabel>Provider</InputLabel>
-          <Select
-            value={provider}
-            onChange={handleProviderChange}
-            label="Provider"
+              )}
+              MenuProps={{
+                PaperProps: {
+                  style: {
+                    maxHeight: 224,
+                  },
+                },
+              }}
+            >
+              {safeOptions.capabilities.map((capability) => (
+                <MenuItem key={capability.id} value={capability.id}>
+                  <Box>
+                    <Typography variant="body2">{capability.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      {capability.description}
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            sx={{ mt: 2 }}
+            disabled={loading}
+            size="medium"
           >
-            {options?.providers.map((p) => (
-              <MenuItem key={p.id} value={p.id}>
-                {p.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+            {loading ? <CircularProgress size={24} /> : 'Create Agent'}
+          </Button>
+        </Box>
         
-        <FormControl fullWidth margin="normal" required disabled={!provider}>
-          <InputLabel>Model</InputLabel>
-          <Select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            label="Model"
-          >
-            {provider && options?.models[provider]?.map((m) => (
-              <MenuItem key={m} value={m}>
-                {m}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        
-        <FormControl fullWidth margin="normal" required>
-          <InputLabel>Capabilities</InputLabel>
-          <Select
-            multiple
-            value={selectedCapabilities}
-            onChange={handleCapabilityChange}
-            input={<OutlinedInput label="Capabilities" />}
-            renderValue={(selected) => (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {selected.map((value) => {
-                  const capability = options?.capabilities.find(c => c.id === value);
-                  return (
-                    <Chip key={value} label={capability?.name || value} />
-                  );
-                })}
-              </Box>
-            )}
-          >
-            {options?.capabilities.map((capability) => (
-              <MenuItem key={capability.id} value={capability.id}>
-                <Box>
-                  <Typography variant="body1">{capability.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {capability.description}
-                  </Typography>
-                </Box>
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        
-        <Button
-          type="submit"
-          variant="contained"
-          color="primary"
-          startIcon={<AddIcon />}
-          sx={{ mt: 3 }}
-          disabled={loading}
+        <Snackbar 
+          open={!!errorMessage} 
+          autoHideDuration={6000} 
+          onClose={() => setErrorMessage(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
-          {loading ? <CircularProgress size={24} /> : 'Create Agent'}
-        </Button>
-      </Box>
-      
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
-        onClose={() => setError(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setError(null)} severity="error">
-          {error}
-        </Alert>
-      </Snackbar>
-      
-      <Snackbar 
-        open={!!success} 
-        autoHideDuration={6000} 
-        onClose={() => setSuccess(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={() => setSuccess(null)} severity="success">
-          {success}
-        </Alert>
-      </Snackbar>
-    </Paper>
+          <Alert onClose={() => setErrorMessage(null)} severity="error">
+            {errorMessage}
+          </Alert>
+        </Snackbar>
+        
+        <Snackbar 
+          open={!!successMessage} 
+          autoHideDuration={6000} 
+          onClose={() => setSuccessMessage(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert onClose={() => setSuccessMessage(null)} severity="success">
+            {successMessage}
+          </Alert>
+        </Snackbar>
+      </Paper>
+    </ErrorBoundaryWrapper>
   );
 }; 

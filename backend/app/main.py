@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from .api.websocket import router as ws_router
 from .api.rest import router as rest_router
-from .core.server import agent_server
-from .utils.logger import get_logger
-from .core.instances import agent_manager  # Import from instances instead
 
+from .utils.logger import get_logger
+
+from .core.instances import agent_server
 from .core.models import Message
 
 logger = get_logger(__name__)
@@ -70,6 +70,7 @@ def handle_exception(loop, context):
 @app.on_event("startup")
 async def startup_event():
     """Start the agent server on application startup."""
+    logger.info("Application startup...")
     # Get the current event loop
     loop = asyncio.get_running_loop()
     
@@ -85,7 +86,8 @@ async def startup_event():
     
     # Start the agent server
     await agent_server.start()
-    
+    agent_manager = agent_server.agent_manager
+
     # Ensure agent_manager has server reference
     if agent_manager.agent_server is None:
         agent_manager.agent_server = agent_server
@@ -114,19 +116,15 @@ async def startup_event():
     # Start the agent manager in the background
     asyncio.create_task(agent_manager.run())
 
-    logger.debug("Application startup complete")
+    logger.info("Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop the agent server on application shutdown."""
     await agent_server.stop()
-    agent_manager.stop()
+
     logger.debug("Application shutdown complete")
 
-# Function to broadcast messages to all connected clients
-async def broadcast_message(message: Message):
-    for connection in active_connections:
-        await connection.send_json(message.dict())
 
 if __name__ == "__main__":
     import uvicorn

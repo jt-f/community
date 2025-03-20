@@ -10,6 +10,7 @@ import time
 
 from ..models import Message, WebSocketMessage, AgentState, AgentConfig
 from ...utils.logger import get_logger
+from ...utils.message_utils import truncate_message
 
 logger = get_logger(__name__)
 
@@ -75,7 +76,7 @@ class BaseAgent(ABC):
     
     async def add_message(self, message: Message) -> None:
         """Add a message to the agent's queue."""
-        logger.debug(f"Agent {self.agent_id} received message: {message.content}")
+        logger.debug(f"Agent {self.agent_id} received message: {truncate_message(message.content)}")
         await self.message_queue.put(message)
     
     async def get_next_message(self) -> Optional[Message]:
@@ -97,38 +98,7 @@ class BaseAgent(ABC):
         Yields messages that should be sent to other agents.
         """
         pass
-    
-    async def run(self) -> AsyncGenerator[Optional[Message], None]:
-        """Main agent processing loop."""
-        logger.debug(f"{self.agent_id} Running agent {self.name}")
-        
-        # First check for any messages in the queue
-        message = await self.get_next_message()
-        if message:
-            try:
-                response = await self.process_message(message)
-                logger.debug(f"{self.agent_id} Processed message: {message.content} -> {response.content if response else 'No response'}")
-                if response:
-                    yield response
-            except Exception as e:
-                logger.error(f"{self.agent_id} Error processing message: {e} for message: {message.content}")
-                return
-        
-        # Then run one think cycle if it's time
-        if self.should_think():
-            logger.debug(f"{self.agent_id} Running think cycle")
-            try:
-                async for thought in self.think():
-                    if thought:
-                        yield thought
-                    else:
-                        logger.debug(f"{self.agent_id} No thought")
-            except Exception as e:
-                logger.error(f"Error in think cycle: {e}")
-                return
-        
-        # Sleep briefly to prevent CPU overuse
-        await asyncio.sleep(0.1)
+
     
     def should_think(self) -> bool:
         """Determine if the agent should run a thinking cycle."""
@@ -151,9 +121,7 @@ class BaseAgent(ABC):
         """Get the current think counter."""
         return self._think_counter
 
-    async def enqueue_message(self, message: Message):
-        """Add a message to this agent's queue."""
-        await self.message_queue.put(message)
+
         
     @classmethod
     def clear_registries(cls):
@@ -169,7 +137,6 @@ class BaseAgent(ABC):
         """Set the status of the agent."""
         self._state.status = status
         if self.agent_server:
-            logger.info(f"Agent {self.name} ({self.agent_id}) state changed to '{status}' - broadcasting state update")
             await self.agent_server.broadcast_state()
 
     async def process_messages(self):
@@ -178,12 +145,10 @@ class BaseAgent(ABC):
             message = await self.message_queue.get()
             
             try:
-                await self.set_status("thinking")
                 response = await self.process_message(message)
-                await self.set_status("responding")
-                await self.agent_server.route_message(response)
-                await self.set_status("idle")    
+                await self.agent_server.route_message(response) 
                 self.message_queue.task_done()
+                await self.set_status("idle")   
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)

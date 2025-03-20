@@ -11,6 +11,7 @@ from .base import BaseAgent
 from ..models import Message, WebSocketMessage
 from ...utils.logger import get_logger
 from ...utils.model_client import model_client, ModelProvider, GenerationParameters
+from ...utils.message_utils import truncate_message
 
 # Import ANALYST_CONFIG instead of settings
 from .config import ANALYST_CONFIG
@@ -39,47 +40,47 @@ class AnalystAgent(BaseAgent):
         self.agent_server = None  # Will be set by the agent_manager
     
     async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message and generate an analyst response."""
+        """Process a message and generate a response."""
         try:
-            logger.debug(f"Analyst agent processing message: {message.content}")
+            # Set status to thinking
+            await self.set_status("thinking")
+
+            # Log the message
+            logger.debug(f"Analyst agent {self.name} processing message: {truncate_message(message)}")
             
-            # Extract the message text
-            message_text = message.content.get("text", "")
+            # Format the prompt based on the message type
+            prompt = self._format_prompt(message)
             
-            # Select the appropriate prompt template based on message type
-            prompt_template = self.prompts.get(
-                message.message_type, 
-                self.prompts.get("default", "You are a helpful assistant. Please respond to the following: {message}")
-            )
-            
-            # Format the prompt with the message text
-            prompt = prompt_template.format(message=message_text)
-            
-            # Generate a response using the LLM
+            # Generate a response
             response_text = await self._generate_response(prompt)
-            logger.debug(f"Analyst agent response: {response_text}")
+            
+            # Set status to responding
+            await self.set_status("responding")
+            
             # Create a response message
             response = Message(
                 sender_id=self.agent_id,
                 receiver_id=message.sender_id,
                 content={"text": response_text},
-                message_type="response",
-                timestamp=datetime.now().isoformat()
+                message_type="text"
             )
-            logger.info(f"Analyst agent response Message: {response}")
-            return response
             
+            logger.debug(f"Analyst agent {self.name} generated response: {truncate_message(response)}")
+            
+            return response
         except Exception as e:
-            logger.error(f"Error processing message in AnalystAgent: {str(e)}")
-            error_message = Message(
+            logger.error(f"Error processing message in analyst agent: {e}", exc_info=True)
+            
+            # Set status back to idle on error
+            await self.set_status("idle")
+            
+            # Return an error message
+            return Message(
                 sender_id=self.agent_id,
                 receiver_id=message.sender_id,
-                content={"text": f"Error processing your request: {str(e)}"},
-                message_type="error",
-                timestamp=datetime.now().isoformat()
+                content={"text": f"I encountered an error: {str(e)}"},
+                message_type="error"
             )
-            
-            return error_message
     
     async def _generate_response(self, prompt: str, model: str = None, parameters: Union[Dict[str, Any], GenerationParameters] = None) -> str:
         """Generate a response using the LLM."""
@@ -133,3 +134,17 @@ class AnalystAgent(BaseAgent):
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
         """Analyst agents do not think autonomously."""
         yield None
+
+    def _format_prompt(self, message: Message) -> str:
+        """Format the prompt based on the message type."""
+        # Extract the message text
+        message_text = message.content.get("text", "")
+        
+        # Select the appropriate prompt template based on message type
+        prompt_template = self.prompts.get(
+            message.message_type, 
+            self.prompts.get("default", "You are a helpful assistant. Please respond to the following: {message}")
+        )
+        
+        # Format the prompt with the message text
+        return prompt_template.format(message=message_text)

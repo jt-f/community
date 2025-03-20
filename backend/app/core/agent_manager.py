@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from app.core.models import Message, WebSocketMessage
 from app.core.agents.base import BaseAgent
 from ..utils.logger import get_logger
+from ..utils.message_utils import truncate_message
 
 logger = get_logger(__name__)
 
@@ -22,9 +23,22 @@ class AgentManager:
         
     def register_agent(self, agent: BaseAgent):
         """Register a new agent with the manager."""
+        logger.debug(f"Registering agent {agent.name} ({agent.agent_id}) with agent manager")
+        
         # Set the agent_server reference in the agent
         agent.agent_server = self.agent_server
+        
+        # Check if agent is already registered
+        for existing_agent in self.available_agents + self.thinking_agents:
+            if existing_agent.agent_id == agent.agent_id:
+                logger.warning(f"Agent {agent.agent_id} already registered with agent manager")
+                return
+        
+        # Add to available agents
         self.available_agents.append(agent)
+        logger.debug(f"Agent {agent.name} added to available agents")
+        logger.debug(f"Total available agents: {len(self.available_agents)}")
+        logger.debug(f"Total thinking agents: {len(self.thinking_agents)}")
         
     def unregister_agent(self, agent: BaseAgent):
         """Unregister an agent from the manager."""
@@ -40,7 +54,7 @@ class AgentManager:
         # Broadcast state update if thinking agents list changed
         if state_changed and self.agent_server:
             asyncio.create_task(self.agent_server.broadcast_state())
-            logger.debug(f"Agent {agent.agent_id} removed from thinking list - broadcasting state update")
+            logger.debug(f"Agent {agent.name} removed from thinking list - broadcasting state update")
             
     async def run(self):
         """Run the agent manager loop."""
@@ -67,9 +81,9 @@ class AgentManager:
             if agent.has_messages():
                 
                 # Process the agent's messages
-                logger.info(f"Agent {agent.name} ({agent.agent_id}) has messages to process")
+                logger.debug(f"Agent {agent.name} has messages to process")
                 await agent.process_messages()
-                logger.info(f"Agent {agent.name} ({agent.agent_id}) has processed messages")
+                logger.debug(f"Agent {agent.name} has processed messages")
                 
                 # If the agent still has messages, keep it in the thinking list
                 if agent.has_messages():
@@ -107,10 +121,7 @@ class AgentManager:
         """Add a new agent to the available agents pool."""
         logger.debug(f"Adding new agent: {agent.name} ({agent.agent_id})")
         
-        # Set the agent server reference
-        agent.agent_server = self.agent_server
-        
-        # Add to available agents
-        self.available_agents.append(agent)
+        # Use the register_agent method to avoid code duplication
+        self.register_agent(agent)
         
         return agent 

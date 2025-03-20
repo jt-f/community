@@ -255,7 +255,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           }}
         >
           <CodeIcon sx={{ fontSize: '0.8em', opacity: 0.8 }} />
-          {agent.name}
+            {agent.name}
         </Typography>
 
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.25 }}>

@@ -107,7 +107,7 @@ export const MessageList: React.FC = () => {
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
 
   // Debug logging
-  useEffect(() => {    
+  useEffect(() => {
     // More detailed message structure debugging
     if (messages && messages.length > 0) {
       const firstMsg = messages[0] as any; // Use type assertion to avoid TypeScript errors
@@ -129,7 +129,7 @@ export const MessageList: React.FC = () => {
   const formatTimestamp = (timestamp?: string) => {
     if (!timestamp) return 'Unknown time';
     try {
-      const date = new Date(timestamp);
+    const date = new Date(timestamp);
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch (e) {
       console.error('Error formatting timestamp:', e);
@@ -163,7 +163,7 @@ export const MessageList: React.FC = () => {
     // Check agent type
     const agent = agents[senderId];
     if (!agent) return <ComputerIcon sx={{ color: '#00FF41' }} />;
-    
+
     switch (agent.type && agent.type.toLowerCase()) {
       case 'system':
         return <MemoryIcon sx={{ color: '#00FF41' }} />;
@@ -181,16 +181,16 @@ export const MessageList: React.FC = () => {
     if (typeof content === 'string') {
       return content;
     }
-    
+
     // If content has a text property, return just the text value
     if (content.text) {
       return content.text;
     }
-    
+
     if (content.status) {
       return `Status: ${content.status}`;
     }
-    
+
     // For other object structures, stringify them
     return JSON.stringify(content);
   };
@@ -441,19 +441,19 @@ export const MessageList: React.FC = () => {
                               Object.values(agents).find((a: any) => a.type === 'human')?.id === senderId;
             
             const isHovered = hoveredMessage === messageId;
-            
-            return (
-              <Paper 
-                key={index} 
-                elevation={1}
+          
+          return (
+            <Paper 
+              key={index} 
+              elevation={1}
                 onMouseEnter={() => setHoveredMessage(messageId)}
                 onMouseLeave={() => setHoveredMessage(null)}
-                sx={{ 
-                  p: 2, 
-                  maxWidth: '80%', 
+              sx={{ 
+                p: 2, 
+                maxWidth: '80%', 
                   width: 'auto',
                   minWidth: '200px',
-                  alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
+                alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
                   backgroundColor: isOutgoing ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 30, 0, 0.5)',
                   color: isOutgoing ? '#00FFFF' : '#00FF41',
                   borderRadius: '4px',
@@ -561,8 +561,8 @@ export const MessageList: React.FC = () => {
                       } : {}),
                     }}
                   >
-                    {senderName}
-                  </Typography>
+                {senderName}
+              </Typography>
                 </Box>
                 
                 <Box sx={{ 
@@ -602,8 +602,8 @@ export const MessageList: React.FC = () => {
                     }}
                   >
                     {content}
-                  </Typography>
-                  
+              </Typography>
+              
                   {/* Render any secondary content like insights */}
                   {msg.content && typeof msg.content === 'object' && 
                     (msg.content.insights || msg.content.status) && 
@@ -631,9 +631,9 @@ export const MessageList: React.FC = () => {
                   }}
                 >
                   {formatTimestamp(timestamp)}
-                </Typography>
-              </Paper>
-            );
+              </Typography>
+            </Paper>
+          );
           })}
           <div ref={messagesEndRef} />
         </Box>

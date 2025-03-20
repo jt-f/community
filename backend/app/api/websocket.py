@@ -4,10 +4,10 @@ WebSocket router for real-time communication.
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 import asyncio
-from ..core.server import agent_server
 from ..core.models import Message, WebSocketMessage
 from ..utils.logger import get_logger
-from ..core.instances import agent_manager
+from ..utils.message_utils import truncate_message
+from ..core.instances import agent_server
 
 logger = get_logger(__name__)
 
@@ -25,7 +25,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
         # Send initial agent list
         agent_list = []
-        all_agents = list(agent_manager.available_agents) + list(agent_manager.thinking_agents)
+        all_agents = list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents)
         logger.debug(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
         
         for agent in all_agents:
@@ -33,7 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "id": agent.agent_id,
                 "name": agent.name,
                 "type": agent.__class__.__name__.replace("Agent", "").lower(),
-                "status": "thinking" if agent in agent_manager.thinking_agents else "idle",
+                "status": "thinking" if agent in agent_server.agent_manager.thinking_agents else "idle",
                 "capabilities": agent.capabilities if hasattr(agent, "capabilities") else [],
                 "model": getattr(agent, "default_model", None),
                 "provider": getattr(agent, "model_provider", None)
@@ -69,11 +69,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         websocket.receive_json(),
                         timeout=0.1  # 100ms timeout
                     )
-                    logger.debug(f"Received WebSocket message: {data}")
-                    
+
                     # Validate message structure
                     if not isinstance(data, dict):
-                        logger.error(f"Invalid message format: {data}")
+                        logger.error(f"Invalid message format: {truncate_message(data)}")
                         continue
                         
                     # Check if the message has the expected structure
@@ -91,33 +90,16 @@ async def websocket_endpoint(websocket: WebSocket):
                                 content=message_data.get('content', {})
                             )
                             
-                            # Route the message to the appropriate agent
-                            for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
-                                if agent.agent_id == message.receiver_id:
-                                    await agent.enqueue_message(message)
-                                    logger.debug(f"Routed message to agent {agent.name} ({agent.agent_id})")
-                                    break
-                    else:
-                        # For backward compatibility, try to handle the old format
-                        logger.warning(f"Message missing 'type' or 'data' fields: {data}")
-                        
-                        # Try to create a Message object directly from the data
-                        try:
-                            message = Message(
-                                sender_id=data.get('sender_id', 'unknown'),
-                                receiver_id=data.get('receiver_id'),
-                                message_type=data.get('message_type', 'text'),
-                                content=data.get('content', {})
-                            )
+                            # Log the message details for debugging
+                            logger.debug(f"Created message object: sender={message.sender_id}, receiver={message.receiver_id}, content={truncate_message(message.content)}")
                             
                             # Route the message to the appropriate agent
-                            for agent in list(agent_manager.available_agents) + list(agent_manager.thinking_agents):
+                            for agent in list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents):
                                 if agent.agent_id == message.receiver_id:
-                                    await agent.enqueue_message(message)
-                                    logger.debug(f"Routed message to agent {agent.name} ({agent.agent_id})")
+                                    await agent.message_queue.put(message)
+                                    logger.info(f"Agent {agent.name} received message: {truncate_message(message.content.get('text','None'))}")
                                     break
-                        except Exception as e:
-                            logger.error(f"Error handling legacy message format: {e}")
+                   
 
                 except asyncio.TimeoutError:
                     # This is expected, just continue the loop

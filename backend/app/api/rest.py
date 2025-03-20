@@ -8,15 +8,16 @@ from fastapi import APIRouter, HTTPException, status, Body
 from pydantic import BaseModel, validator
 from fastapi import Request  # Add this import
 
-from ..core.server import agent_server
+from ..core.instances import agent_server
 from ..core.models import Message, AgentConfig
 from ..utils.logger import get_logger
+from ..utils.message_utils import truncate_message
 from fastapi import Depends, Security
 from fastapi.security import APIKeyHeader
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from ..utils.model_client import ModelProvider
-from ..core.instances import agent_manager  # Import from instances instead
+
 from ..core.agents.config import ANALYST_CONFIG
 
 logger = get_logger(__name__)
@@ -82,6 +83,8 @@ async def post_message(
             metadata=message.metadata or {}
         )
         
+        logger.debug(f"Processing API message: {truncate_message(msg)}")
+        
         # Broadcast to all agents
         failed_agents = []
         for agent in agent_server.agents.values():
@@ -103,7 +106,7 @@ async def post_message(
             data={"message_id": msg.id}
         )
     except Exception as e:
-        logger.error(f"(post_message) Error processing message: {e} for message: {message.content}")
+        logger.error(f"(post_message) Error processing message: {e} for message: {truncate_message(message.content)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -176,11 +179,15 @@ async def create_agent(agent_config: AgentConfig = Body(...)):
             # Set capabilities
             agent.capabilities = agent_config.capabilities
             
-            # Add the agent to the agent manager
-            agent_manager.add_agent(agent)
+            # Register the agent with the agent server (this also adds it to the agent manager)
+            await agent_server.register_agent(agent)
+            
+            # Log the successful agent creation
+            logger.info(f"Created new agent: {agent.name} ({agent.agent_id}) of type {agent_config.agent_type}")
             
             return {"status": "success", "agent_id": agent.agent_id, "message": f"Agent {agent_config.name} created successfully"}
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported agent type: {agent_config.agent_type}")
     except Exception as e:
+        logger.error(f"Failed to create agent: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create agent: {str(e)}")
