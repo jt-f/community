@@ -78,7 +78,7 @@ export const AgentDashboard: React.FC = () => {
             }} 
           />
           <Typography 
-            variant="h4"
+            variant="h5"
             sx={{ 
               color: '#00FF41',
               fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -87,6 +87,7 @@ export const AgentDashboard: React.FC = () => {
               animation: `${flicker} ${7 + randomDelay}s infinite`,
               textTransform: 'uppercase',
               position: 'relative',
+              fontSize: '1.5rem',
               '&::after': {
                 content: '""',
                 position: 'absolute',
@@ -168,7 +169,7 @@ export const AgentDashboard: React.FC = () => {
             },
           }}
         >
-          <AgentCreationForm />
+          <AgentCreationForm onAgentCreated={() => setShowCreationForm(false)} />
         </Box>
       )}
       
