@@ -65,7 +65,7 @@ class ErrorBoundaryWrapper extends React.Component<
   }
 }
 
-export const AgentCreationForm: React.FC = () => {
+export const AgentCreationForm: React.FC<{ onAgentCreated?: () => void }> = ({ onAgentCreated }) => {
   const { addAgent } = useAgentStore();
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<AgentOptions | null>(null);
@@ -173,6 +173,11 @@ export const AgentCreationForm: React.FC = () => {
         model,
         provider
       });
+      
+      // Call the onAgentCreated callback if provided
+      if (onAgentCreated) {
+        onAgentCreated();
+      }
       
     } catch (err) {
       console.error('Error creating agent:', err);

@@ -21,112 +21,112 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.debug("New WebSocket connection established")
         
         # Register the WebSocket with the agent server
-        agent_server.register_websocket(websocket)
+        # Modified to handle non-coroutine method
+        if asyncio.iscoroutinefunction(agent_server.register_websocket):
+            await agent_server.register_websocket(websocket)
+        else:
+            agent_server.register_websocket(websocket)
         
         # Send initial agent list
-        agent_list = []
-        all_agents = list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents)
-        logger.debug(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
-        
-        for agent in all_agents:
-            agent_data = {
-                "id": agent.agent_id,
-                "name": agent.name,
-                "type": agent.__class__.__name__.replace("Agent", "").lower(),
-                "status": "thinking" if agent in agent_server.agent_manager.thinking_agents else "idle",
-                "capabilities": agent.capabilities if hasattr(agent, "capabilities") else [],
-                "model": getattr(agent, "default_model", None),
-                "provider": getattr(agent, "model_provider", None)
+        try:
+            agent_list = []
+            all_agents = list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents)
+            logger.debug(f"WebSocket connected. Sending {len(all_agents)} agents to client.")
+            
+            for agent in all_agents:
+                agent_data = {
+                    "id": agent.agent_id,
+                    "name": agent.name,
+                    "type": agent.__class__.__name__.replace("Agent", "").lower(),
+                    "status": "thinking" if agent in agent_server.agent_manager.thinking_agents else "idle",
+                    "capabilities": agent.capabilities if hasattr(agent, "capabilities") else [],
+                    "model": getattr(agent, "default_model", None),
+                    "provider": getattr(agent, "model_provider", None)
+                }
+                agent_list.append(agent_data)
+                logger.debug(f"Adding agent to list: {agent_data}")
+            
+            message = {
+                "type": "agent_list",
+                "data": {
+                    "agents": agent_list
+                }
             }
-            agent_list.append(agent_data)
-            logger.debug(f"Adding agent to list: {agent_data}")
-        
-        message = {
-            "type": "agent_list",
-            "data": {
-                "agents": agent_list
-            }
-        }
-        logger.debug(f"Sending agent list: {message}")
-        await websocket.send_json(message)
-        
-        # Ensure the connection is properly established
-        if websocket.application_state != WebSocketState.CONNECTED:
-            logger.error("WebSocket not in CONNECTED state after accept")
+            logger.debug(f"Sending agent list: {message}")
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending initial agent list: {str(e)}")
             return
             
         while True:
+            if websocket.application_state != WebSocketState.CONNECTED:
+                logger.error("WebSocket connection lost")
+                break
+
             try:
-                # Check connection state before receiving
-                if websocket.application_state != WebSocketState.CONNECTED:
-                    logger.error("WebSocket connection lost")
-                    break
+                data = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=1.0  # Increased timeout
+                )
 
-                # Use asyncio.wait_for to add a timeout to receive_json
-                try:
-                    logger.debug("Waiting for message...")
-                    data = await asyncio.wait_for(
-                        websocket.receive_json(),
-                        timeout=0.1  # 100ms timeout
-                    )
-
-                    # Validate message structure
-                    if not isinstance(data, dict):
-                        logger.error(f"Invalid message format: {truncate_message(data)}")
-                        continue
-                        
-                    # Check if the message has the expected structure
-                    if 'type' in data and 'data' in data:
-                        # Handle the message based on its type
-                        if data['type'] == 'message':
-                            # Extract the message data
-                            message_data = data['data']
-                            
-                            # Create a Message object
-                            message = Message(
-                                sender_id=message_data.get('sender_id', 'unknown'),
-                                receiver_id=message_data.get('receiver_id'),
-                                message_type=message_data.get('message_type', 'text'),
-                                content=message_data.get('content', {})
-                            )
-                            
-                            # Log the message details for debugging
-                            logger.debug(f"Created message object: sender={message.sender_id}, receiver={message.receiver_id}, content={truncate_message(message.content)}")
-                            
-                            # Route the message to the appropriate agent
-                            for agent in list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents):
-                                if agent.agent_id == message.receiver_id:
-                                    await agent.message_queue.put(message)
-                                    logger.info(f"Agent {agent.name} received message: {truncate_message(message.content.get('text','None'))}")
-                                    break
-                   
-
-                except asyncio.TimeoutError:
-                    # This is expected, just continue the loop
+                # Validate message structure
+                if not isinstance(data, dict):
+                    logger.error(f"Invalid message format: {truncate_message(data)}")
                     continue
-                except WebSocketDisconnect:
-                    logger.debug("WebSocket connection closed by client")
-                    break
+                    
+                # Check if the message has the expected structure
+                if 'type' in data and 'data' in data:
+                    # Handle the message based on its type
+                    if data['type'] == 'message':
+                        # Extract the message data
+                        message_data = data['data']
                         
+                        # Create a Message object
+                        message = Message(
+                            sender_id=message_data.get('sender_id', 'unknown'),
+                            receiver_id=message_data.get('receiver_id'),
+                            message_type=message_data.get('message_type', 'text'),
+                            content=message_data.get('content', {})
+                        )
+                        
+                        # Log the message details for debugging
+                        logger.debug(f"Created message object: sender={message.sender_id}, receiver={message.receiver_id}, content={truncate_message(message.content)}")
+                        
+                        # Route the message to the appropriate agent
+                        for agent in list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents):
+                            if agent.agent_id == message.receiver_id:
+                                await agent.message_queue.put(message)
+                                logger.info(f"Agent {agent.name} received message: {truncate_message(message.content.get('text','None'))}")
+                                break
+            except asyncio.TimeoutError:
+                if websocket.application_state != WebSocketState.CONNECTED:
+                    break
+                continue
+            except asyncio.CancelledError:
+                logger.debug("WebSocket operation cancelled")
+                break
             except WebSocketDisconnect:
                 logger.debug("WebSocket connection closed by client")
                 break
             except Exception as e:
-                logger.error(f"Error handling WebSocket message: {e}")
+                logger.error(f"Error handling WebSocket message: {str(e)}")
                 if websocket.application_state != WebSocketState.CONNECTED:
-                    logger.debug("Connection lost during message handling")
                     break
                 continue
                 
     except WebSocketDisconnect:
         logger.debug("WebSocket connection closed during handshake")
+    except asyncio.CancelledError:
+        logger.debug("WebSocket connection cancelled")
     except Exception as e:
-        logger.error(f"WebSocket connection error: {e}")
+        logger.error(f"WebSocket connection error: {str(e)}")
     finally:
         logger.debug("Cleaning up WebSocket connection")
         try:
-            # Unregister the WebSocket from the agent server
-            agent_server.unregister_websocket(websocket)
-            # Don't try to close the connection here, it's already closed or will be closed by FastAPI
+            # Modified to handle non-coroutine method
+            if asyncio.iscoroutinefunction(agent_server.unregister_websocket):
+                await agent_server.unregister_websocket(websocket)
+            else:
+                agent_server.unregister_websocket(websocket)
         except Exception as e:
-            logger.error(f"Error during WebSocket cleanup: {e}") 
+            logger.error(f"Error during WebSocket cleanup: {str(e)}")

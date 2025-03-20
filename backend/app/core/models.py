@@ -50,7 +50,7 @@ class AgentState(BaseModel):
     
     class Config:
         """Pydantic config."""
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": "agent-123",
                 "name": "Assistant",
