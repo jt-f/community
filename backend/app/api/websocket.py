@@ -21,10 +21,10 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.debug("New WebSocket connection established")
         
         # Register the WebSocket with the agent server
-        # Modified to handle non-coroutine method
         if asyncio.iscoroutinefunction(agent_server.register_websocket):
             await agent_server.register_websocket(websocket)
         else:
+            logger.debug("Using non-coroutine method for agent_server.register_websocket")
             agent_server.register_websocket(websocket)
         
         # Send initial agent list
