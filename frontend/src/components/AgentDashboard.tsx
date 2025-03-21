@@ -62,50 +62,19 @@ export const AgentDashboard: React.FC = () => {
       <Box 
         sx={{ 
           display: 'flex', 
-          justifyContent: 'space-between', 
+          justifyContent: 'center', 
           alignItems: 'center', 
           mb: 3,
           position: 'relative',
           zIndex: 1,
+          width: '100%'
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <MemoryIcon 
-            sx={{ 
-              color: '#00FF41', 
-              fontSize: '2rem',
-              animation: `${pulse} ${3 + randomDelay}s infinite ease-in-out`,
-            }} 
-          />
-          <Typography 
-            variant="h5"
-            sx={{ 
-              color: '#00FF41',
-              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              letterSpacing: '0.05em',
-              textShadow: '0 0 10px rgba(0, 255, 65, 0.7)',
-              animation: `${flicker} ${7 + randomDelay}s infinite`,
-              textTransform: 'uppercase',
-              position: 'relative',
-              fontSize: '1.5rem',
-              '&::after': {
-                content: '""',
-                position: 'absolute',
-                bottom: -5,
-                left: 0,
-                width: '100%',
-                height: '1px',
-                background: 'linear-gradient(90deg, transparent, rgba(0, 255, 65, 0.5), transparent)',
-              }
-            }}
-          >
-            Neural Agent Network
-          </Typography>
-        </Box>
         <Button 
           variant="contained" 
           startIcon={showCreationForm ? <ExpandLessIcon /> : <AddIcon />}
           onClick={() => setShowCreationForm(!showCreationForm)}
+          fullWidth
           sx={{
             backgroundColor: 'rgba(0, 59, 0, 0.7)',
             color: '#00FF41',
@@ -117,6 +86,8 @@ export const AgentDashboard: React.FC = () => {
             transition: 'all 0.3s ease',
             position: 'relative',
             overflow: 'hidden',
+            maxWidth: '100%',
+            py: 1.2,
             '&:hover': {
               backgroundColor: 'rgba(0, 59, 0, 0.9)',
               boxShadow: '0 0 15px rgba(0, 255, 65, 0.4)',
