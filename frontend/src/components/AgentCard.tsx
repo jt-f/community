@@ -187,9 +187,22 @@ class AgentCardErrorBoundary extends React.Component<
   }
 
   static getDerivedStateFromError(error: any) {
+    // Check if it's the specific "Objects are not valid as a React child" error
+    const errorMessage = error?.message || 'Unknown error';
+    const isObjectChildError = typeof errorMessage === 'string' && 
+      errorMessage.includes('Objects are not valid as a React child');
+    
+    console.error("ErrorBoundary caught error:", {
+      message: errorMessage,
+      isObjectChildError,
+      error
+    });
+    
     return { 
       hasError: true,
-      errorMessage: error?.message || 'Unknown error'
+      errorMessage: isObjectChildError 
+        ? 'Error: Object cannot be rendered as React child. This is often caused by directly rendering an object with an "error" property.'
+        : errorMessage
     };
   }
 
@@ -234,20 +247,72 @@ export const AgentCard: React.FC<AgentCardProps> = (props) => {
 const getSafe = <T extends any>(fn: () => T, defaultValue: T): T => {
   try {
     const value = fn();
-    // Check for React's invalid children types
+    
+    // If we're getting a string that will be directly rendered in JSX
+    if (typeof defaultValue === 'string' && value !== null && value !== undefined) {
+      // Return a sanitized version if it's a string type
+      return sanitizeForJSX(value) as unknown as T;
+    }
+    
+    // For non-string types, just check for null/undefined
     if (value === null || value === undefined) {
       return defaultValue;
     }
-    // Handle potential object with error key that can't be rendered directly
-    if (typeof value === 'object' && 'error' in value) {
-      console.error('Error object detected in props:', value);
-      return defaultValue;
-    }
+    
     return value;
   } catch (e) {
     console.error('Error accessing property:', e);
     return defaultValue;
   }
+};
+
+// Add a more comprehensive sanitizer function
+const sanitizeForJSX = (value: any): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  
+  if (typeof value === 'string') {
+    return value;
+  }
+  
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  
+  // Handle objects (including those with an 'error' key)
+  if (typeof value === 'object') {
+    // First, check if it's an Error object
+    if (value instanceof Error) {
+      return `Error: ${value.message}`;
+    }
+    
+    // Check for objects with an 'error' key which React can't render directly
+    if ('error' in value) {
+      if (typeof value.error === 'string') {
+        return `Error: ${value.error}`;
+      } else if (value.error instanceof Error) {
+        return `Error: ${value.error.message}`;
+      } else if (typeof value.error === 'object') {
+        try {
+          return `Error object: ${JSON.stringify(value.error).slice(0, 50)}...`;
+        } catch (e) {
+          return 'Error object (cannot stringify)';
+        }
+      }
+      return 'Error object';
+    }
+    
+    // For other objects, try to stringify them
+    try {
+      return JSON.stringify(value).slice(0, 50) + (JSON.stringify(value).length > 50 ? '...' : '');
+    } catch (e) {
+      return '[Complex object]';
+    }
+  }
+  
+  // Fallback for functions or other types
+  return String(value);
 };
 
 // The actual card content component
@@ -386,13 +451,13 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
                   animation: statusSettings.showAnimation ? `${pulse} ${3 + randomDelay}s infinite ease-in-out` : 'none',
                 }} 
               />
-              {safeAgent.name}
+              {sanitizeForJSX(safeAgent.name)}
             </Typography>
             
             {isCollapsed && (
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 <Chip 
-                  label={safeAgent.status.toUpperCase()}
+                  label={sanitizeForJSX(safeAgent.status).toUpperCase()}
                   size="small"
                   sx={{ 
                     fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -412,7 +477,7 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
                   }} 
                 />
                 <Chip 
-                  label={safeAgent.type.toUpperCase()}
+                  label={sanitizeForJSX(safeAgent.type).toUpperCase()}
                   size="small"
                   sx={{ 
                     fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -454,7 +519,7 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
         {!isCollapsed && (
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
             <Chip 
-              label={safeAgent.status.toUpperCase()}
+              label={sanitizeForJSX(safeAgent.status).toUpperCase()}
               size="small"
               sx={{ 
                 fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -474,7 +539,7 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
               }} 
             />
             <Chip 
-              label={safeAgent.type.toUpperCase()}
+              label={sanitizeForJSX(safeAgent.type).toUpperCase()}
               size="small"
               sx={{ 
                 fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
@@ -513,7 +578,7 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
                   display: 'block'
                 }}
               >
-                <strong>Model:</strong> {safeAgent.model}
+                <strong>Model:</strong> {sanitizeForJSX(safeAgent.model)}
               </Typography>
             </Box>
             
@@ -532,7 +597,7 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
                   display: 'block'
                 }}
               >
-                <strong>Provider:</strong> {safeAgent.provider}
+                <strong>Provider:</strong> {sanitizeForJSX(safeAgent.provider)}
               </Typography>
             </Box>
             
@@ -552,13 +617,9 @@ const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
             
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
               {safeAgent.capabilities.map((capability, index) => {
-                // Ensure capability is a string
-                const capabilityStr = typeof capability === 'string' 
-                  ? capability 
-                  : typeof capability === 'object' && capability !== null
-                    ? JSON.stringify(capability).slice(0, 20) 
-                    : String(capability || '');
-                    
+                // Use the sanitizer function to ensure safe rendering
+                const capabilityStr = sanitizeForJSX(capability);
+                
                 return (
                   <Chip 
                     key={index}
