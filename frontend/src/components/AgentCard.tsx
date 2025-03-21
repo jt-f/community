@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, ErrorInfo } from 'react';
 import {
   Card,
   CardContent,
@@ -10,7 +10,8 @@ import {
   IconButton,
   CardActions,
   Divider,
-  keyframes
+  keyframes,
+  Collapse
 } from '@mui/material';
 import {
   Memory as MemoryIcon,
@@ -19,7 +20,9 @@ import {
   Message as MessageIcon,
   Delete as DeleteIcon,
   Refresh as RefreshIcon,
-  Code as CodeIcon
+  Code as CodeIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
 import { Agent } from '../types/agent';
@@ -59,87 +62,110 @@ const scanline = keyframes`
   100% { transform: translateY(100%); }
 `;
 
+// Define a vibration animation for "thinking" state
+const vibrate = keyframes`
+  0% { transform: translate(0); }
+  20% { transform: translate(-1px, 1px); }
+  40% { transform: translate(1px, -1px); }
+  60% { transform: translate(-1px, -1px); }
+  80% { transform: translate(1px, 1px); }
+  100% { transform: translate(0); }
+`;
+
+// Helper function to safely parse hex color to RGB
+const hexToRgb = (hex: string) => {
+  // Default fallback color components 
+  const defaultR = 79;
+  const defaultG = 195;
+  const defaultB = 247;
+  
+  return {
+    r: getSafe(() => parseInt(hex.slice(1, 3), 16), defaultR),
+    g: getSafe(() => parseInt(hex.slice(3, 5), 16), defaultG),
+    b: getSafe(() => parseInt(hex.slice(5, 7), 16), defaultB)
+  };
+};
+
 // Function to get animation settings based on status
 const getStatusAnimation = (status: string) => {
-  switch (status) {
-    case 'thinking':
-      return {
-        animation: thinkingPulse,
-        color: '#FFA726',  // Warm orange
-        scanlineColor: 'rgba(255, 167, 38, 0.15)',
-        borderColor: '#FF9800',
-        gradientStart: '#2C1810',  // Deep warm brown
-        gradientEnd: 'rgba(44, 24, 16, 0.85)',
-        glowColor: 'rgba(255, 152, 0, 0.45)',
-        textColor: '#FFB74D',  // Light orange
-        progressBarColors: 'linear-gradient(90deg, #2C1810, #FFA726, #FFB74D)',
-        showAnimation: true,
-        backgroundOpacity: 0.92,
-        backgroundPattern: `repeating-linear-gradient(
-          45deg,
-          rgba(255, 167, 38, 0.1) 0px,
-          rgba(255, 167, 38, 0.1) 2px,
-          transparent 2px,
-          transparent 4px
-        )`
-      };
-    case 'responding':
-      return {
-        animation: respondingPulse,
-        color: '#00E676',  // Bright green
-        scanlineColor: 'rgba(0, 230, 118, 0.15)',
-        borderColor: '#00C853',
-        gradientStart: '#0A2615',  // Deep forest green
-        gradientEnd: 'rgba(10, 38, 21, 0.85)',
-        glowColor: 'rgba(0, 230, 118, 0.45)',
-        textColor: '#69F0AE',  // Light green
-        progressBarColors: 'linear-gradient(90deg, #0A2615, #00E676, #69F0AE)',
-        showAnimation: true,
-        backgroundOpacity: 0.92,
-        backgroundPattern: `repeating-linear-gradient(
-          -45deg,
-          rgba(0, 230, 118, 0.1) 0px,
-          rgba(0, 230, 118, 0.1) 2px,
-          transparent 2px,
-          transparent 4px
-        )`
-      };
-    case 'idle':
-      return {
-        animation: 'none',
-        color: '#4FC3F7',  // Light blue
-        scanlineColor: 'rgba(79, 195, 247, 0.1)',
-        borderColor: '#0288D1',
-        gradientStart: '#0A1926',  // Deep navy
-        gradientEnd: 'rgba(10, 25, 38, 0.85)',
-        glowColor: 'rgba(79, 195, 247, 0.3)',
-        textColor: '#81D4FA',  // Lighter blue
-        progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
-        showAnimation: false,
-        backgroundOpacity: 1,
-        backgroundPattern: 'none'  // Remove the pattern for idle state
-      };
-    default:
-      return {
-        animation: 'none',
-        color: '#4FC3F7',  // Light blue
-        scanlineColor: 'rgba(79, 195, 247, 0.1)',
-        borderColor: '#0288D1',
-        gradientStart: '#0A1926',  // Deep navy
-        gradientEnd: 'rgba(10, 25, 38, 0.85)',
-        glowColor: 'rgba(79, 195, 247, 0.3)',
-        textColor: '#81D4FA',  // Lighter blue
-        progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
-        showAnimation: false,
-        backgroundOpacity: 0.95,
-        backgroundPattern: `repeating-linear-gradient(
-          90deg,
-          rgba(79, 195, 247, 0.05) 0px,
-          rgba(79, 195, 247, 0.05) 1px,
-          transparent 1px,
-          transparent 4px
-        )`
-      };
+  try {
+    switch (status) {
+      case 'thinking':
+        return {
+          animation: thinkingPulse,
+          color: '#FFA726',  // Warm orange
+          scanlineColor: 'rgba(255, 167, 38, 0.15)',
+          borderColor: '#FF9800',
+          gradientStart: '#2C1810',  // Deep warm brown
+          gradientEnd: 'rgba(44, 24, 16, 0.85)',
+          glowColor: 'rgba(255, 152, 0, 0.45)',
+          textColor: '#FFB74D',  // Light orange
+          progressBarColors: 'linear-gradient(90deg, #2C1810, #FFA726, #FFB74D)',
+          showAnimation: true,
+          backgroundOpacity: 0.92,
+          backgroundPattern: `repeating-linear-gradient(
+            45deg,
+            rgba(255, 167, 38, 0.1) 0px,
+            rgba(255, 167, 38, 0.1) 2px,
+            transparent 2px,
+            transparent 4px
+          )`
+        };
+      case 'responding':
+        return {
+          animation: respondingPulse,
+          color: '#00E676',  // Bright green
+          scanlineColor: 'rgba(0, 230, 118, 0.15)',
+          borderColor: '#00C853',
+          gradientStart: '#0A2615',  // Deep forest green
+          gradientEnd: 'rgba(10, 38, 21, 0.85)',
+          glowColor: 'rgba(0, 230, 118, 0.45)',
+          textColor: '#69F0AE',  // Light green
+          progressBarColors: 'linear-gradient(90deg, #0A2615, #00E676, #69F0AE)',
+          showAnimation: true,
+          backgroundOpacity: 0.92,
+          backgroundPattern: `repeating-linear-gradient(
+            -45deg,
+            rgba(0, 230, 118, 0.1) 0px,
+            rgba(0, 230, 118, 0.1) 2px,
+            transparent 2px,
+            transparent 4px
+          )`
+        };
+      case 'idle':
+      default:
+        return {
+          animation: 'none',
+          color: '#4FC3F7',  // Light blue
+          scanlineColor: 'rgba(79, 195, 247, 0.1)',
+          borderColor: '#0288D1',
+          gradientStart: '#0A1926',  // Deep navy
+          gradientEnd: 'rgba(10, 25, 38, 0.85)',
+          glowColor: 'rgba(79, 195, 247, 0.3)',
+          textColor: '#81D4FA',  // Lighter blue
+          progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
+          showAnimation: false,
+          backgroundOpacity: 1,
+          backgroundPattern: 'none'  // Remove the pattern for idle state
+        };
+    }
+  } catch (error) {
+    console.error("Error in getStatusAnimation:", error);
+    // Return fallback default values
+    return {
+      animation: 'none',
+      color: '#4FC3F7',
+      scanlineColor: 'rgba(79, 195, 247, 0.1)',
+      borderColor: '#0288D1',
+      gradientStart: '#0A1926',
+      gradientEnd: 'rgba(10, 25, 38, 0.85)',
+      glowColor: 'rgba(79, 195, 247, 0.3)',
+      textColor: '#81D4FA',
+      progressBarColors: 'linear-gradient(90deg, #0A1926, #4FC3F7, #81D4FA)',
+      showAnimation: false,
+      backgroundOpacity: 1,
+      backgroundPattern: 'none'
+    };
   }
 };
 
@@ -147,13 +173,103 @@ interface AgentCardProps {
   agent: Agent;
 }
 
-export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
+// Error boundary component to catch rendering errors
+class AgentCardErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errorMessage: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { 
+      hasError: false,
+      errorMessage: ''
+    };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { 
+      hasError: true,
+      errorMessage: error?.message || 'Unknown error'
+    };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Error in AgentCard:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Fallback UI
+      return (
+        <Card sx={{ 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column',
+          p: 2,
+          backgroundColor: 'rgba(10, 10, 10, 0.85)',
+          border: '1px solid #880E0E',
+          boxShadow: '0 0 15px rgba(255, 0, 0, 0.3)',
+        }}>
+          <Typography color="error" variant="body2">
+            Error rendering agent card: {this.state.errorMessage}
+          </Typography>
+        </Card>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Wrap the original AgentCard with the error boundary
+export const AgentCard: React.FC<AgentCardProps> = (props) => {
+  return (
+    <AgentCardErrorBoundary>
+      <AgentCardContent {...props} />
+    </AgentCardErrorBoundary>
+  );
+};
+
+// Add a safe accessor function for nested object properties
+const getSafe = <T extends any>(fn: () => T, defaultValue: T): T => {
+  try {
+    const value = fn();
+    // Check for React's invalid children types
+    if (value === null || value === undefined) {
+      return defaultValue;
+    }
+    // Handle potential object with error key that can't be rendered directly
+    if (typeof value === 'object' && 'error' in value) {
+      console.error('Error object detected in props:', value);
+      return defaultValue;
+    }
+    return value;
+  } catch (e) {
+    console.error('Error accessing property:', e);
+    return defaultValue;
+  }
+};
+
+// The actual card content component
+const AgentCardContent: React.FC<AgentCardProps> = ({ agent }) => {
   const { sendMessage } = useAgentStore();
   const [isHovered, setIsHovered] = useState(false);
   const [randomDelay, setRandomDelay] = useState(0);
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  
+  // Ensure agent has all required properties with defaults
+  const safeAgent = {
+    id: getSafe(() => agent?.id, 'unknown'),
+    name: getSafe(() => agent?.name, 'Unknown Agent'),
+    type: getSafe(() => agent?.type, 'unknown'),
+    status: getSafe(() => agent?.status, 'idle'),
+    capabilities: getSafe(() => Array.isArray(agent?.capabilities) ? agent.capabilities : [], []),
+    model: getSafe(() => agent?.model, 'Default'),
+    provider: getSafe(() => agent?.provider, 'Default')
+  };
   
   // Calculate statusSettings directly from agent.status instead of using state
-  const statusSettings = getStatusAnimation(agent.status);
+  const statusSettings = getStatusAnimation(safeAgent.status);
   
   useEffect(() => {
     // Set a random delay for animations to create a more organic feel
@@ -164,17 +280,22 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
   
   const handleMessageClick = () => {
     // Implement message sending logic
-    console.log(`Send message to ${agent.name}`);
+    console.log(`Send message to ${safeAgent.name}`);
   };
   
   const handleDeleteClick = () => {
     // Implement agent deletion logic
-    console.log(`Delete agent ${agent.name}`);
+    console.log(`Delete agent ${safeAgent.name}`);
   };
   
   const handleRefreshClick = () => {
     // Implement agent refresh logic
-    console.log(`Refresh agent ${agent.name}`);
+    console.log(`Refresh agent ${safeAgent.name}`);
+  };
+  
+  const toggleCollapse = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsCollapsed(!isCollapsed);
   };
   
   return (
@@ -184,7 +305,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         display: 'flex', 
         flexDirection: 'column',
         position: 'relative',
-        backgroundColor: agent.status === 'idle' ? statusSettings.gradientStart : `rgba(0, 0, 0, ${statusSettings.backgroundOpacity})`,
+        backgroundColor: safeAgent.status === 'idle' ? statusSettings.gradientStart : `rgba(0, 0, 0, ${statusSettings.backgroundOpacity})`,
         backdropFilter: 'blur(5px)',
         border: `1px solid ${statusSettings.borderColor}`,
         boxShadow: isHovered 
@@ -192,6 +313,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
           : `0 0 15px ${statusSettings.glowColor}, inset 0 0 10px ${statusSettings.glowColor}`,
         transition: 'all 0.3s ease',
         overflow: 'hidden',
+        animation: safeAgent.status === 'thinking' ? `${vibrate} 0.3s linear infinite` : 'none',
         transform: isHovered ? 'translateY(-2px)' : 'none',
         '&::before': statusSettings.backgroundPattern === 'none' ? {} : {
           content: '""',
@@ -230,218 +352,287 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent }) => {
         flexGrow: 1, 
         position: 'relative', 
         zIndex: 3, 
-        p: 1, // Reduced padding further
-        '&:last-child': { pb: 1 } // Override default padding
+        p: isCollapsed ? '5px 8px' : 1, // More compact when collapsed
+        '&:last-child': { pb: isCollapsed ? 5 : 8 } // Override default padding
       }}>
-        {/* Agent Name at the top */}
-        <Typography 
-          variant="h6" 
-          component="h2"
-          sx={{ 
-            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-            color: statusSettings.textColor,
-            textShadow: isHovered ? `0 0 10px ${statusSettings.color}` : `0 0 5px ${statusSettings.color}`,
-            letterSpacing: '0.05em',
-            animation: `${flicker} ${5 + randomDelay}s infinite`,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '2px', // Reduced gap
-            fontSize: '0.9rem', // Smaller font
-            lineHeight: 1.1, // Tighter line height
-            mb: 0.5, // Reduced margin
-            textAlign: 'center',
-            width: '100%',
-            justifyContent: 'center'
-          }}
-        >
-          <CodeIcon sx={{ fontSize: '0.8em', opacity: 0.8 }} />
-            {agent.name}
-        </Typography>
-
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.25 }}>
-          {/* Model and Provider info */}
-          <Typography 
-            variant="caption" 
-            color="text.secondary" 
-            sx={{ 
-              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
-              textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
-              letterSpacing: '0.05em',
-              fontSize: '0.6rem', // Smaller font
-              lineHeight: 1 // Tighter line height
-            }}
-          >
-            {agent.model && `${agent.model}`}{agent.model && agent.provider && ' • '}{agent.provider && `${agent.provider}`}
-          </Typography>
+        {/* Agent Name and collapse button at the top */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: isCollapsed ? 0.5 : 0.5 }}>
+          <Box sx={{ width: '100%' }}>
+            <Typography 
+              variant="h6" 
+              component="h2"
+              sx={{ 
+                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                color: statusSettings.textColor,
+                textShadow: isHovered ? `0 0 10px ${statusSettings.color}` : `0 0 5px ${statusSettings.color}`,
+                letterSpacing: '0.05em',
+                animation: `${flicker} ${5 + randomDelay}s infinite`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                fontSize: '0.9rem',
+                lineHeight: 1.1,
+                mb: 0.5,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '100%'
+              }}
+            >
+              <MemoryIcon 
+                sx={{ 
+                  fontSize: '0.85rem', 
+                  mr: 0.5,
+                  animation: statusSettings.showAnimation ? `${pulse} ${3 + randomDelay}s infinite ease-in-out` : 'none',
+                }} 
+              />
+              {safeAgent.name}
+            </Typography>
+            
+            {isCollapsed && (
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Chip 
+                  label={safeAgent.status.toUpperCase()}
+                  size="small"
+                  sx={{ 
+                    fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                    backgroundColor: `rgba(${hexToRgb(statusSettings.color).r}, ${hexToRgb(statusSettings.color).g}, ${hexToRgb(statusSettings.color).b}, 0.15)`,
+                    color: statusSettings.color,
+                    border: `1px solid ${statusSettings.color}`,
+                    fontSize: '0.55rem',
+                    height: '16px',
+                    mr: 0.5,
+                    maxWidth: '60px',
+                    '& .MuiChip-label': {
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      padding: '0 4px'
+                    }
+                  }} 
+                />
+                <Chip 
+                  label={safeAgent.type.toUpperCase()}
+                  size="small"
+                  sx={{ 
+                    fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                    backgroundColor: 'rgba(10, 10, 10, 0.7)',
+                    color: '#B3E5FC',
+                    border: '1px solid #0288D1',
+                    fontSize: '0.55rem',
+                    height: '16px',
+                    maxWidth: '60px',
+                    '& .MuiChip-label': {
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      padding: '0 4px'
+                    }
+                  }} 
+                />
+              </Box>
+            )}
+          </Box>
           
-          {/* Status Chip */}
-          <Chip 
-            label={agent.status} 
-            color={
-              agent.status === 'idle' ? 'primary' :
-              agent.status === 'responding' ? 'success' : 
-              agent.status === 'thinking' ? 'warning' : 'default'
-            }
-            size="small"
-            sx={{
-              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              letterSpacing: '0.05em',
-              animation: agent.status !== 'idle' ? `${statusSettings.animation} 2s infinite` : 'none',
-              textShadow: `0 0 5px ${statusSettings.color}`,
-              border: `1px solid ${statusSettings.borderColor}`,
-              background: `linear-gradient(to right, ${statusSettings.gradientStart}, ${statusSettings.gradientEnd})`,
-              boxShadow: `0 0 5px ${statusSettings.color}`,
-              height: '16px', // Smaller height
-              '& .MuiChip-label': {
-                padding: '0 4px', // Reduced padding
-                fontSize: '0.6rem' // Smaller font
+          <IconButton 
+            size="small" 
+            onClick={toggleCollapse}
+            sx={{ 
+              p: 0.25,
+              ml: 0.5,
+              color: statusSettings.color,
+              '&:hover': { 
+                backgroundColor: `rgba(${hexToRgb(statusSettings.color).r}, ${hexToRgb(statusSettings.color).g}, ${hexToRgb(statusSettings.color).b}, 0.1)` 
               }
             }}
-          />
-        </Box>
-        
-        <Box sx={{ mt: 0.5 }}>
-          <Typography 
-            variant="caption" 
-            color="text.secondary"
-            sx={{ 
-              fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-              color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
-              textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
-              letterSpacing: '0.05em',
-              fontSize: '0.6rem', // Smaller font
-              lineHeight: 1 // Tighter line height
-            }}
           >
-            Capabilities:
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.2, mt: 0.2 }}>
-            {agent.capabilities.map((cap, index) => (
-              <Chip
-                key={index}
-                label={cap}
-                size="small"
-                variant="outlined"
-                sx={{ 
-                  fontSize: '0.55rem', // Smaller font
-                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-                  letterSpacing: '0.05em',
-                  border: `1px solid ${statusSettings.borderColor}`,
-                  background: 'transparent',
-                  color: statusSettings.textColor,
-                  textShadow: `0 0 3px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.5)`,
-                  transition: 'all 0.3s ease',
-                  height: '16px', // Smaller height
-                  '& .MuiChip-label': {
-                    padding: '0 3px', // Reduced padding
-                  },
-                  '&:hover': {
-                    boxShadow: `0 0 5px ${statusSettings.color}`,
-                    borderColor: statusSettings.color,
-                  }
-                }}
-              />
-            ))}
-          </Box>
+            {isCollapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+          </IconButton>
         </Box>
-
-        <Typography 
-          color="text.secondary" 
-          sx={{ 
-            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-            color: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.7)`,
-            textShadow: `0 0 2px rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.3)`,
-            letterSpacing: '0.05em',
-            mt: 0.25, // Reduced margin
-            fontSize: '0.6rem', // Smaller font
-            lineHeight: 1 // Tighter line height
-          }}
-        >
-          Type: {agent.type}
-        </Typography>
         
-        {/* Add a subtle progress bar for visual effect when not idle */}
-        {agent.status !== 'idle' && (
-          <Box sx={{ mt: 0.5, mb: 0 }}>
-            <LinearProgress 
-              variant="indeterminate" 
-              sx={{
-                height: '1px',
-                borderRadius: '1px',
-                backgroundColor: statusSettings.gradientStart,
-                '.MuiLinearProgress-bar': {
-                  background: statusSettings.progressBarColors,
-                  boxShadow: `0 0 5px ${statusSettings.color}`,
+        {/* Status chip - only show when not collapsed */}
+        {!isCollapsed && (
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+            <Chip 
+              label={safeAgent.status.toUpperCase()}
+              size="small"
+              sx={{ 
+                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                backgroundColor: `rgba(${hexToRgb(statusSettings.color).r}, ${hexToRgb(statusSettings.color).g}, ${hexToRgb(statusSettings.color).b}, 0.15)`,
+                color: statusSettings.color,
+                border: `1px solid ${statusSettings.color}`,
+                fontSize: '0.6rem',
+                height: '20px',
+                mr: 0.5,
+                maxWidth: '70px',
+                '& .MuiChip-label': {
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  padding: '0 6px'
                 }
-              }}
+              }} 
+            />
+            <Chip 
+              label={safeAgent.type.toUpperCase()}
+              size="small"
+              sx={{ 
+                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                backgroundColor: 'rgba(10, 10, 10, 0.7)',
+                color: '#B3E5FC',
+                border: '1px solid #0288D1',
+                fontSize: '0.6rem',
+                height: '20px',
+                maxWidth: '70px',
+                '& .MuiChip-label': {
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  padding: '0 6px'
+                }
+              }} 
             />
           </Box>
         )}
+        
+        {/* Collapsible content */}
+        <Collapse in={!isCollapsed} timeout="auto" unmountOnExit>
+          <Box sx={{ mt: 1 }}>
+            {/* Type row with model info */}
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <Typography 
+                variant="caption" 
+                sx={{ 
+                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                  color: '#B3E5FC',
+                  fontSize: '0.65rem',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100%',
+                  display: 'block'
+                }}
+              >
+                <strong>Model:</strong> {safeAgent.model}
+              </Typography>
+            </Box>
+            
+            {/* Provider info */}
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <Typography 
+                variant="caption" 
+                sx={{ 
+                  fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                  color: '#B3E5FC',
+                  fontSize: '0.65rem',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100%',
+                  display: 'block'
+                }}
+              >
+                <strong>Provider:</strong> {safeAgent.provider}
+              </Typography>
+            </Box>
+            
+            {/* Capabilities list */}
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                display: 'block',
+                fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                color: '#B3E5FC',
+                fontSize: '0.65rem',
+                mb: 0.5
+              }}
+            >
+              <strong>Capabilities:</strong>
+            </Typography>
+            
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+              {safeAgent.capabilities.map((capability, index) => {
+                // Ensure capability is a string
+                const capabilityStr = typeof capability === 'string' 
+                  ? capability 
+                  : typeof capability === 'object' && capability !== null
+                    ? JSON.stringify(capability).slice(0, 20) 
+                    : String(capability || '');
+                    
+                return (
+                  <Chip 
+                    key={index}
+                    label={capabilityStr}
+                    size="small"
+                    sx={{ 
+                      fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                      backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                      color: '#B3E5FC',
+                      border: '1px solid #0288D1',
+                      fontSize: '0.6rem',
+                      height: '16px',
+                      py: 0,
+                      px: 0.25,
+                      maxWidth: '80px',
+                      '& .MuiChip-label': {
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        padding: '0 4px'
+                      }
+                    }} 
+                  />
+                );
+              })}
+            </Box>
+            
+            {/* Button row */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+              <Tooltip title="Message Agent">
+                <IconButton 
+                  size="small" 
+                  onClick={handleMessageClick}
+                  sx={{ 
+                    color: '#4FC3F7',
+                    p: 0.5,
+                    '&:hover': { color: '#81D4FA', backgroundColor: 'rgba(79, 195, 247, 0.1)' } 
+                  }}
+                >
+                  <MessageIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Refresh Agent">
+                <IconButton 
+                  size="small" 
+                  onClick={handleRefreshClick}
+                  sx={{ 
+                    color: '#4FC3F7',
+                    p: 0.5,
+                    '&:hover': { color: '#81D4FA', backgroundColor: 'rgba(79, 195, 247, 0.1)' } 
+                  }}
+                >
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              
+              <Tooltip title="Delete Agent">
+                <IconButton 
+                  size="small" 
+                  onClick={handleDeleteClick}
+                  sx={{ 
+                    color: '#EF5350',
+                    p: 0.5,
+                    '&:hover': { color: '#E57373', backgroundColor: 'rgba(239, 83, 80, 0.1)' } 
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Box>
+        </Collapse>
       </CardContent>
-      
-      <CardActions sx={{ 
-        justifyContent: 'flex-end', 
-        borderTop: `1px solid ${statusSettings.borderColor}`,
-        background: `rgba(${statusSettings.gradientStart.replace(/[^\d,]/g, '')}, 0.3)`,
-        position: 'relative',
-        zIndex: 3,
-        p: 0.25, // Reduced padding
-        minHeight: '28px' // Smaller height
-      }}>
-        <IconButton 
-          size="small" 
-          onClick={handleMessageClick} 
-          title="Send Message"
-          sx={{
-            color: statusSettings.textColor,
-            transition: 'all 0.3s ease',
-            padding: '2px', // Smaller padding
-            '&:hover': {
-              backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
-              transform: 'scale(1.1)',
-              boxShadow: `0 0 10px ${statusSettings.color}`,
-            }
-          }}
-        >
-          <MessageIcon sx={{ fontSize: '0.9rem' }} />
-        </IconButton>
-        <IconButton 
-          size="small" 
-          onClick={handleRefreshClick} 
-          title="Refresh Agent"
-          sx={{
-            color: statusSettings.textColor,
-            transition: 'all 0.3s ease',
-            padding: '2px', // Smaller padding
-            '&:hover': {
-              backgroundColor: `rgba(${statusSettings.color.replace(/[^\d,]/g, '')}, 0.1)`,
-              transform: 'scale(1.1)',
-              boxShadow: `0 0 10px ${statusSettings.color}`,
-            }
-          }}
-        >
-          <RefreshIcon sx={{ fontSize: '0.9rem' }} />
-        </IconButton>
-        <IconButton 
-          size="small" 
-          onClick={handleDeleteClick} 
-          title="Delete Agent"
-          sx={{
-            color: statusSettings.textColor,
-            transition: 'all 0.3s ease',
-            padding: '2px', // Smaller padding
-            '&:hover': {
-              backgroundColor: 'rgba(255, 7, 58, 0.1)',
-              transform: 'scale(1.1)',
-              boxShadow: '0 0 10px #FF073A',
-              color: '#FF073A',
-            }
-          }}
-        >
-          <DeleteIcon sx={{ fontSize: '0.9rem' }} />
-        </IconButton>
-      </CardActions>
     </Card>
   );
 }; 

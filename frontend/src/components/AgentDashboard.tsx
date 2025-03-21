@@ -194,9 +194,22 @@ export const AgentDashboard: React.FC = () => {
       />
       
       <Box sx={{ position: 'relative', zIndex: 1 }}>
-        <Grid container spacing={3}>
-          {Object.values(agents).map((agent) => (
-            <Grid item xs={12} sm={6} md={4} key={agent.id}>
+        <Grid container spacing={1.5}>
+          {Object.values(agents).map((agent, index) => (
+            <Grid 
+              item 
+              xs={12} sm={6} md={4} 
+              key={agent.id}
+              sx={{ 
+                mb: 0.5,
+                position: 'relative',
+                transition: 'all 0.3s ease',
+                '&:hover': {
+                  transform: 'translateY(-3px)',
+                  zIndex: 10
+                }
+              }}
+            >
               <AgentCard agent={agent} />
             </Grid>
           ))}
