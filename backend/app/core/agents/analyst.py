@@ -40,7 +40,12 @@ class AnalystAgent(BaseAgent):
         self.agent_server = None  # Will be set by the agent_manager
     
     async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message and generate a response."""
+        """
+        Process a message and generate a response.
+        
+        Note: The agent doesn't set receiver_id - that's the broker's responsibility.
+        The agent only sets sender_id and creates the response content.
+        """
         try:
             # Set status to thinking
             await self.set_status("thinking")
@@ -57,15 +62,20 @@ class AnalystAgent(BaseAgent):
             # Set status to responding
             await self.set_status("responding")
             
-            # Create a response message
+            # Create a response message - note we don't set receiver_id
+            # The message broker will determine where this should be routed
             response = Message(
                 sender_id=self.agent_id,
-                receiver_id=message.sender_id,
+                receiver_id="broadcast",
                 content={"text": response_text},
-                message_type="text"
+                message_type="text",
+                in_reply_to=message.message_id if hasattr(message, 'message_id') else None
             )
             
             logger.debug(f"Analyst agent {self.name} generated response: {truncate_message(response)}")
+            
+            # Set status back to idle
+            await self.set_status("idle")
             
             return response
         except Exception as e:
@@ -74,12 +84,13 @@ class AnalystAgent(BaseAgent):
             # Set status back to idle on error
             await self.set_status("idle")
             
-            # Return an error message
+            # Return an error message - without setting receiver_id
             return Message(
                 sender_id=self.agent_id,
-                receiver_id=message.sender_id,
+                # No receiver_id set here - broker's responsibility
                 content={"text": f"I encountered an error: {str(e)}"},
-                message_type="error"
+                message_type="error",
+                in_reply_to=message.message_id if hasattr(message, 'message_id') else None
             )
     
     async def _generate_response(self, prompt: str, model: str = None, parameters: Union[Dict[str, Any], GenerationParameters] = None) -> str:

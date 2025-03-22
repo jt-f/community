@@ -7,12 +7,14 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 import uuid
 from datetime import datetime
+from collections import defaultdict
 
 from .models import Message, WebSocketMessage
 from .agents.base import BaseAgent
 from .agents.system import SystemAgent
 from .agents.human import HumanAgent
 from .agents.analyst import AnalystAgent
+from .agents.broker import MessageBrokerAgent
 from .agent_manager import AgentManager
 from ..utils.message_utils import truncate_message
 
@@ -31,6 +33,12 @@ class AgentServer:
         self.agent_manager = AgentManager()
         self.agent_manager.set_server(self)  # Set server reference
         self.agents: Dict[str, BaseAgent] = {}
+        self.message_broker = None  # Will be set during start()
+        
+        # Add a message history cache to track conversations
+        # This is a simple in-memory store - in production this should be persisted
+        self.message_history = {}  # message_id -> Message
+        self.message_pairs = defaultdict(dict)  # Maps message IDs to their replies
         
     async def start(self):
         """Start the agent server."""
@@ -39,6 +47,13 @@ class AgentServer:
             
         self.running = True
         logger.debug("Agent server started")
+        
+        # Create and register the message broker agent
+        if not self.message_broker:
+            logger.debug("Creating message broker agent")
+            self.message_broker = MessageBrokerAgent(name="Message Broker")
+            await self.register_agent(self.message_broker)
+            logger.debug(f"Message broker agent created with ID: {self.message_broker.agent_id}")
         
         # Start the message processing loop
         asyncio.create_task(self._process_messages())
@@ -75,7 +90,7 @@ class AgentServer:
                 # Mark the task as done
                 self.message_queue.task_done()
             except Exception as e:
-                logger.error(f"Error processing message: {e}")
+                logger.error(f"(server) Error processing message: {e}")
                 
             # Sleep briefly to avoid busy waiting
             await asyncio.sleep(0.01)
@@ -84,6 +99,15 @@ class AgentServer:
         """Handle a message."""
         # Log the message
         logger.debug(f"Handling message: {truncate_message(message)}")
+        
+        # Store the message in message history
+        if hasattr(message, 'message_id') and message.message_id:
+            self.message_history[message.message_id] = message
+            
+            # If this is a reply, track the relationship
+            if hasattr(message, 'in_reply_to') and message.in_reply_to:
+                self.message_pairs[message.in_reply_to]['response'] = message
+                self.message_pairs[message.message_id]['original'] = self.message_history.get(message.in_reply_to)
         
         # Create a WebSocket message for broadcasting
         try:
@@ -103,9 +127,20 @@ class AgentServer:
         
     async def route_message(self, message: Message):
         """Route a message to the appropriate agent."""
-        logger.debug(f"Routing message: {truncate_message(message)}")
+        logger.info(f"Route message: {message}")
         
-        # First, broadcast this message to all WebSocket clients
+        # First, store the message in message history
+        if hasattr(message, 'message_id') and message.message_id:
+            self.message_history[message.message_id] = message
+            
+            # If this is a reply, track the relationship
+            if hasattr(message, 'in_reply_to') and message.in_reply_to:
+                self.message_pairs[message.in_reply_to]['response'] = message
+                if message.in_reply_to in self.message_history:
+                    self.message_pairs[message.message_id]['original'] = self.message_history[message.in_reply_to]
+                    logger.debug(f"Tracked message {message.message_id} as response to {message.in_reply_to}")
+        
+        # Then broadcast this message to all WebSocket clients
         try:
             # Create a WebSocket message from the agent message
             ws_message = WebSocketMessage(
@@ -122,63 +157,143 @@ class AgentServer:
         except Exception as e:
             logger.error(f"Error broadcasting message to WebSocket clients: {e}")
         
-        # Check if the message has a receiver attribute
-        has_receiver = hasattr(message, 'receiver') and message.receiver is not None
+        # Skip if message is None
+        if message is None:
+            logger.warning("Attempted to route None message")
+            return
         
-        # Check if there's a specific receiver
-        if has_receiver and message.receiver != "broadcast":
-            logger.info(f"Routing message to {message.receiver}")
+        # The message broker should handle all routing decisions
+        # If this message already has an explicit receiver_id, handle direct routing
+        receiver_id = None
+        if hasattr(message, 'receiver_id'):
+            receiver_id = message.receiver_id
+        elif hasattr(message, 'receiver'):
+            receiver_id = message.receiver
+        
+        # Check if there's a specific receiver set by the broker
+        if receiver_id and receiver_id != "broadcast":
+            logger.info(f"Routing message to explicit receiver: {receiver_id}")
+            
             # Check if the receiver is a user ID
-            if message.receiver.startswith("user-"):
+            if receiver_id.startswith("user-"):
                 # Try to find a human agent for this user
                 human_agent = None
                 for agent_id, agent in self.agents.items():
-                    if agent_id == message.receiver and isinstance(agent, HumanAgent):
+                    if agent_id == receiver_id and isinstance(agent, HumanAgent):
                         human_agent = agent
                         break
                 
                 # If no human agent exists for this user, create one
                 if not human_agent:
-                    logger.debug(f"Creating new human agent for user {message.receiver}")
-                    human_agent = HumanAgent(agent_id=message.receiver)
+                    logger.debug(f"Creating new human agent for user {receiver_id}")
+                    human_agent = HumanAgent(agent_id=receiver_id)
                     await self.register_agent(human_agent)
                 
                 # Route the message to the human agent
-                logger.info(f"Routing message to human agent {message.receiver}")
-                await human_agent.receive_message(message)
-                
-                # Queue the message for broadcastin
-                await self.message_queue.put(message)
+                logger.info(f"Routing message to human agent {receiver_id}")
+                await human_agent.add_message(message)
                 
                 # Broadcast the updated state to all clients
-
                 await self.broadcast_state()
                 
                 return
             
             # Try to find the agent by ID
-            if message.receiver in self.agents:
-                agent = self.agents[message.receiver]
-                logger.info(f"Routing message to AI agent {message.receiver}")
-                await agent.receive_message(message)
-                
-                # Queue the message for broadcasting
-                await self.message_queue.put(message)
+            if receiver_id in self.agents:
+                agent = self.agents[receiver_id]
+                logger.info(f"Routing message to AI agent {receiver_id}")
+                await agent.add_message(message)
                 
                 # Broadcast the updated state to all clients
                 await self.broadcast_state()
                 
                 return
             else:
-                logger.warning(f"No agent found for receiver {message.receiver}")
+                logger.warning(f"No agent found for receiver {receiver_id}")
         
-        # If no specific receiver or receiver not found, just queue for broadcasting
-        logger.info("Queueing message for broadcasting")
+        # For messages without explicit receiver_id, use the message broker
+        # This is the primary path where message broker decides routing
+        if self.message_broker:
+            logger.info(f"Using message broker for routing message: {truncate_message(message)}")
+            # Get previous message if this is a response
+            original_message = None
+            
+            logger.info(f"Message_id: {message.message_id}")
+            logger.info(f"Message pairs: {self.message_pairs}")
+
+            # First check our message pair tracking
+            if hasattr(message, 'message_id') and message.message_id in self.message_pairs and 'original' in self.message_pairs[message.message_id]:
+                original_message = self.message_pairs[message.message_id]['original']
+                logger.info(f"Found original message for {message.message_id} from message pairs")
+            # Then check in_reply_to
+            elif hasattr(message, 'in_reply_to') and message.in_reply_to:
+                logger.info(f"Message {message.message_id} is a reply to {message.in_reply_to}")
+                # Check if we have the original message in our history
+                if message.in_reply_to in self.message_history:
+                    original_message = self.message_history[message.in_reply_to]
+                    logger.info(f"Found original message in history: {truncate_message(original_message)}")
+                else:
+                    # Create a placeholder - in a real implementation, you'd retrieve from a database
+                    logger.warning(f"Original message {message.in_reply_to} not found in history, using placeholder")
+                    original_message = Message(
+                        message_id=message.in_reply_to,
+                        sender_id="unknown",
+                        content={"text": "Original message not found in history"},
+                        message_type="text"
+                    )
+            
+            # If we can't find an original message, it's a new conversation
+            if not original_message:
+                logger.info(f"Message {message.message_id} appears to be starting a new conversation")
+                # This is a new conversation, let the broker decide if it should go to a specific agent
+                # For now, just send the message as both original and response
+                original_message = message
+                logger.debug(f"Setting both original and response to the same message for new conversation")
+            
+            try:
+                # Determine the next agent using the broker
+                logger.debug(f"Asking broker to route: original={truncate_message(original_message)}, response={truncate_message(message)}")
+                
+                # Make sure original_sender_id is passed to the broker for consideration in routing
+                original_sender_id = original_message.sender_id if hasattr(original_message, 'sender_id') else None
+                logger.debug(f"Original sender ID: {original_sender_id}")
+                
+                next_agent_id = await self.message_broker.route_message_chain(original_message, message, original_sender_id)
+                
+                if next_agent_id and next_agent_id in self.agents:
+                    next_agent = self.agents[next_agent_id]
+                    logger.info(f"Broker routing message to {next_agent.name} ({next_agent_id})")
+                    
+                    # Create a new message with the receiver_id set by the broker
+                    routed_message = None
+                    if hasattr(message, 'dict'):
+                        message_dict = message.dict()
+                        message_dict['receiver_id'] = next_agent_id
+                        routed_message = Message(**message_dict)
+                    else:
+                        # For dict-like objects
+                        routed_message = message.copy() if hasattr(message, 'copy') else dict(message)
+                        routed_message['receiver_id'] = next_agent_id
+                    
+                    # Send the message to the selected agent
+                    await next_agent.add_message(routed_message)
+                    
+                    # Broadcast the updated state
+                    await self.broadcast_state()
+                    return
+                else:
+                    logger.warning(f"Broker returned invalid agent ID: {next_agent_id}")
+            except Exception as e:
+                logger.error(f"Error using message broker for routing: {e}", exc_info=True)
+        else:
+            logger.warning("No message broker available for routing")
+        
+        # If broker routing failed or no broker is available, queue for broadcast only
+        logger.info("Broker routing failed or not available, queueing message for broadcasting only")
         await self.message_queue.put(message)
         
         # Broadcast the updated state to all clients
         await self.broadcast_state()
-
 
     async def broadcast_message(self, message: WebSocketMessage):
         """Broadcast a message to all connected WebSocket clients."""

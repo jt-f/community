@@ -74,7 +74,7 @@ async def post_message(
     """Send a message through HTTP POST."""
     try:
         msg = Message(
-            id=str(uuid4()),
+            message_id=str(uuid4()),
             timestamp=message.timestamp or datetime.now(),
             sender_id=message.sender_id,
             receiver_id=message.recipient_id,
@@ -97,13 +97,13 @@ async def post_message(
         if failed_agents:
             return APIResponse(
                 status="partial_success",
-                data={"message_id": msg.id},
+                data={"message_id": msg.message_id},
                 error=f"Failed to deliver to agents: {', '.join(failed_agents)}"
             )
             
         return APIResponse(
             status="success",
-            data={"message_id": msg.id}
+            data={"message_id": msg.message_id}
         )
     except Exception as e:
         logger.error(f"(post_message) Error processing message: {e} for message: {truncate_message(message.content)}")
@@ -126,7 +126,8 @@ async def get_agent_options():
     
     # Available agent types
     agent_types = [
-        {"id": "analyst", "name": "Analyst Agent", "description": "Processes analysis requests and generates insights"}
+        {"id": "analyst", "name": "Analyst Agent", "description": "Processes analysis requests and generates insights"},
+        {"id": "broker", "name": "Message Broker", "description": "Routes messages between agents using LLM reasoning"}
     ]
     
     # Available model providers
@@ -148,7 +149,9 @@ async def get_agent_options():
         {"id": "llm_inference", "name": "LLM Inference", "description": "Run inference using language models"},
         {"id": "code_generation", "name": "Code Generation", "description": "Generate code based on requirements"},
         {"id": "text_summarization", "name": "Text Summarization", "description": "Summarize long texts"},
-        {"id": "question_answering", "name": "Question Answering", "description": "Answer questions based on knowledge"}
+        {"id": "question_answering", "name": "Question Answering", "description": "Answer questions based on knowledge"},
+        {"id": "message_routing", "name": "Message Routing", "description": "Route messages between agents"},
+        {"id": "agent_coordination", "name": "Agent Coordination", "description": "Coordinate communication between agents"}
     ]
     
     # Log the response
@@ -186,8 +189,134 @@ async def create_agent(agent_config: AgentConfig = Body(...)):
             logger.info(f"Created new agent: {agent.name} ({agent.agent_id}) of type {agent_config.agent_type}")
             
             return {"status": "success", "agent_id": agent.agent_id, "message": f"Agent {agent_config.name} created successfully"}
+        
+        elif agent_config.agent_type == "broker":
+            from ..core.agents.broker import MessageBrokerAgent
+            
+            # Create a new message broker agent with the specified configuration
+            agent = MessageBrokerAgent(name=agent_config.name)
+            
+            # Set the model and provider
+            agent.default_model = agent_config.model
+            agent.model_provider = ModelProvider(agent_config.provider)
+            
+            # Set capabilities
+            agent.capabilities = agent_config.capabilities
+            
+            # Register the agent with the agent server
+            await agent_server.register_agent(agent)
+            
+            # Log the successful agent creation
+            logger.info(f"Created new message broker agent: {agent.name} ({agent.agent_id})")
+            
+            return {"status": "success", "agent_id": agent.agent_id, "message": f"Message Broker {agent_config.name} created successfully"}
+        
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported agent type: {agent_config.agent_type}")
     except Exception as e:
         logger.error(f"Failed to create agent: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create agent: {str(e)}")
+
+class RouteRequest(BaseModel):
+    """API model for requesting message routing."""
+    original_message_id: str
+    response_message_id: str
+
+@router.post("/route-message")
+async def route_message(route_request: RouteRequest = Body(...)):
+    """
+    Route a message using the message broker.
+    
+    This endpoint respects the separation of responsibilities where the broker
+    determines the next receiver_id but doesn't modify messages directly.
+    """
+    try:
+        # Find the message broker agent
+        message_broker = None
+        for agent_id, agent in agent_server.agents.items():
+            if hasattr(agent, 'state') and agent.state.type == "broker":
+                message_broker = agent
+                break
+        
+        # If no message broker is found, try the default one
+        if not message_broker and hasattr(agent_server, 'message_broker') and agent_server.message_broker:
+            message_broker = agent_server.message_broker
+        
+        if not message_broker:
+            logger.error("No message broker agent found")
+            raise HTTPException(status_code=404, detail="No message broker agent found")
+        
+        # For this example, we'll create dummy messages
+        # In a real implementation, you would retrieve the actual messages from a database or message store
+        original_message = Message(
+            message_id=route_request.original_message_id,
+            sender_id="user", 
+            content={"text": "This is a placeholder for the original message"},
+            message_type="text"
+        )
+        
+        response_message = Message(
+            message_id=route_request.response_message_id,
+            sender_id="agent", 
+            content={"text": "This is a placeholder for the response message"},
+            message_type="text",
+            in_reply_to=route_request.original_message_id
+        )
+        
+        # First, get the routing decision from the broker
+        next_agent_id = await message_broker.route_message_chain(
+            original_message=original_message, 
+            response_message=response_message,
+            original_sender_id=original_message.sender_id
+        )
+        
+        logger.info(f"Broker determined next agent: {next_agent_id}")
+        
+        if next_agent_id and next_agent_id in agent_server.agents:
+            # Create a new message with the receiver_id set as determined by the broker
+            routed_message = Message(
+                message_id=str(uuid4()),
+                sender_id=response_message.sender_id,
+                receiver_id=next_agent_id,  # Set the receiver_id as determined by the broker
+                content=response_message.content,
+                message_type=response_message.message_type,
+                in_reply_to=response_message.message_id
+            )
+            
+            # Send the routed message to the agent server for delivery
+            await agent_server.route_message(routed_message)
+            
+            # Create a system message with the routing decision
+            system_message = Message(
+                sender_id=system_agent.agent_id,
+                receiver_id="broadcast",
+                content={
+                    "text": f"The message has been routed to {agent_info['name']} ({next_agent_id})",
+                    "routing_decision": {
+                        "agent_id": next_agent_id,
+                        "agent_name": agent_info["name"],
+                        "agent_type": agent_info["type"],
+                        "reasoning": reasoning
+                    }
+                },
+                message_type="system",
+                in_reply_to=response_message.message_id
+            )
+            
+            return {
+                "status": "success", 
+                "message": f"Message routed to agent {next_agent_id}",
+                "next_agent_id": next_agent_id
+            }
+        else:
+            # If the broker returned an invalid agent ID, notify the client
+            logger.warning(f"Broker returned invalid agent ID: {next_agent_id}")
+            return {
+                "status": "warning",
+                "message": "Broker returned invalid or empty agent ID",
+                "next_agent_id": next_agent_id
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to route message: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to route message: {str(e)}")

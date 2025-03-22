@@ -151,6 +151,6 @@ class BaseAgent(ABC):
                 await self.set_status("idle")   
 
             except Exception as e:
-                logger.error(f"Error processing message: {e}", exc_info=True)
+                logger.error(f"(process_messages) Error processing message: {e}", exc_info=True)
                 self.message_queue.task_done()
                 await self.set_status("idle")
