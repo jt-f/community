@@ -30,6 +30,50 @@ A real-time chat application built with React, TypeScript, and Vite that connect
 3. Make sure your WebSocket server is running on port 8765
 4. Start chatting!
 
+## Hot Module Replacement (HMR)
+
+This project uses Vite's built-in HMR, which provides instant updates as you edit your code. HMR is enabled by default and works out of the box.
+
+### How it works
+
+- When you make changes to your React components, the changes will be reflected immediately in the browser without a full page reload
+- Component state is preserved during updates
+- The WebSocket connection will automatically reconnect if needed
+
+### Custom HMR Configuration
+
+If you need to customize HMR behavior, you can modify the `vite.config.ts` file:
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    hmr: {
+      // Enable HMR overlay
+      overlay: true,
+      // Custom HMR protocol
+      protocol: 'ws',
+      // Custom HMR host
+      host: 'localhost',
+      // Custom HMR port
+      port: 24678
+    }
+  }
+})
+```
+
+### Troubleshooting HMR
+
+If HMR isn't working as expected:
+
+1. Make sure you're not using any browser extensions that might interfere with WebSocket connections
+2. Check if your firewall is blocking WebSocket connections
+3. Try clearing your browser cache
+4. Ensure you're running the latest version of the development server
+
 ## Features
 
 - Real-time WebSocket communication

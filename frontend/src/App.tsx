@@ -4,7 +4,7 @@ function App() {
   return (
     <div className="app">
       <header>
-        <h1>WebSocket Chat</h1>
+        <h1>Chat</h1>
       </header>
       <main>
         <Chat />

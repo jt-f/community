@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-
-interface Message {
-  text: string;
-  isEcho: boolean;
-}
+import { ChatMessage, MessageType, createMessage } from '../types/message';
 
 export function Chat() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const userId = useRef(`user_${Math.random().toString(36).substring(2, 11)}`);
 
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:8765/ws');
@@ -20,7 +17,12 @@ export function Chat() {
     };
 
     ws.onmessage = (event) => {
-      setMessages(prev => [...prev, { text: event.data, isEcho: true }]);
+      try {
+        const message = JSON.parse(event.data) as ChatMessage;
+        setMessages(prev => [...prev, message]);
+      } catch (error) {
+        console.error('Failed to parse message:', error);
+      }
     };
 
     ws.onclose = () => {
@@ -42,8 +44,15 @@ export function Chat() {
 
   const sendMessage = () => {
     if (inputMessage.trim() && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(inputMessage);
-      setMessages(prev => [...prev, { text: inputMessage, isEcho: false }]);
+      const message = createMessage(
+        userId.current,
+        'server',
+        inputMessage,
+        MessageType.TEXT
+      );
+      
+      wsRef.current.send(JSON.stringify(message));
+      setMessages(prev => [...prev, message]);
       setInputMessage('');
     }
   };
@@ -60,12 +69,25 @@ export function Chat() {
         Status: {isConnected ? 'Connected' : 'Disconnected'}
       </div>
       <div className="messages">
-        {messages.map((message, index) => (
+        {messages.map((message) => (
           <div
-            key={index}
-            className={`message ${message.isEcho ? 'echo' : 'sent'}`}
+            key={message.message_id}
+            className={`message ${message.sender_id === userId.current ? 'sent' : 'received'}`}
           >
-            {message.text}
+            <div className="message-header">
+              <span className="sender">{message.sender_id}</span>
+              <span className="timestamp">
+                {new Date(message.send_timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+            <div className="message-content">
+              {message.text_payload}
+              {message.in_reply_to_message_id && (
+                <div className="reply-indicator">
+                  Replying to message: {message.in_reply_to_message_id}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -74,7 +96,7 @@ export function Chat() {
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
+          onKeyUp={handleKeyPress}
           placeholder="Type a message..."
           disabled={!isConnected}
         />
@@ -123,9 +145,27 @@ export function Chat() {
           margin-left: auto;
         }
 
-        .message.echo {
+        .message.received {
           background-color: #e9ecef;
           color: #212529;
+        }
+
+        .message-header {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.8em;
+          margin-bottom: 4px;
+        }
+
+        .message-content {
+          word-wrap: break-word;
+        }
+
+        .reply-indicator {
+          font-size: 0.8em;
+          margin-top: 4px;
+          padding-top: 4px;
+          border-top: 1px solid rgba(255, 255, 255, 0.2);
         }
 
         .input-container {
