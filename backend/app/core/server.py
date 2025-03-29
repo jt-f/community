@@ -1,7 +1,7 @@
 """
 Agent server implementation for managing agents and WebSocket connections.
 """
-from typing import Dict, Set, Any
+from typing import Dict, Set, Any, AsyncGenerator
 import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -114,49 +114,38 @@ class AgentServer:
             ws_message = WebSocketMessage(
                 type="message",
                 data={
-                    "message": message.dict() if hasattr(message, "dict") else message,
+                    "message": message.model_dump() if hasattr(message, "model_dump") else message,
                     "timestamp": datetime.now().isoformat()
                 }
             )
             
             # Broadcast the message to all clients
-            logger.info(f"Broadcasting message from _handle_message")
             await self.broadcast_message(ws_message)
         except Exception as e:
             logger.error(f"Error broadcasting message from queue: {e}")
         
     async def route_message(self, message: Message):
         """Route a message to the appropriate agent."""
-        logger.info(f"Route message: {message}")
+        logger.info(f"Server routing message ({message.message_id}) from <{self.agents[message.sender_id].name}>")
         
         # First, store the message in message history
-        if hasattr(message, 'message_id') and message.message_id:
-            self.message_history[message.message_id] = message
-            
-            # If this is a reply, track the relationship
-            if hasattr(message, 'in_reply_to') and message.in_reply_to:
-                self.message_pairs[message.in_reply_to]['response'] = message
-                if message.in_reply_to in self.message_history:
-                    self.message_pairs[message.message_id]['original'] = self.message_history[message.in_reply_to]
-                    logger.debug(f"Tracked message {message.message_id} as response to {message.in_reply_to}")
+        self.message_history[message.message_id] = message
         
-        # Then broadcast this message to all WebSocket clients
-        try:
-            # Create a WebSocket message from the agent message
-            ws_message = WebSocketMessage(
-                type="message",
-                data={
-                    "message": message.dict() if hasattr(message, "dict") else message,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-            
-            # Broadcast the message to all clients
-            logger.info(f"Broadcasting message from route_message")
-            await self.broadcast_message(ws_message)
-        except Exception as e:
-            logger.error(f"Error broadcasting message to WebSocket clients: {e}")
-        
+        # If this is a reply, track the relationship
+        if hasattr(message, 'in_reply_to') and message.in_reply_to:
+            self.message_pairs[message.in_reply_to]['response'] = message
+            if message.in_reply_to in self.message_history:
+                self.message_pairs[message.message_id]['original'] = self.message_history[message.in_reply_to]
+                logger.info(f"Recorded message {message.message_id} as response to {message.in_reply_to}")
+            else:
+                logger.warning(f"Original message {message.in_reply_to} not found in history, using placeholder")
+                self.message_pairs[message.message_id]['original'] = Message(
+                    message_id=message.in_reply_to,
+                    sender_id="unknown",
+                    content={"text": "Original message not found in history"},
+                    message_type="text"
+                )
+    
         # Skip if message is None
         if message is None:
             logger.warning("Attempted to route None message")
@@ -172,7 +161,8 @@ class AgentServer:
         
         # Check if there's a specific receiver set by the broker
         if receiver_id and receiver_id != "broadcast":
-            logger.info(f"Routing message to explicit receiver: {receiver_id}")
+            agent_name = self.agents[receiver_id].name
+            logger.info(f"Routing message to explicit receiver: {agent_name}")
             
             # Check if the receiver is a user ID
             if receiver_id.startswith("user-"):
@@ -185,7 +175,7 @@ class AgentServer:
                 
                 # If no human agent exists for this user, create one
                 if not human_agent:
-                    logger.debug(f"Creating new human agent for user {receiver_id}")
+                    logger.info(f"Creating new human agent : {agent_name}({receiver_id})")
                     human_agent = HumanAgent(agent_id=receiver_id)
                     await self.register_agent(human_agent)
                 
@@ -201,7 +191,7 @@ class AgentServer:
             # Try to find the agent by ID
             if receiver_id in self.agents:
                 agent = self.agents[receiver_id]
-                logger.info(f"Routing message to AI agent {receiver_id}")
+                logger.info(f"Routing message to Agent {agent.name}")
                 await agent.add_message(message)
                 
                 # Broadcast the updated state to all clients
@@ -214,7 +204,8 @@ class AgentServer:
         # For messages without explicit receiver_id, use the message broker
         # This is the primary path where message broker decides routing
         if self.message_broker:
-            logger.info(f"Using message broker for routing message: {truncate_message(message)}")
+            logger.info(f"Using message broker to route message: '{truncate_message(message.content.get('text'))}'")
+            
             # Get previous message if this is a response
             original_message = None
             
@@ -231,7 +222,7 @@ class AgentServer:
                 # Check if we have the original message in our history
                 if message.in_reply_to in self.message_history:
                     original_message = self.message_history[message.in_reply_to]
-                    logger.info(f"Found original message in history: {truncate_message(original_message)}")
+                    logger.info(f"Found original message in history: '{truncate_message(original_message.content.get('text'))}'")
                 else:
                     # Create a placeholder - in a real implementation, you'd retrieve from a database
                     logger.warning(f"Original message {message.in_reply_to} not found in history, using placeholder")
@@ -262,12 +253,12 @@ class AgentServer:
                 
                 if next_agent_id and next_agent_id in self.agents:
                     next_agent = self.agents[next_agent_id]
-                    logger.info(f"Broker routing message to {next_agent.name} ({next_agent_id})")
+                    logger.info(f"Broker routing message to {next_agent.name}")
                     
                     # Create a new message with the receiver_id set by the broker
                     routed_message = None
-                    if hasattr(message, 'dict'):
-                        message_dict = message.dict()
+                    if hasattr(message, 'model_dump'):
+                        message_dict = message.model_dump()
                         message_dict['receiver_id'] = next_agent_id
                         routed_message = Message(**message_dict)
                     else:
@@ -288,6 +279,23 @@ class AgentServer:
         else:
             logger.warning("No message broker available for routing")
         
+        # Then broadcast this message to all WebSocket clients
+        try:
+            # Create a WebSocket message from the agent message
+            ws_message = WebSocketMessage(
+                type="message",
+                data={
+                    "message": message.model_dump() if hasattr(message, "model_dump") else message,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+            logger.info(f"Server broadcasting message to ws clients: {ws_message}")
+            # Broadcast the message to all clients
+
+            await self.broadcast_message(ws_message)
+        except Exception as e:
+            logger.error(f"Error broadcasting message to WebSocket clients: {e}")
+        
         # If broker routing failed or no broker is available, queue for broadcast only
         logger.info("Broker routing failed or not available, queueing message for broadcasting only")
         await self.message_queue.put(message)
@@ -301,7 +309,7 @@ class AgentServer:
         if isinstance(message, dict):
             data = message
         else:
-            data = message.dict()
+            data = message.model_dump()
             
         # Send to all connected clients
         if data['type'] == 'message':
@@ -314,6 +322,41 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Error sending message to client: {e}")
                 
+    async def process_message(self, message: Message) -> AsyncGenerator[Message, None]:
+        """Process an incoming message and route it to the appropriate agent."""
+        logger.info(f"message ({message.message_id}) passed to agent server")
+        try:
+            # Get the receiver agent
+            receiver_id = message.receiver_id
+            receiver = self.agents.get(receiver_id)
+            # Get the sender agent
+            sender_id = message.sender_id
+            sender = self.agents.get(sender_id)
+
+            
+            # For non-human agents, process the message normally
+            if receiver:
+                logger.info(f"message ({message.message_id}) passed to receiving agent {receiver.name}")
+                async for response in receiver.process_message(message):
+                    logger.info(f"message ({response.message_id}) generated in response to message ({message.message_id}) by {receiver.name}")
+                    yield response
+            else:
+                logger.warning(f"Unknown receiver: {receiver_id}")
+                yield Message(
+                    sender_id=self.system_agent.agent_id,
+                    receiver_id=message.sender_id,
+                    content={"text": f"Error: Unknown receiver {receiver_id}", "type": "error"},
+                    message_type="error"
+                )
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
+            yield Message(
+                sender_id=self.system_agent.agent_id,
+                receiver_id=message.sender_id,
+                content={"text": f"Error processing message: {str(e)}", "type": "error"},
+                message_type="error"
+            )
+
     def register_websocket(self, websocket):
         """Register a WebSocket connection."""
         self.websocket_clients.add(websocket)
@@ -384,7 +427,7 @@ class AgentServer:
             # First, add all agents from self.agents
             for agent_id, agent in self.agents.items():
                 try:
-                    states[agent_id] = agent.state.dict()
+                    states[agent_id] = agent.state.model_dump()
                     names[agent_id] = agent.name
                     logger.debug(f"Added state for agent {agent_id} from self.agents")
                 except Exception as e:
@@ -394,7 +437,7 @@ class AgentServer:
             for agent in list(available_agents) + list(thinking_agents):
                 if agent.agent_id not in states:
                     try:
-                        states[agent.agent_id] = agent.state.dict()
+                        states[agent.agent_id] = agent.state.model_dump()
                         names[agent.agent_id] = agent.name
                         logger.debug(f"Added state for agent {agent.agent_id} from agent_manager")
                     except Exception as e:

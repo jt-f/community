@@ -3,14 +3,17 @@ Base agent implementation.
 """
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, List, Optional, AsyncGenerator, Set
+from typing import Dict, List, Optional, AsyncGenerator, Set, Any, Tuple, Union, ClassVar
 from uuid import uuid4
 import asyncio
 import time
+import os
+import json
 
 from ..models import Message, WebSocketMessage, AgentState, AgentConfig
 from ...utils.logger import get_logger
 from ...utils.message_utils import truncate_message
+from ...utils.id_generator import generate_short_id
 
 logger = get_logger(__name__)
 
@@ -20,6 +23,12 @@ _used_agent_names: Set[str] = set()
 
 class BaseAgent(ABC):
     """Base agent class defining the core agent interface."""
+    
+    name: ClassVar[str] = "BaseAgent"
+    agent_type: ClassVar[str] = "base"
+    description: ClassVar[str] = "Base agent implementation"
+    capabilities: ClassVar[List[str]] = []
+    config: ClassVar[Dict[str, Any]] = {}
     
     def __init__(self, name: str, think_interval: float = 60.0):
         """
@@ -35,13 +44,11 @@ class BaseAgent(ABC):
         if name in _used_agent_names:
             raise ValueError(f"Agent name '{name}' is already in use")
             
-        # Generate a unique UUID
-        while True:
-            new_id = str(uuid4())
-            if new_id not in _used_agent_ids:
-                break
+        # Generate a unique shorter ID
+        self.agent_id = generate_short_id()
+        while self.agent_id in _used_agent_ids:
+            self.agent_id = generate_short_id()
                 
-        self.agent_id = new_id
         self.name = name
         self.message_queue = asyncio.Queue()
         self.last_think_time = 0
@@ -55,7 +62,7 @@ class BaseAgent(ABC):
             status="idle",
             queue_size=0,
             last_activity=datetime.now().isoformat(),
-            capabilities=[]
+            capabilities=self.capabilities or []
         )
         
         # Register the agent's ID and name
@@ -70,13 +77,18 @@ class BaseAgent(ABC):
             _used_agent_names.discard(self.name)
         
     @property
+    def id(self) -> str:
+        """Get the agent's unique ID."""
+        return self.agent_id
+    
+    @property
     def state(self) -> AgentState:
-        """Get the current agent state."""
+        """Get the agent's current state."""
         return self._state
     
     async def add_message(self, message: Message) -> None:
         """Add a message to the agent's queue."""
-        logger.debug(f"Agent {self.agent_id} received message: {truncate_message(message.content)}")
+        logger.debug(f"Agent {self.agent_id} received message: '{truncate_message(message.content.get('text'))}'")
         await self.message_queue.put(message)
     
     async def get_next_message(self) -> Optional[Message]:
@@ -99,8 +111,20 @@ class BaseAgent(ABC):
         """
         pass
 
+    async def set_status(self, status: str) -> None:
+        """
+        Update the agent's status.
+        
+        Args:
+            status: The new status
+        """
+        self._state.status = status
+        self._state.last_activity = datetime.now().isoformat()
+        # Notify the agent server of the status change if there is one
+        if self.agent_server:
+            await self.agent_server.broadcast_state()
     
-    def should_think(self) -> bool:
+    async def _should_think(self) -> bool:
         """Determine if the agent should run a thinking cycle."""
         current_time = time.time()
         logger.debug(f"{self.name}:{self.agent_id} Checking if should think")
@@ -111,18 +135,68 @@ class BaseAgent(ABC):
         logger.debug(f"{self.name}:{self.agent_id} Think decision: {think_decision}")
         return think_decision
     
-    async def think_once(self) -> Optional[Message]:
-        """Run a single thinking cycle. Override in subclasses."""
-        self.last_think_time = time.time()
-        self._think_counter += 1  # Increment the think counter
-        return None
-    
-    async def think_counter(self) -> int:
-        """Get the current think counter."""
-        return self._think_counter
-
-
+    async def _think(self) -> AsyncGenerator[Message, None]:
+        """
+        Perform an internal thinking cycle, without external stimulus.
         
+        Agents may override this to provide proactive behavior.
+        """
+        if self.message_queue.empty():
+            logger.debug(f"Agent {self.name} thinking...")
+            self._think_counter += 1
+            self.last_think_time = time.time()
+            yield Message(
+                sender_id=self.agent_id,
+                receiver_id="broadcast",
+                content={"text": f"{self.name} - Thinking cycle {self._think_counter}", "type": "thinking"},
+                message_type="thinking"
+            )
+    
+    async def run(self) -> AsyncGenerator[Message, None]:
+        """
+        Main agent processing loop. Processes messages from the queue and runs thinking cycles.
+        
+        Yields:
+            Message objects representing the agent's responses/actions
+        """
+        while True:
+            try:
+                # Check if we should run a thinking cycle
+                if await self._should_think():
+                    async for response in self._think():
+                        yield response
+                
+                # Check for messages in the queue (non-blocking)
+                if not self.message_queue.empty():
+                    message = await self.message_queue.get()
+                    await self.set_status("responding")
+                    
+                    # Process the message
+                    async for response in self.process_message(message):
+                        yield response
+                    
+                    self.message_queue.task_done()
+                    await self.set_status("idle")
+                
+                # Sleep briefly to prevent CPU spinning
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                logger.exception(f"Error in agent {self.name} run loop: {e}")
+                await asyncio.sleep(1)  # Sleep after an error to prevent rapid failures
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get the current state of the agent as a dictionary."""
+        return {
+            "id": self.agent_id,
+            "name": self.name,
+            "type": self.__class__.__name__.lower().replace('agent', ''),
+            "status": self._state.status,
+            "queue_size": self.message_queue.qsize(),
+            "last_activity": self._state.last_activity,
+            "capabilities": self.capabilities
+        }
+
     @classmethod
     def clear_registries(cls):
         """Clear the registries of used IDs and names (mainly for testing)."""
@@ -132,12 +206,6 @@ class BaseAgent(ABC):
     def has_messages(self) -> bool:
         """Check if the agent has messages in its queue."""
         return not self.message_queue.empty()
-    
-    async def set_status(self, status: str):
-        """Set the status of the agent."""
-        self._state.status = status
-        if self.agent_server:
-            await self.agent_server.broadcast_state()
 
     async def process_messages(self):
         """Process all messages in the queue."""
@@ -146,6 +214,7 @@ class BaseAgent(ABC):
             
             try:
                 response = await self.process_message(message)
+                logger.info(f"<{self.name}> generated response : '{response.content.get('text')}'")
                 await self.agent_server.route_message(response) 
                 self.message_queue.task_done()
                 await self.set_status("idle")   

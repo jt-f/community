@@ -7,6 +7,7 @@ import asyncio
 from ..core.models import Message, WebSocketMessage
 from ..utils.logger import get_logger
 from ..utils.message_utils import truncate_message
+from ..utils.id_generator import generate_short_id
 from ..core.instances import agent_server
 
 logger = get_logger(__name__)
@@ -66,14 +67,18 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 data = await asyncio.wait_for(
                     websocket.receive_json(),
-                    timeout=1.0  # Increased timeout
+                    timeout=0.2  # Increased timeout
                 )
 
                 # Validate message structure
                 if not isinstance(data, dict):
                     logger.error(f"Invalid message format: {truncate_message(data)}")
                     continue
-                    
+                
+                # Log the received message safely
+                message_id = data.get('data', {}).get('message_id', 'unknown')
+                content = data.get('data', {}).get('content', {}).get('text', '')
+
                 # Check if the message has the expected structure
                 if 'type' in data and 'data' in data:
                     # Handle the message based on its type
@@ -86,18 +91,44 @@ async def websocket_endpoint(websocket: WebSocket):
                             sender_id=message_data.get('sender_id', 'unknown'),
                             receiver_id=message_data.get('receiver_id'),
                             message_type=message_data.get('message_type', 'text'),
-                            content=message_data.get('content', {})
+                            content=message_data.get('content', {}),
+                            message_id=message_data.get('message_id', generate_short_id()),
+                            in_reply_to=message_data.get('in_reply_to')
                         )
                         
-                        # Log the message details for debugging
-                        logger.debug(f"Created message object: sender={message.sender_id}, receiver={message.receiver_id}, content={truncate_message(message.content)}")
-                        
-                        # Route the message to the appropriate agent
-                        for agent in list(agent_server.agent_manager.available_agents) + list(agent_server.agent_manager.thinking_agents):
-                            if agent.agent_id == message.receiver_id:
-                                await agent.message_queue.put(message)
-                                logger.info(f"Agent {agent.name} received message: {truncate_message(message.content.get('text','None'))}")
-                                break
+
+                        # Use the agent_server to process the message properly through the broker
+                        # This ensures routing is handled by the broker's LLM-based logic
+                        logger.debug(f"Agents: {', '.join([value.name+':'+value.agent_id for key, value in agent_server.agents.items()])}")
+                        # Process the message through the agent server
+                        try:
+                            logger.info(f"message ({message.message_id}) received by backend websocket: sender={agent_server.agents[message.sender_id].name}, receiver={agent_server.agents[message.receiver_id].name}, content={truncate_message(message.content)}")
+                            async for response in agent_server.process_message(message):
+                                # Send each response back to the client
+                                if isinstance(response, Message):
+                                    response_data = {
+                                        "type": "message",
+                                        "data": response.model_dump()
+                                    }
+                                    await websocket.send_json(response_data)
+
+                                    response_name = agent_server.agents[response_data.get('data').get('receiver_id')].name
+                                    logger.info(f"message ({response_data.get('data').get('message_id')}) sent in response to {response_name}")
+                                else:
+                                    logger.warning(f"Unexpected response type: {type(response)}")
+                        except Exception as e:
+                            logger.error(f"Error processing message: {str(e)}")
+                            # Send error message back to client
+                            error_message = {
+                                "type": "error",
+                                "data": {
+                                    "message": f"Error processing message: {str(e)}",
+                                    "message_id": message.message_id
+                                }
+                            }
+                            await websocket.send_json(error_message)
+                else:
+                    logger.info("Unexpected structure of message received from websocket")
             except asyncio.TimeoutError:
                 if websocket.application_state != WebSocketState.CONNECTED:
                     break
@@ -109,7 +140,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.debug("WebSocket connection closed by client")
                 break
             except Exception as e:
-                logger.error(f"Error handling WebSocket message: {str(e)}")
+                import traceback
+                logger.error(
+                    f"Error handling WebSocket message:\n"
+                    f"Error type: {type(e).__name__}\n"
+                    f"Error message: {str(e)}\n"
+                    f"Traceback:\n{traceback.format_exc()}"
+                )
                 if websocket.application_state != WebSocketState.CONNECTED:
                     break
                 continue

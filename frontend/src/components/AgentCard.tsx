@@ -237,9 +237,11 @@ class AgentCardErrorBoundary extends React.Component<
 // Wrap the original AgentCard with the error boundary
 export const AgentCard: React.FC<AgentCardProps> = (props) => {
   return (
-    <AgentCardErrorBoundary>
-      <AgentCardContent {...props} />
-    </AgentCardErrorBoundary>
+    <div id={`agent-card-${props.agent.id}`} style={{ width: '100%', height: '100%' }}>
+      <AgentCardErrorBoundary>
+        <AgentCardContent {...props} />
+      </AgentCardErrorBoundary>
+    </div>
   );
 };
 

@@ -17,6 +17,7 @@ from fastapi.security import APIKeyHeader
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from ..utils.model_client import ModelProvider
+from ..utils.id_generator import generate_short_id
 
 from ..core.agents.config import ANALYST_CONFIG
 
@@ -74,7 +75,7 @@ async def post_message(
     """Send a message through HTTP POST."""
     try:
         msg = Message(
-            message_id=str(uuid4()),
+            message_id=generate_short_id(),
             timestamp=message.timestamp or datetime.now(),
             sender_id=message.sender_id,
             receiver_id=message.recipient_id,
@@ -186,7 +187,7 @@ async def create_agent(agent_config: AgentConfig = Body(...)):
             await agent_server.register_agent(agent)
             
             # Log the successful agent creation
-            logger.info(f"Created new agent: {agent.name} ({agent.agent_id}) of type {agent_config.agent_type}")
+            logger.info(f"Created Agent: {agent.name} ({agent.agent_id}) of type {agent_config.agent_type}")
             
             return {"status": "success", "agent_id": agent.agent_id, "message": f"Agent {agent_config.name} created successfully"}
         
@@ -207,7 +208,7 @@ async def create_agent(agent_config: AgentConfig = Body(...)):
             await agent_server.register_agent(agent)
             
             # Log the successful agent creation
-            logger.info(f"Created new message broker agent: {agent.name} ({agent.agent_id})")
+            logger.info(f"Created new message broker Agent: {agent.name} ({agent.agent_id})")
             
             return {"status": "success", "agent_id": agent.agent_id, "message": f"Message Broker {agent_config.name} created successfully"}
         
@@ -270,12 +271,13 @@ async def route_message(route_request: RouteRequest = Body(...)):
             original_sender_id=original_message.sender_id
         )
         
-        logger.info(f"Broker determined next agent: {next_agent_id}")
+        next_agent = agent_server.agents[next_agent_id]
+        logger.info(f"Broker determined next agent: {next_agent.name}")
         
         if next_agent_id and next_agent_id in agent_server.agents:
             # Create a new message with the receiver_id set as determined by the broker
             routed_message = Message(
-                message_id=str(uuid4()),
+                message_id=generate_short_id(),
                 sender_id=response_message.sender_id,
                 receiver_id=next_agent_id,  # Set the receiver_id as determined by the broker
                 content=response_message.content,
@@ -320,3 +322,53 @@ async def route_message(route_request: RouteRequest = Body(...)):
     except Exception as e:
         logger.error(f"Failed to route message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to route message: {str(e)}")
+
+@router.post("/message")
+async def handle_message(request: Request):
+    """Handle a message from the frontend."""
+    try:
+        # Parse the message from the request body
+        body = await request.json()
+        data = body.get("data", {})
+        
+        # Create a message object
+        msg = Message(
+            message_id=generate_short_id(),
+            sender_id=data.get("sender_id", "unknown"),
+            receiver_id=data.get("receiver_id"),
+            content=data.get("content", {}),
+            message_type=data.get("message_type", "text"),
+            in_reply_to=data.get("in_reply_to")
+        )
+        
+        # Process the message
+        await server.process_message(msg)
+        
+        return {"status": "success", "data": {"message_id": msg.message_id}}
+    except Exception as e:
+        logging.exception("Error handling message")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/broadcast-thinking")
+async def broadcast_thinking_status(request: Request):
+    """Broadcast a thinking status message to all clients."""
+    try:
+        # Parse the message from the request body
+        body = await request.json()
+        
+        # Create a message object
+        msg = Message(
+            message_id=generate_short_id(),
+            sender_id=body.get("agent_id", "system"),
+            receiver_id="broadcast",
+            content={"status": "thinking", "text": "Processing..."},
+            message_type="thinking"
+        )
+        
+        # Broadcast the message
+        await server.broadcast_message(msg)
+        
+        return {"status": "success", "data": {"message_id": msg.message_id}}
+    except Exception as e:
+        logging.exception("Error broadcasting thinking status")
+        raise HTTPException(status_code=500, detail=str(e))

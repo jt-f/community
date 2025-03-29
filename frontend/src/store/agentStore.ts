@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { WebSocketMessage } from '../types/WebSocketMessage';
 import { getAgentName } from '../utils/agentUtils';
+import { useMessageStore } from './messageStore';
+import { generateShortId } from '../utils/idGenerator';
 
 interface Agent {
   id: string;
@@ -68,7 +70,7 @@ interface AgentStore {
   processedMessageIds: Set<string>;
   connect: () => void;
   disconnect: () => void;
-  sendMessage: (content: string, agentId: string, addToUI: boolean) => void;
+  sendMessage: (content: string, agentId: string, addToUI: boolean, messageId?: string, inReplyTo?: string) => void;
   selectAgent: (id: string | null) => void;
   updateAgent: (id: string, data: Partial<Agent>) => void;
   removeAgent: (id: string) => void;
@@ -96,8 +98,8 @@ const normalizeMessage = (message: any): Message => {
   // If it's already in the expected format with sender_id and content
   if (message.sender_id && (message.content !== undefined)) {
     return {
-      id: message.id || message.message_id || Math.random().toString(36).substring(2, 9),
-      message_id: message.message_id || message.id || Math.random().toString(36).substring(2, 9),
+      id: message.id || message.message_id || generateShortId(),
+      message_id: message.message_id || message.id || generateShortId(),
       sender_id: message.sender_id,
       receiver_id: message.receiver_id,
       content: message.content,
@@ -111,8 +113,8 @@ const normalizeMessage = (message: any): Message => {
   if (message.type === 'message' && message.data && message.data.message) {
     const wsMessage = message.data.message;
     return {
-      id: wsMessage.message_id || wsMessage.id || message.id || Math.random().toString(36).substring(2, 9),
-      message_id: wsMessage.message_id || wsMessage.id || message.id || Math.random().toString(36).substring(2, 9),
+      id: wsMessage.message_id || wsMessage.id || message.id || generateShortId(),
+      message_id: wsMessage.message_id || wsMessage.id || message.id || generateShortId(),
       sender_id: wsMessage.sender_id || message.data.sender_id || 'unknown',
       receiver_id: wsMessage.receiver_id || message.data.receiver_id,
       content: wsMessage.content || message.data.content || { text: 'No content available' },
@@ -125,8 +127,8 @@ const normalizeMessage = (message: any): Message => {
   // If it's a WebSocket message with direct data structure
   if (message.type === 'message' && message.data) {
     return {
-      id: message.data.message_id || message.data.id || message.id || Math.random().toString(36).substring(2, 9),
-      message_id: message.data.message_id || message.data.id || message.id || Math.random().toString(36).substring(2, 9),
+      id: message.data.message_id || message.data.id || message.id || generateShortId(),
+      message_id: message.data.message_id || message.data.id || message.id || generateShortId(),
       sender_id: message.data.sender_id || 'unknown',
       receiver_id: message.data.receiver_id,
       content: message.data.content || { text: 'No content available' },
@@ -139,8 +141,8 @@ const normalizeMessage = (message: any): Message => {
   // If it's a nested message structure
   if (message.message) {
     return {
-      id: message.message.message_id || message.message.id || message.id || Math.random().toString(36).substring(2, 9),
-      message_id: message.message.message_id || message.message.id || message.id || Math.random().toString(36).substring(2, 9),
+      id: message.message.message_id || message.message.id || message.id || generateShortId(),
+      message_id: message.message.message_id || message.message.id || message.id || generateShortId(),
       sender_id: message.message.sender_id || 'unknown',
       receiver_id: message.message.receiver_id,
       content: message.message.content || { text: 'No content available' },
@@ -152,14 +154,29 @@ const normalizeMessage = (message: any): Message => {
   
   // If we can't normalize it, return as is with some defaults
   return {
-    id: message.id || message.message_id || Math.random().toString(36).substring(2, 9),
-    message_id: message.message_id || message.id || Math.random().toString(36).substring(2, 9),
+    id: message.id || message.message_id || generateShortId(),
+    message_id: message.message_id || message.id || generateShortId(),
     sender_id: message.sender_id || 'unknown',
     receiver_id: message.receiver_id,
     content: message.content || { text: 'No content available' },
     timestamp: message.timestamp || new Date().toISOString(),
     message_type: message.message_type || 'text',
     type: message.type || 'incoming'
+  };
+};
+
+// Helper to convert from agentStore message format to messageStore format
+const convertToMessageStoreFormat = (message: Message) => {
+  return {
+    message_id: message.message_id || message.id || '',
+    timestamp: message.timestamp,
+    sender_id: message.sender_id,
+    receiver_id: message.receiver_id,
+    in_reply_to: message.content?.in_reply_to || message.metadata?.in_reply_to,
+    content: message.content,
+    message_type: message.message_type,
+    metadata: message.metadata || {},
+    is_outgoing: message.type === 'outgoing'
   };
 };
 
@@ -235,12 +252,11 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               set({ agents: agentMap });
             }
           } else if (data.type === 'message') {
-
             // Use the normalizeMessage function to handle different message formats
             const normalizedMessage = normalizeMessage(data);
             
             // Check if we've already processed this message
-            const messageId = normalizedMessage.id;
+            const messageId = normalizedMessage.id || normalizedMessage.message_id;
             if (messageId && get().processedMessageIds.has(messageId)) {
               console.log('Skipping duplicate message with ID:', messageId);
               return;
@@ -251,10 +267,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
               get().processedMessageIds.add(messageId);
             }
             
-            // Add the normalized message to the store
+            // Add the normalized message to the agentStore
             set((state) => ({
               messages: [...state.messages, normalizedMessage]
             }));
+            
+            // Also add to messageStore
+            const messageStoreFormat = convertToMessageStoreFormat(normalizedMessage);
+            useMessageStore.getState().addMessage(messageStoreFormat);
           } else if (data.type === 'state_update') {
             // Handle state updates
             console.log(`[${getTimestamp()}] Received state update:`, data.data);
@@ -297,58 +317,63 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       }
     },
     
-    sendMessage: (content: string, agentId: string, addToUI: boolean = true) => {
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.error(`[${getTimestamp()}] WebSocket not connected`);
+    sendMessage: async (message: string, receiverId: string, addToUI: boolean = true, messageId?: string, in_reply_to?: string) => {
+      if (!socket || !get().isConnected) {
+        console.error('WebSocket not connected');
         return;
       }
-      
-      const userId = localStorage.getItem('userId') || 'user-' + Math.random().toString(36).substring(2, 9);
-      localStorage.setItem('userId', userId);
-      
-      const messageId = Math.random().toString(36).substring(2, 9);
-      
-      const message = {
+
+      // Get the human agent ID from the agents list
+      const humanAgent = Object.values(get().agents).find(agent => agent.type.toLowerCase() === 'human');
+      if (!humanAgent) {
+        console.error('No human agent found');
+        return;
+      }
+
+      const messageData = {
         type: 'message',
         data: {
-          message_id: messageId,
-          sender_id: userId,
-          receiver_id: agentId,
-          content: {
-            text: content,
-            timestamp: new Date().toISOString()
-          },
-          message_type: 'text'
+          message_id: messageId || generateShortId(),
+          sender_id: humanAgent.id,
+          receiver_id: receiverId,
+          content: { text: message },
+          message_type: 'text',
+          in_reply_to: in_reply_to
         }
       };
       
-      console.log(`[${getTimestamp()}] Sending message to agent:`, getAgentName(agentId, get().agents));
-      socket.send(JSON.stringify(message));
+      console.log(`[${getTimestamp()}] Sending message to agent:`, getAgentName(receiverId, get().agents));
+      socket.send(JSON.stringify(messageData));
       
       // Add the message to the local state only if addToUI is true
       if (addToUI) {
         const newMessage: Message = {
-          id: messageId,
-          sender_id: userId,
-          receiver_id: agentId,
-          content: { text: content },
+          id: messageData.data.message_id,
+          message_id: messageData.data.message_id,
+          sender_id: messageData.data.sender_id,
+          receiver_id: messageData.data.receiver_id,
+          content: messageData.data.content,
           timestamp: new Date().toISOString(),
           type: 'outgoing',
-          message_type: 'text'
+          message_type: messageData.data.message_type
         };
         
         // Add message ID to processed set
-        get().processedMessageIds.add(messageId);
+        get().processedMessageIds.add(messageData.data.message_id);
+        
+        // Also add to messageStore
+        const messageStoreFormat = convertToMessageStoreFormat(newMessage);
+        useMessageStore.getState().addMessage(messageStoreFormat);
         
         // Update the agent status to 'thinking' when a message is sent to it
         const currentAgents = get().agents;
-        if (currentAgents[agentId]) {
+        if (currentAgents[receiverId]) {
           set((state) => ({
             messages: [...state.messages, newMessage],
             agents: {
               ...state.agents,
-              [agentId]: {
-                ...state.agents[agentId],
+              [receiverId]: {
+                ...state.agents[receiverId],
                 status: 'thinking'
               }
             }
@@ -360,7 +385,25 @@ export const useAgentStore = create<AgentStore>((set, get) => {
           }));
           
           // Log a warning that the agent wasn't found
-          console.warn(`[${getTimestamp()}] Warning: Agent ${agentId} not found in store when sending message`);
+          console.warn(`[${getTimestamp()}] Warning: Agent ${receiverId} not found in store when sending message`);
+        }
+      } else {
+        // Even if we don't add to UI, we should still add message ID to processed set
+        // and update agent status
+        get().processedMessageIds.add(messageData.data.message_id);
+        
+        // Update the agent status to 'thinking' when a message is sent to it
+        const currentAgents = get().agents;
+        if (currentAgents[receiverId]) {
+          set((state) => ({
+            agents: {
+              ...state.agents,
+              [receiverId]: {
+                ...state.agents[receiverId],
+                status: 'thinking'
+              }
+            }
+          }));
         }
       }
     },
@@ -399,7 +442,7 @@ export const useAgentStore = create<AgentStore>((set, get) => {
       console.log(`[${getTimestamp()}] Normalized message:`, normalizedMessage);
       
       // Check if we've already processed this message
-      const messageId = normalizedMessage.id;
+      const messageId = normalizedMessage.id || normalizedMessage.message_id;
       if (messageId && get().processedMessageIds.has(messageId)) {
         console.log(`[${getTimestamp()}] Skipping duplicate message with ID:`, messageId);
         return;
@@ -410,9 +453,14 @@ export const useAgentStore = create<AgentStore>((set, get) => {
         get().processedMessageIds.add(messageId);
       }
       
+      // Add to agentStore
       set((state) => ({
         messages: [...state.messages, normalizedMessage]
       }));
+      
+      // Also add to messageStore
+      const messageStoreFormat = convertToMessageStoreFormat(normalizedMessage);
+      useMessageStore.getState().addMessage(messageStoreFormat);
     },
     
     addAgent: (agent) => {

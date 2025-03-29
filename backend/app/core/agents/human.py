@@ -1,67 +1,74 @@
 """
 Human agent implementation.
 """
-from typing import Optional, AsyncGenerator
-import asyncio
-import time
+from typing import AsyncGenerator, ClassVar, List, Optional
 from datetime import datetime
+import asyncio
 
-from .base import BaseAgent
 from ..models import Message, WebSocketMessage
+from .base import BaseAgent
 from ...utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 class HumanAgent(BaseAgent):
-    """Human agent representing a user in the system."""
+    """
+    Human agent representing a user of the system.
+    This agent doesn't run autonomously but serves as a proxy for real human users.
+    """
     
-    def __init__(self, name: str = "Human", agent_id: Optional[str] = None):
-        """Initialize a human agent."""
-        super().__init__(name=name)
-        
-        # Override the agent_id if provided
-        if agent_id:
-            # Remove the old ID from the registry
-            _used_agent_ids.discard(self.agent_id)
-            # Set the new ID
-            self.agent_id = agent_id
-            # Add the new ID to the registry
-            _used_agent_ids.add(self.agent_id)
-            # Update the state with the new ID
-            self._state.id = agent_id
-        
-        # Set human-specific capabilities
-        self._state.capabilities = ["text_input", "file_upload", "human_feedback"]
-        self._state.type = "human"  # Explicitly set type to "human"
-        self.capabilities = [
-            "user_interaction",
-            "message_sending",
-            "command_execution",
-            "task_delegation"
-        ]
-        self.agent_server = None  # Will be set by the agent_manager
+    name: ClassVar[str] = "Human"
+    agent_type: ClassVar[str] = "human"
+    description: ClassVar[str] = "Human user of the system"
+    capabilities: ClassVar[List[str]] = [
+        "text_input", 
+        "file_upload", 
+        "human_feedback",
+        "natural_language",
+        "reasoning",
+        "learning",
+        "creativity"
+    ]
     
-    async def process_message(self, message: Message) -> Optional[Message]:
-        """Process a message sent to the human agent."""
+    def __init__(self, name: str = "Human", think_interval: float = 3600.0):
+        """Initialize human agent with a very long think interval since humans don't auto-think."""
+        super().__init__(name=name, think_interval=think_interval)
+    
+    async def process_message(self, message: Message) -> AsyncGenerator[Message, None]:
+        """
+        Process a message sent to the human agent.
+        
+        For human agents, we don't auto-respond, but this method could be used
+        to generate automatic acknowledgements or out-of-office messages.
+        """
         # Human agents don't automatically respond to messages
-        # They just receive them and the UI displays them
+        # We could implement auto-responses here if desired
+        logger.debug(f"Human agent {self.name} received message: '{message.content.get('text')}'")
         
-        # Log the message for debugging
-        logger.debug(f"Human agent {self.name} received message: {message.content}")
+        # Since we don't generate a response, we need to return an empty AsyncGenerator
+        if False:  # This condition never executes but makes it a valid AsyncGenerator
+            yield Message(
+                sender_id=self.agent_id,
+                receiver_id=message.sender_id,
+                content={"text": "Auto-response from human agent (disabled)"},
+                reply_to_id=message.message_id
+            )
+    
+    async def _think(self) -> AsyncGenerator[Message, None]:
+        """
+        Human agents don't think autonomously in the system.
         
-        # Return None since humans respond manually through the UI
-        return None
-    
-    def should_think(self) -> bool:
-        """Human agents don't think autonomously."""
-        return False
-    
-    async def think_once(self) -> Optional[Message]:
-        """Human agents don't think autonomously."""
-        return None
-    
+        This is just a placeholder implementation.
+        """
+        # No autonomous thinking for human agents
+        return
+        yield  # This line will never be reached, but makes it a valid generator
+        
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
-        """Human agents don't think autonomously."""
+        """
+        Human agents don't think autonomously.
+        This method is required by the BaseAgent abstract class but is a no-op for humans.
+        """
         while True:
             yield None
             await asyncio.sleep(60)  # Just sleep, humans don't think autonomously

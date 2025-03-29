@@ -4,6 +4,8 @@ import { AgentDashboard } from './components/AgentDashboard';
 import { MessageInput } from './components/MessageInput';
 import { MessageList } from './components/MessageList';
 import { useAgentStore } from './store/agentStore';
+import { useMessageStore } from './store/messageStore';
+import { initializeMessageStore } from './utils/messageStoreMigration';
 import { matrixTheme } from './theme/matrixTheme';
 
 // Add global styles for Matrix-like effects
@@ -54,11 +56,15 @@ const globalStyles = (
 
 function App() {
   const { connect, isConnected, agents } = useAgentStore();
+  const { messages } = useMessageStore();
   
   // Connect to WebSocket when the app loads
   useEffect(() => {
     connect();
     console.log('Connecting to WebSocket...');
+    
+    // Initialize message store
+    initializeMessageStore();
     
     // Log connection status and agents for debugging
     return () => {
@@ -70,6 +76,11 @@ function App() {
   useEffect(() => {
     console.log('Agents updated:', agents);
   }, [agents]);
+  
+  // Log when messages change
+  useEffect(() => {
+    console.log('Messages in message store:', messages.length);
+  }, [messages]);
 
   return (
     <ThemeProvider theme={matrixTheme}>

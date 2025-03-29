@@ -75,43 +75,31 @@ class AgentManager:
             await asyncio.sleep(0.1)
     
     async def _process_agent(self, agent: BaseAgent):
-        """Process a single agent."""
+        """Process an agent's messages and thinking cycles."""
         try:
-            # Check if the agent has messages to process
-            if agent.has_messages():
-                
-                # Process the agent's messages
-                logger.debug(f"Agent {agent.name} has messages to process")
-                await agent.process_messages()
-                logger.debug(f"Agent {agent.name} has processed messages")
-                
-                # If the agent still has messages, keep it in the thinking list
-                if agent.has_messages():
-                    return
-            
-            # Remove from thinking and add to available
-            self.thinking_agents.remove(agent)  # Updated from busy_agents
-            self.available_agents.append(agent)
-            
-            # Update agent state to 'idle' when it has no more messages to process
-            if agent.state.status != 'idle':
-                await agent.set_status('idle')
-            
+            # Run the agent's processing loop to get its responses
+            async for response in agent.run():
+                if response:
+                    # Add the response to the server's message queue for routing
+                    await self.agent_server.message_queue.put(response)
+                    
+                    # If the response is a message, add it to the message history
+                    if hasattr(self.agent_server, 'message_history'):
+                        self.agent_server.message_history[response.message_id] = response
+                    
+                    # Log the response for debugging
+                    logger.debug(f"Agent {agent.name} produced response: {truncate_message(response.content.get('text', ''))}")
         except Exception as e:
-            # Handle errors, log them
-            logger.error(f"Error processing agent {agent.name} ({agent.agent_id}): {e}", exc_info=True)
-            
-            # Remove from thinking list
-            if agent in self.thinking_agents:  # Updated from busy_agents
-                self.thinking_agents.remove(agent)  # Updated from busy_agents
+            logger.error(f"Error processing agent {agent.name}: {e}")
+        finally:
+            # Move the agent back to available agents
+            if agent in self.thinking_agents:
+                self.thinking_agents.remove(agent)
+                self.available_agents.append(agent)
                 
-                # Update agent state to 'idle' when an error occurs
-                if agent.state.status != 'idle':
-                    await agent.set_status('idle')
-            
-            # Add back to available after a short delay
-            await asyncio.sleep(1)
-            self.available_agents.append(agent)
+                # Broadcast the state change
+                if self.agent_server:
+                    asyncio.create_task(self.agent_server.broadcast_state())
             
     def stop(self):
         """Stop the agent manager."""

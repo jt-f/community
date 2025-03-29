@@ -2,18 +2,28 @@
 Core data models for the agent system.
 """
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from enum import Enum
+from typing import Dict, List, Optional, Any, Union
 from uuid import uuid4
 from pydantic import BaseModel, Field, model_validator
+from app.utils.id_generator import generate_short_id
 
+class MessageType(str, Enum):
+    TEXT = "text"
+    ERROR = "error"
+    STATUS = "status"
+    THINKING = "thinking"
+    
 class Message(BaseModel):
     """Message model for communication between agents."""
     sender_id: str
     receiver_id: Optional[str] = None
     content: Dict[str, Any]
-    message_type: str = "text"
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    message_id: str = Field(default_factory=lambda: str(uuid4()))
+    message_type: str = MessageType.TEXT
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    message_id: str = Field(default_factory=generate_short_id)
+    in_reply_to: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
     @model_validator(mode='before')
     @classmethod

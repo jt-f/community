@@ -11,15 +11,27 @@ import {
   Divider,
   keyframes,
   alpha,
+  IconButton,
+  Tooltip,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
 } from '@mui/material';
 import { 
   Computer as ComputerIcon, 
   Person as PersonIcon,
   Code as CodeIcon,
-  Memory as MemoryIcon
+  Memory as MemoryIcon,
+  Reply as ReplyIcon,
+  DeleteSweep as DeleteSweepIcon,
 } from '@mui/icons-material';
 import { useAgentStore } from '../store/agentStore';
+import { useMessageStore, Message as MessageType } from '../store/messageStore';
 import { getAgentName } from '../utils/agentUtils';
+import { getReplyStyles, enhanceMessageWithReplyData } from '../utils/messageReplyUtils';
 
 // Define keyframes for animations
 const typing = keyframes`
@@ -69,55 +81,29 @@ const glitch = keyframes`
   }
 `;
 
-interface Message {
-  id?: string;
-  message_id?: string;
-  timestamp?: string;
-  sender_id?: string;
-  receiver_id?: string;
-  content?: any;
-  message_type?: string;
-  type?: string;
-  // Add fields for nested message structure
-  message?: {
-    sender_id?: string;
-    receiver_id?: string;
-    content?: any;
-    timestamp?: string;
-    message_id?: string;
-  };
-  data?: {
-    message?: {
-      sender_id?: string;
-      receiver_id?: string;
-      content?: any;
-      timestamp?: string;
-      message_id?: string;
-    };
-    timestamp?: string;
-    sender_id?: string;
-    receiver_id?: string;
-    content?: any;
-  };
-}
+// Function to trigger a reply event
+const triggerReplyTo = (messageId: string) => {
+  // Create and dispatch a custom event
+  const event = new CustomEvent('replyToMessage', {
+    detail: { messageId }
+  });
+  window.dispatchEvent(event);
+};
 
 export const MessageList: React.FC = () => {
-  const { messages, agents } = useAgentStore();
+  const { agents } = useAgentStore();
+  const { messages, messagesByID, getEffectiveReceiver, clearHistory } = useMessageStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
   // Debug logging
   useEffect(() => {
     // More detailed message structure debugging
     if (messages && messages.length > 0) {
-      const firstMsg = messages[0] as any; // Use type assertion to avoid TypeScript errors
-      
-      // Check for nested message structure
-      if (firstMsg.data && firstMsg.data.message) {
-        console.log('Nested message found in data.message:', JSON.stringify(firstMsg.data.message, null, 2));
-      }
+      console.log('Message store contains', messages.length, 'messages');
     }
-  }, [agents, messages]);
+  }, [messages]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -129,7 +115,7 @@ export const MessageList: React.FC = () => {
   const formatTimestamp = (timestamp?: string) => {
     if (!timestamp) return 'Unknown time';
     try {
-    const date = new Date(timestamp);
+      const date = new Date(timestamp);
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch (e) {
       console.error('Error formatting timestamp:', e);
@@ -174,7 +160,7 @@ export const MessageList: React.FC = () => {
     }
   };
 
-  const renderMessageContent = (content: Message['content']) => {
+  const renderMessageContent = (content: MessageType['content']) => {
     if (!content) return 'No content';
     
     // If content is a string, return it directly
@@ -195,7 +181,7 @@ export const MessageList: React.FC = () => {
     return JSON.stringify(content);
   };
 
-  const renderSecondaryContent = (content: Message['content']) => {
+  const renderSecondaryContent = (content: MessageType['content']) => {
     if (!content) return null;
 
     return (
@@ -237,17 +223,24 @@ export const MessageList: React.FC = () => {
     );
   };
 
+  // Handler for clearing message history
+  const handleClearHistory = () => {
+    clearHistory();
+    setConfirmDialogOpen(false);
+  };
+
   return (
-    <Box
-      sx={{
-        flex: 1,
+    <Box 
+      sx={{ 
+        flexGrow: 1, 
         overflow: 'auto',
-        p: 2,
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
+        height: '100%',
+        p: 2,
         gap: 2,
-        position: 'relative',
-        height: '100%', // Ensure the container takes full height
+        backgroundColor: 'rgba(0, 10, 2, 0.95)',
         '&::-webkit-scrollbar': {
           width: '8px',
         },
@@ -269,9 +262,9 @@ export const MessageList: React.FC = () => {
           left: 0,
           width: '100%',
           height: '100%',
-          background: 'repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.02) 0px, rgba(0, 255, 65, 0.02) 1px, transparent 1px, transparent 2px)',
+          background: 'repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.03) 0px, rgba(0, 255, 65, 0.03) 1px, transparent 1px, transparent 2px)',
           pointerEvents: 'none',
-          opacity: 0.3,
+          opacity: 0.5,
           zIndex: 0,
         },
         '&::after': {
@@ -287,6 +280,85 @@ export const MessageList: React.FC = () => {
         }
       }}
     >
+      {/* Clear History Button */}
+      <Box 
+        sx={{ 
+          position: 'sticky', 
+          top: 0, 
+          p: 1, 
+          zIndex: 3, 
+          display: 'flex', 
+          justifyContent: 'flex-end',
+          backgroundColor: 'rgba(10, 10, 10, 0.8)',
+          borderBottom: '1px solid #003B00',
+          boxShadow: '0 0 10px rgba(0, 255, 65, 0.2)'
+        }}
+      >
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<DeleteSweepIcon />}
+          onClick={() => setConfirmDialogOpen(true)}
+          sx={{
+            color: '#FF5252',
+            borderColor: 'rgba(255, 82, 82, 0.5)',
+            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+            letterSpacing: '0.05em',
+            '&:hover': {
+              borderColor: '#FF5252',
+              backgroundColor: 'rgba(255, 82, 82, 0.1)',
+            },
+          }}
+        >
+          PURGE DATA
+        </Button>
+      </Box>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => setConfirmDialogOpen(false)}
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(10, 10, 10, 0.95)',
+            border: '1px solid #003B00',
+            boxShadow: '0 0 20px rgba(0, 255, 65, 0.3)',
+            color: '#00FF41',
+            fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+          }
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: '1px solid #003B00' }}>
+          CONFIRM DATA PURGE
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ color: '#00FF41', my: 2 }}>
+            WARNING: ALL MESSAGE DATA WILL BE PERMANENTLY ERASED FROM LOCAL STORAGE. THIS ACTION CANNOT BE UNDONE.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ borderTop: '1px solid #003B00', p: 2 }}>
+          <Button 
+            onClick={() => setConfirmDialogOpen(false)}
+            sx={{ 
+              color: '#00FF41',
+              '&:hover': { backgroundColor: 'rgba(0, 255, 65, 0.1)' },
+            }}
+          >
+            CANCEL
+          </Button>
+          <Button 
+            onClick={handleClearHistory}
+            sx={{ 
+              color: '#FF5252',
+              '&:hover': { backgroundColor: 'rgba(255, 82, 82, 0.1)' },
+            }}
+            autoFocus
+          >
+            CONFIRM PURGE
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {messages.length === 0 ? (
         <Box sx={{ 
           display: 'flex', 
@@ -349,111 +421,67 @@ export const MessageList: React.FC = () => {
           position: 'relative',
           zIndex: 2
         }}>
-          {messages.map((msg: any, index: number) => {
-            // Get a unique ID for the message
-            const messageId = msg.id || msg.message_id || `msg-${index}`;
+          {messages.map((originalMsg: MessageType, index: number) => {
+            // Enhance message with reply metadata
+            const msg = enhanceMessageWithReplyData(originalMsg);
             
-            // Safely extract sender and receiver IDs
-            let senderId;
-            let receiverId;
-            
-            // Check for WebSocket message format (data.message structure)
-            if (msg.data && msg.data.message) {
-              senderId = msg.data.message.sender_id;
-              receiverId = msg.data.message.receiver_id;
-            } 
-            // Check for nested message format
-            else if (msg.message) {
-              senderId = msg.message.sender_id;
-              receiverId = msg.message.receiver_id;
-            } 
-            // Check for direct format
-            else {
-              senderId = msg.sender_id;
-              receiverId = msg.receiver_id;
-            }
-            
-            // Get agent names safely
+            // Get sender and receiver info
+            const senderId = msg.sender_id;
             const senderName = getAgentName(senderId, agents);
-            const receiverName = getAgentName(receiverId, agents);
-
-            // Extract message content safely
-            let content;
-            try {
-              // Check for WebSocket message format
-              if (msg.data && msg.data.message && msg.data.message.content) {
-                const rawContent = msg.data.message.content;
-
-                if (typeof rawContent === 'string') {
-                  content = rawContent;
-                } else if (typeof rawContent === 'object') {
-                  if (rawContent.text) {
-                    content = rawContent.text;
-                  } else {
-                    content = JSON.stringify(rawContent);
-                  }
-                }
-              } 
-              // Check for nested message format
-              else if (msg.message && msg.message.content) {
-                const rawContent = msg.message.content;
-
-                if (typeof rawContent === 'string') {
-                  content = rawContent;
-                } else if (typeof rawContent === 'object') {
-                  if (rawContent.text) {
-                    content = rawContent.text;
-                  } else {
-                    content = JSON.stringify(rawContent);
-                  }
-                }
-              } 
-              // Check for direct format
-              else if (msg.content) {
-                const rawContent = msg.content;
-                
-                if (typeof rawContent === 'string') {
-                  content = rawContent;
-                } else if (typeof rawContent === 'object') {
-                  if (rawContent.text) {
-                    content = rawContent.text;
-                  } else {
-                    content = JSON.stringify(rawContent);
-                  }
-                }
-              } else {
-                console.log(`Message ${index} has no recognizable content structure`);
-                content = 'No content';
-              }
-            } catch (e) {
-              console.error(`Error extracting content for message ${index}:`, e);
-              content = 'Error displaying message';
-            }
             
-            // Get timestamp
-            const timestamp = msg.timestamp || 
-              (msg.message && msg.message.timestamp) || 
-              (msg.data && msg.data.timestamp) ||
-              (msg.data && msg.data.message && msg.data.message.timestamp);
+            // Get the effective receiver (accounts for broadcast vs reply relationships)
+            const effectiveReceiverId = getEffectiveReceiver(msg);
+            const receiverName = getAgentName(effectiveReceiverId, agents);
             
-            const isOutgoing = senderId === localStorage.getItem('userId') || 
-                              msg.type === 'outgoing' ||
-                              Object.values(agents).find((a: any) => a.type === 'human')?.id === senderId;
+            // Get human agent for determining if message is outgoing
+            const humanAgent = Object.values(agents).find((a: any) => 
+              a.type === 'human'
+            );
             
+            // Determine if message is outgoing
+            const isOutgoing = msg.is_outgoing || senderId === humanAgent?.id;
+            
+            // Format content
+            const content = typeof msg.content.text === 'string' 
+              ? msg.content.text 
+              : renderMessageContent(msg.content);
+            
+            const timestamp = msg.timestamp;
+            const messageId = msg.message_id;
             const isHovered = hoveredMessage === messageId;
+            
+            // Get reply-specific styles
+            const replyStyles = getReplyStyles(msg, index);
+            
+            // Add debug logging for the most recent message
+            if (index === messages.length - 1) {
+              console.log('DEBUG - Latest message:', {
+                messageId,
+                senderId,
+                senderName,
+                receiverId: msg.receiver_id,
+                effectiveReceiverId,
+                receiverName,
+                inReplyTo: msg.in_reply_to,
+                replyDepth: msg.replyDepth,
+                hasReplies: msg.hasReplies,
+                originalSender: msg.in_reply_to ? messagesByID[msg.in_reply_to]?.sender_id : undefined,
+                isOutgoing
+              });
+            }
           
-          return (
-            <Paper 
-              key={index} 
-              elevation={1}
+            return (
+              <Paper 
+                key={index} 
+                elevation={1}
                 onMouseEnter={() => setHoveredMessage(messageId)}
                 onMouseLeave={() => setHoveredMessage(null)}
-              sx={{ 
-                p: 2, 
-                maxWidth: '80%', 
+                sx={{ 
+                  p: 2, 
+                  maxWidth: '80%', 
                   width: 'auto',
                   minWidth: '200px',
-                alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
+                  alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
                   backgroundColor: isOutgoing ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 30, 0, 0.5)',
                   color: isOutgoing ? '#00FFFF' : '#00FF41',
                   borderRadius: '4px',
@@ -470,9 +498,28 @@ export const MessageList: React.FC = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   height: 'auto',
-                  ...(index % 5 === 1 && !isOutgoing ? {
-                    borderLeft: '2px solid #FF8C00',
+                  // Apply reply-specific styles to the Paper component
+                  ...replyStyles.paper,
+                  ...(msg.isReply && {
+                    // Add small arrow indicator for replies
                     '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: '10px',
+                      left: isOutgoing ? 'auto' : '-10px',
+                      right: isOutgoing ? '-10px' : 'auto',
+                      width: '0',
+                      height: '0',
+                      borderTop: '5px solid transparent',
+                      borderBottom: '5px solid transparent',
+                      borderLeft: isOutgoing ? 'none' : `5px solid ${msg.replyDepth > 1 ? 'rgba(255, 140, 0, 0.8)' : 'rgba(0, 255, 65, 0.8)'}`,
+                      borderRight: isOutgoing ? `5px solid ${msg.replyDepth > 1 ? 'rgba(0, 71, 171, 0.8)' : 'rgba(0, 150, 255, 0.8)'}` : 'none',
+                    }
+                  }),
+                  // Add style variations based on message position
+                  ...(index % 5 === 1 && !isOutgoing ? {
+                    borderLeft: msg.isReply ? 'none' : '2px solid #FF8C00',
+                    '&::after': {
                       background: 'linear-gradient(90deg, #FF8C00, rgba(0, 255, 65, 0.5), transparent) !important',
                     }
                   } : {}),
@@ -535,6 +582,12 @@ export const MessageList: React.FC = () => {
                       backgroundColor: isOutgoing ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 59, 0, 0.3)',
                       border: isOutgoing ? '1px solid rgba(0, 150, 255, 0.3)' : '1px solid rgba(0, 59, 0, 0.5)',
                       flexShrink: 0,
+                      // Add reply chain indicator glow if part of a chain
+                      ...(msg.hasReplies && {
+                        boxShadow: isOutgoing 
+                          ? '0 0 8px rgba(0, 150, 255, 0.7)' 
+                          : '0 0 8px rgba(0, 255, 65, 0.7)',
+                      }),
                       ...(index % 5 === 1 ? {
                         boxShadow: '0 0 5px #FF8C00',
                       } : {}),
@@ -553,6 +606,8 @@ export const MessageList: React.FC = () => {
                       letterSpacing: '0.05em',
                       color: isOutgoing ? '#00FFFF' : '#00FF41',
                       textShadow: isOutgoing ? '0 0 5px rgba(0, 150, 255, 0.5)' : '0 0 5px rgba(0, 255, 65, 0.5)',
+                      // Apply reply-specific styles to the sender name
+                      ...replyStyles.sender,
                       ...(index % 5 === 1 ? {
                         textShadow: '0 0 5px rgba(255, 140, 0, 0.5)',
                       } : {}),
@@ -561,8 +616,71 @@ export const MessageList: React.FC = () => {
                       } : {}),
                     }}
                   >
-                {senderName}
-              </Typography>
+                    {senderName}
+                  </Typography>
+                  
+                  {/* Show recipient info */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', ml: 2 }}>
+                    <Typography 
+                      variant="caption" 
+                      sx={{ 
+                        color: isOutgoing ? 'rgba(0, 255, 255, 0.8)' : 'rgba(0, 255, 65, 0.8)',
+                        fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                        letterSpacing: '0.05em',
+                        ml: 0.5,
+                        fontSize: '0.7rem',
+                        opacity: 0.9,
+                      }}
+                    >
+                      {(() => {
+                        // If this is a reply, show "REPLY TO: [original sender]" instead
+                        if (msg.isReply && msg.in_reply_to) {
+                          const originalMsg = messagesByID[msg.in_reply_to];
+                          if (originalMsg) {
+                            const originalSenderName = getAgentName(originalMsg.sender_id, agents);
+                            return `REPLY TO: ${originalSenderName}`;
+                          }
+                        }
+                        
+                        // If no effective receiver, show unknown
+                        if (!effectiveReceiverId) return 'TO: UNKNOWN';
+                        
+                        // If it's explicitly a broadcast with no specific target
+                        if (effectiveReceiverId === 'broadcast') return 'TO: ALL AGENTS';
+                        
+                        // If receiver is a human agent, show their name
+                        const isHumanReceiver = Object.values(agents).some((a: any) => 
+                          a.type === 'human' && a.id === effectiveReceiverId
+                        );
+                        if (isHumanReceiver) return `TO: ${receiverName}`;
+                        
+                        // Otherwise show the agent name or ID
+                        return `TO: ${receiverName || effectiveReceiverId}`;
+                      })()}
+                    </Typography>
+                  </Box>
+                  
+                  {/* Add reply button */}
+                  <Box sx={{ ml: 'auto' }}>
+                    <Tooltip title="Reply to this message">
+                      <IconButton
+                        size="small"
+                        onClick={() => triggerReplyTo(messageId)}
+                        sx={{
+                          color: isOutgoing ? 'rgba(0, 150, 255, 0.7)' : 'rgba(0, 255, 65, 0.7)',
+                          padding: '4px',
+                          opacity: isHovered ? 1 : 0,
+                          transition: 'opacity 0.3s ease',
+                          '&:hover': {
+                            backgroundColor: isOutgoing ? 'rgba(0, 150, 255, 0.1)' : 'rgba(0, 255, 65, 0.1)',
+                            color: isOutgoing ? '#00FFFF' : '#00FF41',
+                          }
+                        }}
+                      >
+                        <ReplyIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </Box>
                 
                 <Box sx={{ 
@@ -585,6 +703,8 @@ export const MessageList: React.FC = () => {
                       whiteSpace: 'pre-wrap',
                       display: 'block',
                       width: '100%',
+                      // Apply reply-specific styles to the message content
+                      ...replyStyles.content,
                       '&::selection': {
                         backgroundColor: isOutgoing ? 'rgba(0, 150, 255, 0.3)' : 'rgba(0, 255, 65, 0.3)',
                         color: isOutgoing ? '#00FFFF' : '#00FF41',
@@ -602,38 +722,38 @@ export const MessageList: React.FC = () => {
                     }}
                   >
                     {content}
-              </Typography>
-              
-                  {/* Render any secondary content like insights */}
-                  {msg.content && typeof msg.content === 'object' && 
-                    (msg.content.insights || msg.content.status) && 
-                    renderSecondaryContent(msg.content)}
+                  </Typography>
+                  
+                  {/* Add small timestamp */}
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: isOutgoing ? 'rgba(0, 255, 255, 0.5)' : 'rgba(0, 255, 65, 0.5)',
+                      fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
+                      fontSize: '0.6rem',
+                      textAlign: 'right',
+                      mt: 1,
+                      opacity: isHovered ? 0.8 : 0.5,
+                      transition: 'opacity 0.3s ease',
+                    }}
+                  >
+                    {/* Format the timestamp to show just time if today, date+time if older */}
+                    {(() => {
+                      try {
+                        const date = new Date(timestamp);
+                        const now = new Date();
+                        const isToday = date.toDateString() === now.toDateString();
+                        return isToday 
+                          ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      } catch (e) {
+                        return timestamp || 'Unknown time';
+                      }
+                    })()}
+                  </Typography>
                 </Box>
-                
-                <Typography 
-                  variant="caption" 
-                  sx={{ 
-                    opacity: 0.7, 
-                    display: 'block', 
-                    textAlign: 'right', 
-                    mt: 1,
-                    fontFamily: '"Share Tech Mono", "Roboto Mono", monospace',
-                    letterSpacing: '0.03em',
-                    color: isOutgoing ? 'rgba(0, 255, 255, 0.7)' : 'rgba(0, 255, 65, 0.7)',
-                    alignSelf: 'flex-end',
-                    width: '100%',
-                    ...(index % 5 === 1 ? {
-                      color: 'rgba(255, 140, 0, 0.7)',
-                    } : {}),
-                    ...(index % 5 === 3 ? {
-                      color: 'rgba(65, 105, 225, 0.7)',
-                    } : {}),
-                  }}
-                >
-                  {formatTimestamp(timestamp)}
-              </Typography>
-            </Paper>
-          );
+              </Paper>
+            );
           })}
           <div ref={messagesEndRef} />
         </Box>

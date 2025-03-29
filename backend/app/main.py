@@ -99,18 +99,15 @@ async def startup_event():
     
     # Create default agents
     human_agent = HumanAgent(name="Human")
-    agent_manager.register_agent(human_agent)
-    agent_server.agents[human_agent.agent_id] = human_agent
+    await agent_server.register_agent(human_agent)
     logger.debug(f"Created default Human agent: {human_agent.agent_id}")
     
     system_agent = SystemAgent(name="System")
-    agent_manager.register_agent(system_agent)
-    agent_server.agents[system_agent.agent_id] = system_agent
+    await agent_server.register_agent(system_agent)
     logger.debug(f"Created default System agent: {system_agent.agent_id}")
     
     analyst_agent = AnalystAgent(name="Analyst")
-    agent_manager.register_agent(analyst_agent)
-    agent_server.agents[analyst_agent.agent_id] = analyst_agent
+    await agent_server.register_agent(analyst_agent)
     logger.debug(f"Created default Analyst agent: {analyst_agent.agent_id}")
 
     # Start the agent manager in the background

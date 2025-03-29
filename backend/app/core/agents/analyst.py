@@ -2,10 +2,12 @@
 Analyst agent implementation.
 """
 import asyncio
-from typing import Optional, AsyncGenerator, Union, Dict, Any
+from typing import Optional, AsyncGenerator, Union, Dict, Any, ClassVar, List
 import time
 import logging
 from datetime import datetime
+import json
+import random
 
 from .base import BaseAgent
 from ..models import Message, WebSocketMessage
@@ -19,15 +21,29 @@ from .config import ANALYST_CONFIG
 logger = get_logger(__name__)
 
 class AnalystAgent(BaseAgent):
-    """Agent that analyzes data and provides insights."""
+    """
+    Analyst agent responsible for analyzing data and providing insights.
+    """
     
-    def __init__(self, name: str = "Analyst"):
-        super().__init__(name=name)
-        self.capabilities = [
-            "data_analysis",
-            "insight_generation",
-            "llm_inference"
-        ]
+    name: ClassVar[str] = "Analyst"
+    agent_type: ClassVar[str] = "analyst"
+    description: ClassVar[str] = "Analyzes data and provides insights"
+    capabilities: ClassVar[List[str]] = [
+        "data_analysis",
+        "trend_detection",
+        "pattern_recognition",
+        "report_generation",
+        "statistical_modeling"
+    ]
+    
+    def __init__(self, name: str = "Analyst", think_interval: float = 120.0):
+        """Initialize the analyst agent."""
+        super().__init__(name=name, think_interval=think_interval)
+        self.metrics = {
+            "messages_analyzed": 0,
+            "insights_generated": 0,
+            "reports_created": 0
+        }
         self.default_model = ANALYST_CONFIG.get("model", "mistral-large-latest")
         self.model_provider = ModelProvider(ANALYST_CONFIG.get("provider", "mistral"))
         self.default_parameters = GenerationParameters(
@@ -39,60 +55,172 @@ class AnalystAgent(BaseAgent):
         self.prompts = ANALYST_CONFIG.get("prompts", {})
         self.agent_server = None  # Will be set by the agent_manager
     
-    async def process_message(self, message: Message) -> Optional[Message]:
-        """
-        Process a message and generate a response.
+    async def process_message(self, message: Message) -> AsyncGenerator[Message, None]:
+        """Process a message sent to the analyst agent."""
+        text = message.content.get("text", "")
         
-        Note: The agent doesn't set receiver_id - that's the broker's responsibility.
-        The agent only sets sender_id and creates the response content.
-        """
-        try:
-            # Set status to thinking
-            await self.set_status("thinking")
-
-            # Log the message
-            logger.debug(f"Analyst agent {self.name} processing message: {truncate_message(message)}")
+        # Increment metrics
+        self.metrics["messages_analyzed"] += 1
+        
+        # Check if this is a data analysis request
+        if "analyze" in text.lower() or "data" in text.lower():
+            logger.info(f"Analyst agent@ {self.name} processing 'analyze' or 'data' message ({message.message_id})")
+            # Simulate data analysis
+            await asyncio.sleep(1)  # Simulate processing time
             
-            # Format the prompt based on the message type
+            analysis_result = self._generate_mock_analysis()
+            self.metrics["insights_generated"] += 1
+            
+            yield Message(
+                sender_id=self.agent_id,
+                receiver_id=message.sender_id,
+                content={
+                    "text": f"Analysis completed. Here are the insights:\n\n{analysis_result}",
+                    "data": {"analysis": analysis_result}
+                },
+                message_type="analysis",
+                reply_to_id=message.message_id
+            )
+        
+        # Check if this is a report request
+        elif "report" in text.lower():
+            logger.info(f"Analyst agent processing 'report' message ({message.message_id})")
+            # Simulate report generation
+            await asyncio.sleep(2)  # Simulate processing time
+            
+            report = self._generate_mock_report()
+            self.metrics["reports_created"] += 1
+            
+            yield Message(
+                sender_id=self.agent_id,
+                receiver_id=message.sender_id,
+                content={
+                    "text": f"Report generated:\n\n{report}",
+                    "data": {"report": report}
+                },
+                message_type="report",
+                reply_to_id=message.message_id
+            )
+        
+        # Default response - use the model client
+        else:
+            # Format the prompt for the model
             prompt = self._format_prompt(message)
             
-            # Generate a response
-            response_text = await self._generate_response(prompt)
-            
-            # Set status to responding
-            await self.set_status("responding")
-            
-            # Create a response message - note we don't set receiver_id
-            # The message broker will determine where this should be routed
-            response = Message(
-                sender_id=self.agent_id,
-                receiver_id="broadcast",
-                content={"text": response_text},
-                message_type="text",
-                in_reply_to=message.message_id if hasattr(message, 'message_id') else None
+            # Generate a response using the LLM
+            response_text = await self._generate_response(
+                prompt=prompt,
+                model=self.default_model,
+                parameters=self.default_parameters
             )
             
-            logger.debug(f"Analyst agent {self.name} generated response: {truncate_message(response)}")
-            
-            # Set status back to idle
-            await self.set_status("idle")
-            
-            return response
-        except Exception as e:
-            logger.error(f"Error processing message in analyst agent: {e}", exc_info=True)
-            
-            # Set status back to idle on error
-            await self.set_status("idle")
-            
-            # Return an error message - without setting receiver_id
-            return Message(
+            yield Message(
                 sender_id=self.agent_id,
-                # No receiver_id set here - broker's responsibility
-                content={"text": f"I encountered an error: {str(e)}"},
-                message_type="error",
-                in_reply_to=message.message_id if hasattr(message, 'message_id') else None
+                receiver_id=message.sender_id,
+                content={
+                    "text": response_text
+                },
+                reply_to_id=message.message_id
             )
     
+    async def _think(self) -> AsyncGenerator[Message, None]:
+        """Periodically provide insights based on accumulated data."""
+        if self.message_queue.empty():
+            self.last_think_time = datetime.now().timestamp()
+            
+            # Only generate insights if we've analyzed some messages
+            if self.metrics["messages_analyzed"] > 0:
+                insight = self._generate_random_insight()
+                
+                # Find all human agents
+                human_agents = [
+                    agent_id for agent_id, agent in self.agent_server.agents.items()
+                    if agent.state.type.lower() == 'human'
+                ]
+                
+                # Send insight to each human agent
+                for human_agent_id in human_agents:
+                    yield Message(
+                        sender_id=self.agent_id,
+                        receiver_id=human_agent_id,
+                        content={
+                            "text": f"Proactive Insight: {insight}",
+                            "data": {"insight": insight}
+                        },
+                        message_type="insight"
+                    )
+    
+    def _generate_mock_analysis(self) -> str:
+        """Generate a mock data analysis result."""
+        analysis_templates = [
+            "The data shows a significant upward trend with a correlation coefficient of {correlation:.2f}.",
+            "Analysis indicates a cyclical pattern with period of {period} units.",
+            "Statistical analysis reveals a {percent:.1f}% increase in activity over the baseline.",
+            "Data clustering shows {clusters} distinct groups with clear separation.",
+            "Time series analysis indicates seasonality with peaks every {seasonality} units."
+        ]
+        
+        template = random.choice(analysis_templates)
+        filled_template = template.format(
+            correlation=random.uniform(0.7, 0.99),
+            period=random.randint(3, 12),
+            percent=random.uniform(5.0, 45.0),
+            clusters=random.randint(2, 5),
+            seasonality=random.randint(4, 24)
+        )
+        
+        return filled_template
+    
+    def _generate_mock_report(self) -> str:
+        """Generate a mock report."""
+        report_template = """
+# Analysis Report
+
+## Overview
+{overview}
+
+## Key Findings
+1. {finding1}
+2. {finding2}
+3. {finding3}
+
+## Recommendations
+- {recommendation1}
+- {recommendation2}
+
+## Metrics
+- Confidence Level: {confidence}%
+- Reliability Index: {reliability}/10
+- Data Quality Score: {quality}/10
+"""
+        
+        report = report_template.format(
+            overview="Analysis of recent data shows several notable patterns and opportunities.",
+            finding1=self._generate_mock_analysis(),
+            finding2=self._generate_mock_analysis(),
+            finding3=self._generate_mock_analysis(),
+            recommendation1="Implement continuous monitoring of the identified trends.",
+            recommendation2="Further analyze segment {segment} for optimization opportunities.".format(
+                segment=random.choice(["A", "B", "C", "D"])
+            ),
+            confidence=random.randint(85, 99),
+            reliability=random.randint(7, 10),
+            quality=random.randint(6, 10)
+        )
+        
+        return report
+    
+    def _generate_random_insight(self) -> str:
+        """Generate a random insight to share proactively."""
+        insights = [
+            "Recent activity patterns suggest an emerging trend in the system interaction dynamics.",
+            "A correlation analysis suggests a potential optimization opportunity in the messaging flow.",
+            "I've detected an unusual pattern that might be worth investigating further.",
+            "Based on historical data, we might expect increased activity in the next cycle.",
+            "Recent exchanges show a marked improvement in response quality and relevance."
+        ]
+        return random.choice(insights)
+
     async def _generate_response(self, prompt: str, model: str = None, parameters: Union[Dict[str, Any], GenerationParameters] = None) -> str:
         """Generate a response using the LLM."""
         model = model or self.default_model
@@ -143,8 +271,30 @@ class AnalystAgent(BaseAgent):
         return thought_message
         
     async def think(self) -> AsyncGenerator[Optional[Message], None]:
-        """Analyst agents do not think autonomously."""
-        yield None
+        """
+        Periodically provide insights based on accumulated data.
+        This method is required by the BaseAgent abstract class.
+        """
+        while True:
+            if await self._should_think():
+                if self.metrics["messages_analyzed"] > 0:
+                    insight = self._generate_random_insight()
+                    
+                    yield Message(
+                        sender_id=self.agent_id,
+                        receiver_id="broadcast",
+                        content={
+                            "text": f"Proactive Insight: {insight}",
+                            "data": {"insight": insight}
+                        },
+                        message_type="insight"
+                    )
+                
+                # Update last think time
+                self.last_think_time = datetime.now().timestamp()
+            
+            # Sleep to avoid busy waiting
+            await asyncio.sleep(10)
 
     def _format_prompt(self, message: Message) -> str:
         """Format the prompt based on the message type."""

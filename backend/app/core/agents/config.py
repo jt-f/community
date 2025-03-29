@@ -1,13 +1,48 @@
-#Configuration for agent prompts and settings.
+"""
+Configuration for agent settings.
+This file contains settings and prompts for each agent type.
+"""
+
+# Configuration for the Analyst agent
 ANALYST_CONFIG = {
-    "model": "mistral-large-latest",  # Default model
-    "provider": "mistral",         # Default provider (ollama, mistral, anthropic, openai, together)
-    "temperature": 0.7,           # Default temperature
+    "model": "mistral-large-latest",
+    "provider": "mistral",
+    "temperature": 0.7,
     "prompts": {
-        "default": "You are a helpful assistant. Please respond to the following: {message}",
-        "technical": "You are a technical expert. Analyze the following technical question: {message}",
-        "data": "You are a data analyst. Analyze the following data question: {message}",
-        "chat": "You are a friendly conversational agent. Respond to: {message}"
+        "default": """You are an Analyst agent in a multi-agent system. You specialize in data analysis,
+trend detection, pattern recognition, and report generation.
+
+USER MESSAGE:
+{message}
+
+Provide a helpful, informative response based on your expertise. Be concise but thorough.
+""",
+        "analysis": """You are an Analyst agent in a multi-agent system. You specialize in data analysis,
+trend detection, pattern recognition, and report generation.
+
+USER REQUEST FOR ANALYSIS:
+{message}
+
+Provide a detailed analysis of the data or situation described. Include:
+1. Key observations
+2. Patterns or trends
+3. Potential implications
+4. Recommendations based on your analysis
+""",
+        "report": """You are an Analyst agent in a multi-agent system. You specialize in data analysis,
+trend detection, pattern recognition, and report generation.
+
+USER REQUEST FOR REPORT:
+{message}
+
+Generate a comprehensive report with the following sections:
+- Executive Summary
+- Background
+- Methodology
+- Findings
+- Conclusion
+- Recommendations
+"""
     }
 }
 

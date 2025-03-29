@@ -33,4 +33,16 @@ export const getAgentName = (agentId?: string, agents?: Record<string, Agent> | 
   
   // If we can't find the agent, return a formatted version of the ID
   return `Agent ${agentId.substring(0, 6)}...`;
+};
+
+export const isHumanAgent = (agent: any): boolean => {
+  return agent?.type?.toLowerCase() === 'human';
+};
+
+export const isSystemAgent = (agent: any): boolean => {
+  return agent?.type?.toLowerCase() === 'system';
+};
+
+export const isAIAgent = (agent: any): boolean => {
+  return agent?.type?.toLowerCase() === 'ai';
 }; 

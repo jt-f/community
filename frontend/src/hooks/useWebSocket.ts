@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { create } from 'zustand';
+import { generateShortId } from '../utils/idGenerator';
 
 interface AgentState {
   id: string;
@@ -12,7 +13,7 @@ interface AgentState {
 }
 
 interface MessageContent {
-  text?: string;
+  text: string;
   status?: string;
   insights?: string[];
   type?: string;
@@ -21,12 +22,12 @@ interface MessageContent {
 }
 
 interface Message {
-  id: string;
-  timestamp: string;
+  message_id: string;
   sender_id: string;
-  content: MessageContent;
+  receiver_id?: string;
   message_type: string;
-  metadata?: Record<string, unknown>;
+  content: MessageContent;
+  in_reply_to?: string;
 }
 
 interface MessageWSData {
@@ -122,15 +123,20 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   sendMessage: async (message: Partial<Message>) => {
     const { socket } = get();
     if (socket?.readyState === WebSocket.OPEN) {
+      const messageId = message.message_id || generateShortId();
+      
       const fullMessage: MessageWSData = {
         type: 'message',
         data: {
-          id: crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
+          message_id: messageId,
           sender_id: message.sender_id || 'unknown',
-          content: message.content || {},
+          receiver_id: message.receiver_id,
           message_type: message.message_type || 'text',
-          metadata: message.metadata
+          content: {
+            text: message.content?.text || '',
+            ...message.content
+          },
+          in_reply_to: message.in_reply_to
         }
       };
       socket.send(JSON.stringify(fullMessage));
