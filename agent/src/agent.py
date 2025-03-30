@@ -330,6 +330,13 @@ async def main():
         logger.info("Received termination signal, shutting down...")
         if agent.running:
             agent.running = False
+            # Force exit to terminate all running threads
+            agent.cleanup()
+            # Cancel all running tasks
+            for task in asyncio.all_tasks(loop):
+                if task is not asyncio.current_task():
+                    task.cancel()
+            loop.stop()
     
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
