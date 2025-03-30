@@ -1,72 +1,163 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /* Font settings */
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: #213547;
-  background-color: #ffffff;
+  /* Color Scheme - Command Center Dark */
+  --color-background: #0a0e14; /* Darker background - almost black with blue tint */
+  --color-surface: #141920; /* Slightly lighter surface color */
+  --color-surface-raised: #1c2230; /* For elements that should appear raised */
+  --color-text: rgba(255, 255, 255, 0.92); /* Crisp white text */
+  --color-text-secondary: rgba(255, 255, 255, 0.64); /* Secondary text */
+  --color-text-tertiary: rgba(255, 255, 255, 0.42); /* Less important text */
+  --color-primary: #0084ff; /* Bright blue for primary actions/highlights */
+  --color-primary-muted: rgba(0, 132, 255, 0.15); /* For backgrounds/subtle highlights */
+  --color-accent: #00ccff; /* For important highlights */
+  --color-success: #00c853; /* Success indicators */
+  --color-warning: #ffab00; /* Warning indicators */
+  --color-error: #ff3d71; /* Error indicators */
+  --color-border: rgba(255, 255, 255, 0.12); /* Subtle borders */
+  --color-border-strong: rgba(255, 255, 255, 0.2); /* More visible borders */
+  
+  /* Grid effect for tech feel */
+  --grid-color: rgba(28, 114, 147, 0.07);
+  --grid-size: 25px;
 
+  color-scheme: dark;
+  color: var(--color-text);
+  background-color: var(--color-background);
+  background-image: 
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  background-size: var(--grid-size) var(--grid-size);
+
+  /* Font smoothing */
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*, *::before, *::after {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
+  transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 }
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: var(--color-primary);
   text-decoration: inherit;
+  position: relative;
 }
+
 a:hover {
-  color: #535bf2;
+  color: var(--color-accent);
+}
+
+a:hover::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: a 1px;
+  background-color: var(--color-accent);
+  bottom: -2px;
+  left: 0;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--color-background);
+}
+
+#root {
+  width: 100%;
+  padding: 0;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  line-height: 1.2;
 }
 
 h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+  font-size: 2.5rem;
+}
+
+h2 {
+  font-size: 2rem;
+}
+
+p {
+  margin: 0 0 1em;
+  line-height: 1.6;
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
+  border-radius: 4px;
+  border: 1px solid var(--color-border-strong);
   padding: 0.6em 1.2em;
-  font-size: 1em;
+  font-size: 0.9em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: var(--color-surface-raised);
+  color: var(--color-text);
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  transition: all 0.2s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
-@media (prefers-color-scheme: light) {
+button:hover {
+  background-color: var(--color-surface-raised);
+  border-color: var(--color-primary);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-primary);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:focus,
+button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+input, textarea, select {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  padding: 0.6em 1em;
+  font-family: inherit;
+  font-size: 0.9em;
+  transition: all 0.2s;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-muted);
+}
+
+/* Remove media query overrides since we're committed to dark mode */
+@media (prefers-color-scheme: dark) {
   :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
+    /* Already dark by default */
   }
 }
+
+/* Utility classes */
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
+.text-muted { color: var(--color-text-tertiary); }
+.bg-raised { background-color: var(--color-surface-raised); }
