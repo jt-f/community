@@ -75,19 +75,28 @@ export function Chat() {
             className={`message ${message.sender_id === userId.current ? 'sent' : 'received'}`}
           >
             <div className="message-header">
-              <span className="sender">{message.sender_id}</span>
-              <span className="timestamp">
-                {new Date(message.send_timestamp).toLocaleTimeString()}
-              </span>
+              <span className="sender">From: {message.sender_id}</span>
+              <span className="timestamp">{message.send_timestamp}</span>
             </div>
             <div className="message-content">
               {message.text_payload}
-              {message.in_reply_to_message_id && (
-                <div className="reply-indicator">
-                  Replying to message: {message.in_reply_to_message_id}
-                </div>
-              )}
             </div>
+            {message.message_type === MessageType.REPLY && (
+              <div className="reply-indicator">
+                <span className="message_ids">
+                  Message ID: {message.message_id} in response to Message ID: {message.in_reply_to_message_id}
+                </span>
+              </div>
+            )}
+            {message.message_type === MessageType.TEXT && (
+              <div className="text-indicator">
+                <span className="text-message">
+                  Message ID: {message.message_id}
+                </span>
+              </div>
+            )}
+
+
           </div>
         ))}
       </div>

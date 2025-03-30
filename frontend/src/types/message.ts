@@ -3,7 +3,7 @@ export interface ChatMessage {
   sender_id: string;
   receiver_id: string;
   text_payload: string;
-  send_timestamp: string; // ISO 8601 format
+  send_timestamp: string;
   message_type: MessageType;
   in_reply_to_message_id?: string; // Optional, only present for reply messages
 }
@@ -24,11 +24,11 @@ export function createMessage(
   in_reply_to_message_id?: string
 ): ChatMessage {
   return {
-    message_id: crypto.randomUUID(),
+    message_id: Math.random().toString(36).substring(2, 8),
     sender_id,
     receiver_id,
     text_payload,
-    send_timestamp: new Date().toISOString(),
+    send_timestamp: new Date().toLocaleTimeString(),
     message_type,
     ...(in_reply_to_message_id && { in_reply_to_message_id })
   };
