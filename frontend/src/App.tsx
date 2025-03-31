@@ -1,4 +1,4 @@
-import { Chat } from './components/Chat'
+import { ChatUI } from './components/ChatUI'
 
 function App() {
   return (
@@ -24,7 +24,7 @@ function App() {
         </div>
       </header>
       <main>
-        <Chat />
+        <ChatUI />
       </main>
       <style>{`
         .app {

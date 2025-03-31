@@ -1,53 +1,71 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChatMessage, MessageType, createMessage } from '../types/message';
 
-export function Chat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+interface ChatProps {
+  wsRef: React.MutableRefObject<WebSocket | null>;
+}
+
+interface MessageWithAnimation extends ChatMessage {
+  isNew?: boolean;
+  animationPhase?: 'fadeIn' | 'vibrate' | null;
+}
+
+export function Chat({ wsRef }: ChatProps) {
+  const [messages, setMessages] = useState<MessageWithAnimation[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
   const userId = useRef(`user_${Math.random().toString(36).substring(2, 11)}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8765/ws');
+    const ws = wsRef.current;
+    if (!ws) return;
 
-    ws.onopen = () => {
+    // Update connection status when the component mounts
+    setIsConnected(ws.readyState === WebSocket.OPEN);
+
+    // Set up event listeners for the websocket
+    const handleOpen = () => {
       setIsConnected(true);
-      console.log('Connected to WebSocket server');
+      console.log('Chat: WebSocket connected');
     };
 
-    ws.onmessage = (event) => {
+    const handleClose = () => {
+      setIsConnected(false);
+      console.log('Chat: WebSocket disconnected');
+    };
+
+    const handleMessage = (event: MessageEvent) => {
       try {
-        const message = JSON.parse(event.data) as ChatMessage;
-        // Add animation status to new messages
-        const messageWithAnimation = {
-          ...message,
-          isNew: true,
-          animationPhase: 'fadeIn' // Start with fade in
-        };
-        setMessages(prev => [...prev, messageWithAnimation]);
+        const data = JSON.parse(event.data);
+        
+        // Only process chat messages, not agent status updates
+        if (data.message_type !== MessageType.AGENT_STATUS_UPDATE) {
+          const message = data as ChatMessage;
+          // Add animation status to new messages
+          const messageWithAnimation: MessageWithAnimation = {
+            ...message,
+            isNew: true,
+            animationPhase: 'fadeIn' // Start with fade in
+          };
+          setMessages(prev => [...prev, messageWithAnimation]);
+        }
       } catch (error) {
         console.error('Failed to parse message:', error);
       }
     };
 
-    ws.onclose = () => {
-      setIsConnected(false);
-      console.log('Disconnected from WebSocket server');
-    };
+    ws.addEventListener('open', handleOpen);
+    ws.addEventListener('close', handleClose);
+    ws.addEventListener('message', handleMessage);
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setIsConnected(false);
-    };
-
-    wsRef.current = ws;
-
+    // Clean up event listeners
     return () => {
-      ws.close();
+      ws.removeEventListener('open', handleOpen);
+      ws.removeEventListener('close', handleClose);
+      ws.removeEventListener('message', handleMessage);
     };
-  }, []);
+  }, [wsRef]);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -64,7 +82,7 @@ export function Chat() {
       );
       
       // Add animation status to sent messages
-      const messageWithAnimation = {
+      const messageWithAnimation: MessageWithAnimation = {
         ...message,
         isNew: true,
         animationPhase: 'fadeIn' // Start with fade in
@@ -129,10 +147,10 @@ export function Chat() {
               key={message.message_id}
               className={`message 
                 ${message.sender_id === userId.current ? 'sent' : 'received'} 
-                ${(message as any).animationPhase === 'fadeIn' ? 'fade-in' : ''}
-                ${(message as any).animationPhase === 'vibrate' ? 'vibrate' : ''}`}
+                ${message.animationPhase === 'fadeIn' ? 'fade-in' : ''}
+                ${message.animationPhase === 'vibrate' ? 'vibrate' : ''}`}
               onAnimationEnd={() => {
-                if ((message as any).animationPhase === 'fadeIn') {
+                if (message.animationPhase === 'fadeIn') {
                   handleFadeInComplete(index);
                 }
               }}
@@ -173,352 +191,354 @@ export function Chat() {
           TRANSMIT
         </button>
       </div>
-      <style>{`
-        .chat-container {
-          width: 38.2vw;
-          margin: 20px auto 30px;
-          padding: 0;
-          border: 1px solid var(--color-border-strong);
-          border-radius: 4px;
-          background-color: var(--color-surface);
-          display: flex;
-          flex-direction: column;
-          height: calc(100vh - 120px);
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-          overflow: hidden;
-          position: relative;
-        }
-        
-        /* Outer glow effect */
-        .chat-container::before {
-          content: '';
-          position: absolute;
-          top: -1px;
-          left: -1px;
-          right: -1px;
-          bottom: -1px;
-          border-radius: 5px;
-          padding: 1px;
-          background: linear-gradient(45deg, transparent, var(--color-primary-muted), transparent);
-          -webkit-mask: 
-            linear-gradient(#fff 0 0) content-box, 
-            linear-gradient(#fff 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          pointer-events: none;
-        }
-        
-        /* Define keyframe animations */
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
+      <style>
+        {`
+          .chat-container {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: 1px solid var(--color-border-strong);
+            border-radius: 4px;
+            background-color: var(--color-surface);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+            position: relative;
           }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          20% { transform: translateX(-8px); }
-          40% { transform: translateX(8px); }
-          60% { transform: translateX(-8px); }
-          80% { transform: translateX(8px); }
-        }
-        
-        /* Animation classes */
-        .message.fade-in {
-          animation: fadeIn 0.4s ease-out forwards;
-        }
-        
-        .message.vibrate {
-          animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
-        }
-        
-        .chat-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px 16px;
-          background-color: var(--color-surface-raised);
-          border-bottom: 1px solid var(--color-border-strong);
-          height: 60px;
-        }
-        
-        .header-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .header-icon {
-          color: var(--color-primary);
-          font-size: 1.2em;
-        }
-        
-        .header-title h3 {
-          margin: 0;
-          font-size: 0.9em;
-          letter-spacing: 1px;
-          color: var(--color-text);
-        }
-        
-        .connection-status {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .status-indicator {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background-color: var(--color-error);
-          position: relative;
-        }
-        
-        .status-indicator.connected {
-          background-color: var(--color-success);
-        }
-        
-        /* Pulsing effect for connected status */
-        .status-indicator.connected::after {
-          content: '';
-          position: absolute;
-          top: -4px;
-          left: -4px;
-          right: -4px;
-          bottom: -4px;
-          border-radius: 50%;
-          background-color: var(--color-success);
-          opacity: 0.3;
-          animation: pulse 2s infinite;
-          z-index: 0;
-        }
-        
-        @keyframes pulse {
-          0% { transform: scale(0.95); opacity: 0.5; }
-          70% { transform: scale(1.1); opacity: 0.2; }
-          100% { transform: scale(0.95); opacity: 0.5; }
-        }
-        
-        .status-text {
-          font-size: 0.75em;
-          font-weight: 600;
-          color: var(--color-text-secondary);
-          letter-spacing: 0.5px;
-        }
-        
-        .messages-container {
-          flex-grow: 1;
-          display: flex;
-          flex-direction: column;
-          border-bottom: 1px solid var(--color-border-strong);
-          background-color: var(--color-background);
-          position: relative;
-        }
-        
-        /* Grid overlay effect */
-        .messages-container::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-image: 
-            linear-gradient(var(--grid-color) 1px, transparent 1px),
-            linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-          background-size: var(--grid-size) var(--grid-size);
-          pointer-events: none;
-          opacity: 0.3;
-          z-index: 0;
-        }
-        
-        .messages-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 8px 16px;
-          background-color: var(--color-surface);
-          border-bottom: 1px solid var(--color-border);
-          font-size: 0.7em;
-          color: var(--color-text-secondary);
-          height: 32px;
-        }
-        
-        .channel-info {
-          display: flex;
-          gap: 8px;
-        }
-        
-        .channel-label {
-          color: var(--color-text-tertiary);
-        }
-        
-        .channel-value {
-          color: var(--color-primary);
-          font-weight: 600;
-        }
-        
-        .timestamp {
-          font-family: monospace;
-          color: var(--color-text-tertiary);
-        }
-        
-        .messages {
-          flex-grow: 1;
-          overflow-y: auto;
-          padding: 16px;
-          position: relative;
-          z-index: 1;
           
-          /* Custom Scrollbar */
-          scrollbar-width: thin;
-          scrollbar-color: var(--color-primary) var(--color-surface);
-        }
-        
-        .messages::-webkit-scrollbar {
-          width: 6px;
-        }
-        
-        .messages::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        
-        .messages::-webkit-scrollbar-thumb {
-          background-color: var(--color-primary);
-          border-radius: 3px;
-        }
-        
-        .message {
-          margin: 12px 0;
-          padding: 12px 16px;
-          border-radius: 4px;
-          max-width: 82%;
-          word-wrap: break-word;
-          line-height: 1.4;
-          position: relative;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-        
-        .message.sent {
-          background-color: var(--color-primary-muted);
-          color: var(--color-text);
-          margin-left: auto;
-          margin-right: 4px;
-          border-left: 3px solid var(--color-primary);
-        }
-        
-        .message.received {
-          background-color: var(--color-surface-raised);
-          color: var(--color-text);
-          margin-right: auto;
-          margin-left: 4px;
-          border-left: 3px solid var(--color-accent);
-        }
-        
-        .message-header {
-          display: flex;
-          justify-content: space-between;
-          font-size: 0.7em;
-          margin-bottom: 6px;
-          color: var(--color-text-secondary);
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        
-        .message-content {
-          word-wrap: break-word;
-          font-size: 0.9em;
-          line-height: 1.5;
-        }
-        
-        .message-footer {
-          display: flex;
-          justify-content: space-between;
-          margin-top: 6px;
-          padding-top: 4px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          font-size: 0.65em;
-          color: var(--color-text-tertiary);
-          font-family: monospace;
-        }
-        
-        .message-id {
-          opacity: 0.7;
-        }
-        
-        .reply-to {
-          color: var(--color-primary);
-        }
-        
-        .input-container {
-          display: flex;
-          gap: 8px;
-          padding: 12px 16px;
-          background-color: var(--color-surface-raised);
-          border-top: 1px solid var(--color-border-strong);
-          height: 64px;
-        }
-        
-        input[type="text"] {
-          flex: 1;
-          padding: 0 16px;
-          border: 1px solid var(--color-border-strong);
-          border-radius: 4px;
-          font-size: 0.9em;
-          background-color: var(--color-surface);
-          color: var(--color-text);
-          font-family: inherit;
-          height: 40px;
-        }
-        
-        input[type="text"]:focus {
-          border-color: var(--color-primary);
-          box-shadow: 0 0 0 1px var(--color-primary-muted);
-          outline: none;
-        }
-        
-        input[type="text"]::placeholder {
-          color: var(--color-text-tertiary);
-        }
-        
-        .input-container button {
-          height: 40px;
-          padding: 0 20px;
-          background-color: var(--color-surface-raised);
-          color: var(--color-text);
-          border: 1px solid var(--color-border-strong);
-          border-radius: 4px;
-          font-size: 0.8em;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        
-        .input-container button:hover:not(:disabled) {
-          background-color: var(--color-primary);
-          border-color: var(--color-primary);
-          color: white;
-        }
-        
-        .input-container button:active:not(:disabled) {
-          transform: translateY(1px);
-        }
-        
-        .input-container button:disabled {
-          background-color: var(--color-surface);
-          color: var(--color-text-tertiary);
-          border-color: var(--color-border);
-          cursor: not-allowed;
-        }
-      `}</style>
+          /* Outer glow effect */
+          .chat-container::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: -1px;
+            right: -1px;
+            bottom: -1px;
+            border-radius: 5px;
+            padding: 1px;
+            background: linear-gradient(45deg, transparent, var(--color-primary-muted), transparent);
+            -webkit-mask: 
+              linear-gradient(#fff 0 0) content-box, 
+              linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+          }
+          
+          /* Define keyframe animations */
+          @keyframes fadeIn {
+            from {
+              opacity: 0;
+              transform: translateY(10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          
+          @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-8px); }
+            40% { transform: translateX(8px); }
+            60% { transform: translateX(-8px); }
+            80% { transform: translateX(8px); }
+          }
+          
+          /* Animation classes */
+          .message.fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+          }
+          
+          .message.vibrate {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+          }
+          
+          .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background-color: var(--color-surface-raised);
+            border-bottom: 1px solid var(--color-border-strong);
+            height: 60px;
+          }
+          
+          .header-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          
+          .header-icon {
+            color: var(--color-primary);
+            font-size: 1.2em;
+          }
+          
+          .header-title h3 {
+            margin: 0;
+            font-size: 0.9em;
+            letter-spacing: 1px;
+            color: var(--color-text);
+          }
+          
+          .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          
+          .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--color-error);
+            position: relative;
+          }
+          
+          .status-indicator.connected {
+            background-color: var(--color-success);
+          }
+          
+          /* Pulsing effect for connected status */
+          .status-indicator.connected::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            right: -4px;
+            bottom: -4px;
+            border-radius: 50%;
+            background-color: var(--color-success);
+            opacity: 0.3;
+            animation: pulse 2s infinite;
+            z-index: 0;
+          }
+          
+          @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            70% { transform: scale(1.1); opacity: 0.2; }
+            100% { transform: scale(0.95); opacity: 0.5; }
+          }
+          
+          .status-text {
+            font-size: 0.75em;
+            font-weight: 600;
+            color: var(--color-text-secondary);
+            letter-spacing: 0.5px;
+          }
+          
+          .messages-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid var(--color-border-strong);
+            background-color: var(--color-background);
+            position: relative;
+          }
+          
+          /* Grid overlay effect */
+          .messages-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+              linear-gradient(var(--grid-color) 1px, transparent 1px),
+              linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: var(--grid-size) var(--grid-size);
+            pointer-events: none;
+            opacity: 0.3;
+            z-index: 0;
+          }
+          
+          .messages-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 16px;
+            background-color: var(--color-surface);
+            border-bottom: 1px solid var(--color-border);
+            font-size: 0.7em;
+            color: var(--color-text-secondary);
+            height: 32px;
+          }
+          
+          .channel-info {
+            display: flex;
+            gap: 8px;
+          }
+          
+          .channel-label {
+            color: var(--color-text-tertiary);
+          }
+          
+          .channel-value {
+            color: var(--color-primary);
+            font-weight: 600;
+          }
+          
+          .timestamp {
+            font-family: monospace;
+            color: var(--color-text-tertiary);
+          }
+          
+          .messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 16px;
+            position: relative;
+            z-index: 1;
+            
+            /* Custom Scrollbar */
+            scrollbar-width: thin;
+            scrollbar-color: var(--color-primary) var(--color-surface);
+          }
+          
+          .messages::-webkit-scrollbar {
+            width: 6px;
+          }
+          
+          .messages::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          
+          .messages::-webkit-scrollbar-thumb {
+            background-color: var(--color-primary);
+            border-radius: 3px;
+          }
+          
+          .message {
+            margin: 12px 0;
+            padding: 12px 16px;
+            border-radius: 4px;
+            max-width: 82%;
+            word-wrap: break-word;
+            line-height: 1.4;
+            position: relative;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          }
+          
+          .message.sent {
+            background-color: var(--color-primary-muted);
+            color: var(--color-text);
+            margin-left: auto;
+            margin-right: 4px;
+            border-left: 3px solid var(--color-primary);
+          }
+          
+          .message.received {
+            background-color: var(--color-surface-raised);
+            color: var(--color-text);
+            margin-right: auto;
+            margin-left: 4px;
+            border-left: 3px solid var(--color-accent);
+          }
+          
+          .message-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7em;
+            margin-bottom: 6px;
+            color: var(--color-text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          
+          .message-content {
+            word-wrap: break-word;
+            font-size: 0.9em;
+            line-height: 1.5;
+          }
+          
+          .message-footer {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 6px;
+            padding-top: 4px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.65em;
+            color: var(--color-text-tertiary);
+            font-family: monospace;
+          }
+          
+          .message-id {
+            opacity: 0.7;
+          }
+          
+          .reply-to {
+            color: var(--color-primary);
+          }
+          
+          .input-container {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background-color: var(--color-surface-raised);
+            border-top: 1px solid var(--color-border-strong);
+            height: 64px;
+          }
+          
+          input[type="text"] {
+            flex: 1;
+            padding: 0 16px;
+            border: 1px solid var(--color-border-strong);
+            border-radius: 4px;
+            font-size: 0.9em;
+            background-color: var(--color-surface);
+            color: var(--color-text);
+            font-family: inherit;
+            height: 40px;
+          }
+          
+          input[type="text"]:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 1px var(--color-primary-muted);
+            outline: none;
+          }
+          
+          input[type="text"]::placeholder {
+            color: var(--color-text-tertiary);
+          }
+          
+          .input-container button {
+            height: 40px;
+            padding: 0 20px;
+            background-color: var(--color-surface-raised);
+            color: var(--color-text);
+            border: 1px solid var(--color-border-strong);
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+          }
+          
+          .input-container button:hover:not(:disabled) {
+            background-color: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+          }
+          
+          .input-container button:active:not(:disabled) {
+            transform: translateY(1px);
+          }
+          
+          .input-container button:disabled {
+            background-color: var(--color-surface);
+            color: var(--color-text-tertiary);
+            border-color: var(--color-border);
+            cursor: not-allowed;
+          }
+        `}
+      </style>
     </div>
   );
 } 

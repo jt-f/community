@@ -9,6 +9,7 @@ import sys
 import uuid
 import websockets
 from typing import Dict, Any, Optional, Callable
+from datetime import datetime
 
 
 from shared_models import (
@@ -213,24 +214,70 @@ class Agent:
                 data = json.loads(message)
                 message_type = data.get("message_type")
                 
-
                 if message_type == MessageType.PING:
-                    # Respond to ping with a pong
+                    # Respond to ping with a pong, with more details to help server track status
+                    server_ping_time = data.get("timestamp", "unknown")
+                    response_time = datetime.now().strftime("%H:%M:%S")
+                    logger.info(f"Received PING from server at {response_time}, responding with PONG")
+                    
                     await self.websocket.send(json.dumps({
                         "message_type": MessageType.PONG,
-                        "agent_id": self.agent_id
+                        "agent_id": self.agent_id,
+                        "agent_name": self.agent_name,
+                        "response_time": response_time,
+                        "server_ping_time": server_ping_time
                     }))
                 elif message_type == MessageType.SHUTDOWN:
                     # Handle shutdown request
                     logger.info("Received shutdown request from broker")
                     self.running = False
                     break
-
+                elif message_type == MessageType.AGENT_STATUS_UPDATE:
+                    # Agents should ignore these updates as they're meant for frontend clients
+                    logger.debug("Received agent status update, ignoring as it's meant for frontend clients")
+                elif message_type == MessageType.REGISTER_AGENT_RESPONSE:
+                    # Handle registration response
+                    if data.get("status") == ResponseStatus.SUCCESS:
+                        logger.info(f"Successfully registered with broker: {data.get('message')}")
+                        self.is_registered = True
+                    else:
+                        logger.error(f"Failed to register with broker: {data.get('message')}")
+                else:
+                    # Process user message
+                    logger.info(f"Received message of type {message_type}")
                     
-        except websockets.exceptions.ConnectionClosed:
-            logger.error("WebSocket connection closed")
+                    # If this is a chat message, process it
+                    if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+                        # Process in a separate task to avoid blocking the websocket listener
+                        asyncio.create_task(self.process_message(data))
+                    
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.error(f"WebSocket connection closed: {e}. Attempting to reconnect...")
+            # Set flag to indicate we're no longer connected but don't stop running
+            self.is_registered = False
+            
+            # Try to reconnect
+            for attempt in range(5):
+                logger.info(f"Reconnection attempt {attempt + 1}/5")
+                try:
+                    if await self.connect_websocket():
+                        if await self.register_with_broker():
+                            logger.info("Successfully reconnected and re-registered with broker")
+                            # Resume listening
+                            return await self.listen_websocket()
+                except Exception as reconnect_error:
+                    logger.error(f"Reconnection attempt failed: {reconnect_error}")
+                
+                # Wait before next attempt
+                await asyncio.sleep(5)
+            
+            # If we get here, reconnection failed
+            logger.error("Failed to reconnect after multiple attempts. Shutting down.")
+            self.running = False
+            
         except Exception as e:
             logger.error(f"Error in WebSocket listener: {e}")
+            self.running = False
     
     def start_rabbitmq_consumer(self) -> None:
         """Start consuming messages from RabbitMQ queue."""
@@ -284,16 +331,84 @@ class Agent:
         """Clean up connections before exit."""
         logger.info("Cleaning up before exit...")
         
+        # Close WebSocket connection
+        if self.websocket:
+            try:
+                # Create a new event loop for the close task
+                close_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(close_loop)
+                
+                # Create and run a task to close the websocket
+                close_loop.run_until_complete(self.close_websocket())
+                close_loop.close()
+                
+                logger.info("WebSocket connection closed")
+            except Exception as e:
+                logger.error(f"Error closing WebSocket connection: {e}")
+        
         # Close RabbitMQ connection
         if self.rabbitmq_connection and self.rabbitmq_connection.is_open:
             try:
-                self.rabbitmq_channel.stop_consuming()
+                if self.rabbitmq_channel and self.rabbitmq_channel.is_open:
+                    self.rabbitmq_channel.stop_consuming()
                 self.rabbitmq_connection.close()
                 logger.info("RabbitMQ connection closed")
             except Exception as e:
                 logger.error(f"Error closing RabbitMQ connection: {e}")
-        
-        # WebSocket will be closed by the context manager
+    
+    async def close_websocket(self) -> None:
+        """Close the websocket connection gracefully."""
+        if self.websocket:
+            try:
+                await self.websocket.close()
+                self.websocket = None
+                logger.info("Closed WebSocket connection")
+            except Exception as e:
+                logger.error(f"Error closing WebSocket: {e}")
+                self.websocket = None
+
+    async def process_message(self, message_data):
+        """Process an incoming chat message."""
+        try:
+            # Extract message details
+            message_type = message_data.get("message_type")
+            sender_id = message_data.get("sender_id", "unknown")
+            text_payload = message_data.get("text_payload", "")
+            
+            logger.info(f"Processing message from {sender_id}: {text_payload[:50]}...")
+            
+            # Generate a simple echo response for now
+            # This is where you would add your agent's specific logic
+            response_text = f"Echo: {text_payload}"
+            
+            # Create a response message
+            response = {
+                "message_type": MessageType.REPLY,
+                "sender_id": self.agent_id,
+                "receiver_id": sender_id,  # Reply to the sender
+                "text_payload": response_text
+            }
+            
+            # Send the response
+            if self.websocket and self.websocket.open:
+                await self.websocket.send(json.dumps(response))
+                logger.info(f"Sent response to {sender_id}")
+            else:
+                logger.error("Cannot send response: WebSocket connection not open")
+                
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            
+            # Try to send an error message back if possible
+            if self.websocket and self.websocket.open:
+                error_response = {
+                    "message_type": MessageType.ERROR,
+                    "sender_id": self.agent_id,
+                    "receiver_id": message_data.get("sender_id", "unknown"),
+                    "text_payload": f"Error processing your message: {str(e)}"
+                }
+                await self.websocket.send(json.dumps(error_response))
+                logger.info(f"Sent error response to {message_data.get('sender_id', 'unknown')}")
 
 def parse_arguments():
     """Parse command line arguments."""

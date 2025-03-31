@@ -713,7 +713,7 @@ optional = false
 python-versions = ">=3.13"
 groups = ["main"]
 files = []
-develop = true
+develop = false
 
 [package.dependencies]
 pydantic = ">=2.11.1,<3.0.0"
@@ -1054,4 +1054,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13"
-content-hash = "7dc1a571997c8cebcc0465cae9bef5b83c58bc7ffa9c409370bc24690373204e"
+content-hash = "7d2649383b5811440d2183f4ed63141feef11a5a4ae3aeeeadca1da532cfc48d"

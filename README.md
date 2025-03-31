@@ -7,12 +7,12 @@ http://localhost:15672/#/
 source ~/.bashrc
 poetry run python src/server.py
 
+# frontend
+npm run dev
+
 # message routing broker
 source ~/.bashrc
 poetry run python src/broker.py 
-
-# frontend
-npm run dev
 
 # agents
 source ~/.bashrc

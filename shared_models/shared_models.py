@@ -16,6 +16,9 @@ class MessageType(str, Enum):
     PONG = "PONG"
     SHUTDOWN = "SHUTDOWN"
     CLIENT_DISCONNECTED = "CLIENT_DISCONNECTED"
+    AGENT_STATUS_UPDATE = "AGENT_STATUS_UPDATE"
+    REGISTER_FRONTEND = "REGISTER_FRONTEND"
+    REQUEST_AGENT_STATUS = "REQUEST_AGENT_STATUS"
 
 class ResponseStatus(str, Enum):
     SUCCESS = "success"
@@ -147,4 +150,31 @@ def create_reply_message(original_message: ChatMessage, sender_id: str, text_pay
         send_timestamp=datetime.now().isoformat(),
         message_type=MessageType.REPLY,
         in_reply_to_message_id=original_message.message_id
-    ) 
+    )
+
+class AgentStatus(BaseModel):
+    """Represents the status of a single agent."""
+    agent_id: str
+    agent_name: str
+    is_online: bool = True
+    last_seen: str = datetime.now().strftime("%H:%M:%S")
+
+class AgentStatusUpdate(BaseModel):
+    """Message containing the current status of all registered agents."""
+    message_type: MessageType = MessageType.AGENT_STATUS_UPDATE
+    agents: list[AgentStatus]
+    
+    def to_dict(self) -> dict:
+        """Convert the AgentStatusUpdate to a dictionary for JSON serialization."""
+        return {
+            "message_type": self.message_type,
+            "agents": [agent.model_dump() for agent in self.agents]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "AgentStatusUpdate":
+        """Create an AgentStatusUpdate from a dictionary."""
+        return cls(
+            message_type=data.get("message_type", MessageType.AGENT_STATUS_UPDATE),
+            agents=[AgentStatus(**agent) for agent in data.get("agents", [])]
+        ) 

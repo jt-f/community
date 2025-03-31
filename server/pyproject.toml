@@ -21,4 +21,3 @@ build-backend = "poetry.core.masonry.api"
 
 
 [tool.poetry.dependencies]
-shared-models = {develop = true}

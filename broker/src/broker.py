@@ -1,297 +1,323 @@
-import pika
-import json
 import logging
-import time
-import os
-import sys
 import threading
-import uuid
+import json
+import time
+import pika
+import os
+from datetime import datetime
+from typing import Dict, Set, List, Optional
 
-# Adjust import path for running as a script/module
-# This assumes you run the broker from the workspace root like: python -m server.broker.broker
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-sys.path.append(PROJECT_ROOT)
+# Import shared models directly
+from shared_models import (
+    MessageType,
+    ResponseStatus,
+    ChatMessage
+)
 
-# Import shared models directly - they will always be available
-from shared_models import ChatMessage, MessageType, ResponseStatus
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger(__name__)
+# Get a logger for this module
+log = logging.getLogger("broker")
 
+# RabbitMQ connection details - can be overridden with environment variables
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
-INCOMING_QUEUE = 'incoming_messages_queue'
-BROKER_CONTROL_QUEUE = 'broker_control_queue'  # Queue for control messages (registrations, etc.)
+INCOMING_QUEUE = "incoming_messages_queue"
+BROKER_CONTROL_QUEUE = "broker_control_queue"
+SERVER_RESPONSE_QUEUE = "server_response_queue"
 
-# Dictionary to track registered agents and their queues
-registered_agents = {}
-# Dictionary to track client websocket IDs for message routing
-client_connections = {}
+# Dictionary to store registered agents - the only state the broker needs
+registered_agents = {}  # agent_id -> agent info (capabilities, name, etc.)
 
-# Placeholder for LLM-based agent routing
-def get_target_agent_queue(message_data) -> str:
-    """Determines the target agent queue based on message content."""
-    log.debug(f"Determining route for message")
-    
-    # If message has a specific receiver_id that's a registered agent, use that
-    receiver_id = message_data.get('receiver_id')
-    if receiver_id in registered_agents:
-        return registered_agents[receiver_id]['queue']
-    
-    # Otherwise use content-based routing
-    content = message_data.get('text_payload', '').lower()
-    if "weather" in content:
-        queue = "weather_agent_queue"
-    elif "translate" in content:
-        queue = "translation_agent_queue"
-    else:
-        queue = "general_agent_queue"
-    log.debug(f"Target queue: {queue}")
-    return queue
-
-def get_rabbitmq_connection(retries=5, delay=5):
-    """Establishes a connection to RabbitMQ with retry logic."""
-    credentials = pika.PlainCredentials('guest', 'guest')
-    parameters = pika.ConnectionParameters(RABBITMQ_HOST, RABBITMQ_PORT, '/', credentials)
-    attempt = 0
-    while attempt < retries:
-        attempt += 1
-        try:
-            connection = pika.BlockingConnection(parameters)
-            log.info(f"Broker successfully connected to RabbitMQ on attempt {attempt}.")
-            return connection
-        except pika.exceptions.AMQPConnectionError as e:
-            log.warning(f"Broker failed to connect to RabbitMQ: {e}. Retrying in {delay} seconds... ({attempt}/{retries})")
-            time.sleep(delay)
-    log.error("Broker could not connect to RabbitMQ after multiple retries. Exiting.")
-    sys.exit(1) # Exit if connection fails permanently
-
-def publish_to_queue(channel, queue_name, message_data):
-    """Publishes a message to the specified queue."""
+def setup_rabbitmq_channel(queue_name, callback_function):
+    """Set up a RabbitMQ channel and consumer."""
     try:
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        channel = connection.channel()
+        
+        # Declare the queue, ensuring it exists
         channel.queue_declare(queue=queue_name, durable=True)
+        
+        # Set up the consumer
+        channel.basic_consume(
+            queue=queue_name,
+            on_message_callback=lambda ch, method, properties, body: callback_function(ch, method, properties, body),
+            auto_ack=False
+        )
+        
+        log.info(f"Connected to RabbitMQ and consuming from {queue_name}")
+        return channel
+    except Exception as e:
+        log.error(f"Failed to set up RabbitMQ channel for {queue_name}: {e}")
+        return None
+
+def publish_to_server_response_queue(message_data):
+    """Publish a message to the server response queue."""
+    try:
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        channel = connection.channel()
+        
+        # Ensure the queue exists
+        channel.queue_declare(queue=SERVER_RESPONSE_QUEUE, durable=True)
+        
+        # Publish the message
         channel.basic_publish(
             exchange='',
-            routing_key=queue_name,
+            routing_key=SERVER_RESPONSE_QUEUE,
             body=json.dumps(message_data),
-            properties=pika.BasicProperties(delivery_mode=2)
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # make message persistent
+            )
         )
-        log.info(f"Message successfully published to {queue_name}.")
+        
+        log.debug(f"Published message to {SERVER_RESPONSE_QUEUE}")
+        
+        # Clean up
+        connection.close()
         return True
     except Exception as e:
-        log.error(f"Error publishing message to {queue_name}: {e}", exc_info=True)
+        log.error(f"Failed to publish to {SERVER_RESPONSE_QUEUE}: {e}")
         return False
 
-def publish_response_to_server(channel, response_data):
-    """Publishes a response back to the server for client forwarding."""
-    try:
-        server_response_queue = "server_response_queue"
-        channel.queue_declare(queue=server_response_queue, durable=True)
-        channel.basic_publish(
-            exchange='',
-            routing_key=server_response_queue,
-            body=json.dumps(response_data),
-            properties=pika.BasicProperties(delivery_mode=2)
-        )
-        log.info(f"Response sent back to server.")
-        return True
-    except Exception as e:
-        log.error(f"Error sending response to server: {e}", exc_info=True)
-        return False
-
-def handle_agent_registration(channel, message_data):
-    """Processes agent registration request."""
-    agent_id = message_data.get("agent_id")
-    agent_name = message_data.get("agent_name")
-    client_id = message_data.get("_client_id")  # Sent by server to identify originating connection
-    
-    log.info(f"Processing registration for agent {agent_name} (ID: {agent_id}) from client {client_id}")
-    
-    # Default values for response
-    status = ResponseStatus.ERROR
-    response_message = "Unknown error during registration"
-    
-    # Create an agent queue
-    queue_name = f"agent_queue_{agent_id}"
-    try:
-        # Declare a durable queue for the agent
-        channel.queue_declare(queue=queue_name, durable=True)
-        log.info(f"Created queue {queue_name} for agent {agent_id}")
-        
-        # Register the agent
-        registered_agents[agent_id] = {
-            'name': agent_name,
-            'queue': queue_name,
-            'client_id': client_id
-        }
-        
-        # Add client mapping
-        if client_id:
-            client_connections[client_id] = agent_id
-        
-        # Set success status
-        status = ResponseStatus.SUCCESS
-        response_message = "Agent registered successfully"
-        log.info(f"Agent {agent_id} registered successfully")
-        
-    except Exception as e:
-        log.error(f"Failed to create queue for agent {agent_id}: {e}")
-        response_message = f"Failed to register agent: {str(e)}"
-    
-    # Create response message
-    response = {
-        "message_type": MessageType.REGISTER_AGENT_RESPONSE,
-        "status": status,
-        "agent_id": agent_id,
-        "message": response_message,
-        "client_id": client_id  # Include client_id so server knows where to route
-    }
-    
-    # Send response back to server
-    publish_response_to_server(channel, response)
-
-def handle_client_disconnected(channel, message_data):
-    """Handles client disconnection notification."""
-    client_id = message_data.get("client_id")
-    log.info(f"Client disconnected: {client_id}")
-    
-    # Check if this client was associated with an agent
-    if client_id in client_connections:
-        agent_id = client_connections[client_id]
-        if agent_id in registered_agents:
-            log.info(f"Unregistering agent {agent_id} due to client disconnection")
-            del registered_agents[agent_id]
-        del client_connections[client_id]
-
-def process_control_message(ch, method, properties, body):
-    """Processes control messages such as agent registration."""
-    log.info(f"Received control message. Delivery tag: {method.delivery_tag}")
+def handle_incoming_message(channel, method, properties, body):
+    """Handle incoming chat messages."""
     try:
         message_data = json.loads(body)
         message_type = message_data.get("message_type")
         
-        if message_type == MessageType.REGISTER_AGENT:
-            handle_agent_registration(ch, message_data)
-        elif message_type == MessageType.CLIENT_DISCONNECTED:
-            handle_client_disconnected(ch, message_data)
+        if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+            # Get sender and receiver IDs
+            sender_id = message_data.get("sender_id", "unknown")
+            receiver_id = message_data.get("receiver_id", "broadcast")
+            
+            log.info(f"Received message type {message_type} from {sender_id} to {receiver_id}")
+            
+            # Update message routing with the simplified approach
+            route_message(message_data)
+            
+            # Acknowledge the message was processed
+            channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
-            log.warning(f"Unhandled control message type: {message_type}")
-        
-        # Acknowledge the message was processed
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        
+            log.warning(f"Received unsupported message type in incoming queue: {message_type}")
+            # Acknowledge but skip processing
+            channel.basic_ack(delivery_tag=method.delivery_tag)
     except json.JSONDecodeError:
-        log.error(f"Invalid JSON received in control queue: {body}")
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        log.error(f"Invalid JSON in message: {body}")
+        # Acknowledge but don't process invalid messages
+        channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:
-        log.error(f"Error processing control message: {e}", exc_info=True)
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        log.error(f"Error processing incoming message: {e}")
+        # Negative acknowledgment for failed processing
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-def message_callback(ch, method, properties, body):
-    """Callback function executed when a message is received from INCOMING_QUEUE."""
-    log.info(f"Received message from {INCOMING_QUEUE}. Delivery tag: {method.delivery_tag}")
+def handle_control_message(channel, method, properties, body):
+    """Handle control messages for the broker."""
     try:
         message_data = json.loads(body)
-        log.debug(f"Processing message from incoming queue")
-
-        target_queue = get_target_agent_queue(message_data)
-
-        # Re-publish to the target agent queue
-        publish_to_queue(ch, target_queue, message_data)
-
-        # Acknowledge the message was processed successfully
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        log.debug(f"Acknowledged message from incoming queue")
-
+        message_type = message_data.get("message_type")
+        
+        # Process based on message type
+        if message_type == MessageType.REGISTER_AGENT:
+            handle_agent_registration(channel, message_data)
+        elif message_type == MessageType.CLIENT_DISCONNECTED:
+            handle_client_disconnected(channel, message_data)
+        elif message_type == MessageType.AGENT_STATUS_UPDATE:
+            handle_agent_status_update(channel, message_data)
+        else:
+            log.warning(f"Received unsupported control message type: {message_type}")
+        
+        # Acknowledge the message was processed
+        channel.basic_ack(delivery_tag=method.delivery_tag)
     except json.JSONDecodeError:
-        log.error(f"Invalid JSON received in incoming queue: {body}")
-        # Decide how to handle poison messages (e.g., move to dead-letter queue or discard)
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False) # Discarding for now
+        log.error(f"Invalid JSON in control message: {body}")
+        channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:
-        log.error(f"Error processing message {properties.message_id if properties else 'Unknown'}: {e}", exc_info=True)
-        # Negative acknowledge, potentially requeue depending on error type
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False) # Requeue=False to avoid infinite loops for persistent errors
+        log.error(f"Error processing control message: {e}")
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-def start_control_consumer():
-    """Starts a separate thread to consume control messages."""
-    connection = get_rabbitmq_connection()
-    channel = connection.channel()
+def handle_agent_registration(channel, message_data):
+    """Handles agent registration requests."""
+    agent_id = message_data.get("agent_id")
+    agent_name = message_data.get("agent_name", "Unknown Agent")
+    client_id = message_data.get("_client_id")
     
-    # Declare the control queue
-    channel.queue_declare(queue=BROKER_CONTROL_QUEUE, durable=True)
-    log.info(f"Broker listening for control messages on {BROKER_CONTROL_QUEUE}")
+    if not agent_id:
+        log.error("Agent registration failed: Missing agent_id")
+        return
     
-    # Ensure fair dispatch
-    channel.basic_qos(prefetch_count=1)
+    # Store agent information - this is the only state we need to maintain
+    registered_agents[agent_id] = {
+        "name": agent_name,
+        "capabilities": message_data.get("capabilities", []),
+        "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "is_online": True
+    }
     
-    # Set up consuming
-    channel.basic_consume(queue=BROKER_CONTROL_QUEUE, on_message_callback=process_control_message)
+    log.info(f"Agent registered: {agent_name} (ID: {agent_id})")
+    
+    # Prepare registration response
+    response = {
+        "message_type": MessageType.REGISTER_AGENT_RESPONSE,
+        "status": ResponseStatus.SUCCESS,
+        "agent_id": agent_id,
+        "message": "Agent registered successfully",
+    }
+    
+    # Add client_id for routing back to the correct client
+    if client_id:
+        response["client_id"] = client_id
+    
+    # Send response back to the server
+    publish_to_server_response_queue(response)
+
+def handle_client_disconnected(channel, message_data):
+    """Handles client disconnection notification."""
+    agent_id = message_data.get("agent_id")
+    
+    # If this is an agent disconnection and we know about this agent
+    if agent_id and agent_id in registered_agents:
+        log.info(f"Unregistering agent {agent_id} due to client disconnection")
+        
+        # Mark agent as offline but keep its registration
+        registered_agents[agent_id]["is_online"] = False
+        log.info(f"Agent {agent_id} marked as offline")
+
+def handle_agent_status_update(channel, message_data):
+    """Handles agent status updates from the server."""
+    agents = message_data.get("agents", [])
+    
+    log.info(f"Received status update for {len(agents)} agents")
+    
+    # Update our registry with online/offline status
+    for agent in agents:
+        agent_id = agent.get("agent_id")
+        is_online = agent.get("is_online", False)
+        
+        if agent_id:
+            # If we know about this agent, update its status
+            if agent_id in registered_agents:
+                registered_agents[agent_id]["is_online"] = is_online
+                log.debug(f"Updated agent {agent_id} status: online={is_online}")
+            # Otherwise, create a minimal entry for it
+            else:
+                registered_agents[agent_id] = {
+                    "name": agent.get("agent_name", "Unknown Agent"),
+                    "is_online": is_online,
+                    "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "capabilities": []
+                }
+                log.debug(f"Added new agent {agent_id} from status update")
+
+def request_agent_status_sync():
+    """Request a full agent status update from the server."""
+    request = {
+        "message_type": MessageType.REQUEST_AGENT_STATUS
+    }
+    publish_to_server_response_queue(request)
+    log.info("Requested full agent status update from server")
+
+def route_message(message_data):
+    """Route messages to the appropriate recipients based on sender and receiver.
+    Server will handle the client connection mapping."""
+    message_type = message_data.get("message_type")
+    sender_id = message_data.get("sender_id", "unknown")
+    receiver_id = message_data.get("receiver_id", "broadcast")
+    
+    # Request the latest agent status before routing
+    request_agent_status_sync()
+    
+    # Prepare the message for routing
+    outgoing_message = dict(message_data)
+    
+    # For broadcast messages, add a flag for the server to broadcast
+    if receiver_id == "broadcast":
+        outgoing_message["_broadcast"] = True
+        publish_to_server_response_queue(outgoing_message)
+        log.info(f"Sent broadcast message from {sender_id} to server for distribution")
+        return
+        
+    # For direct messages to specific agents, check if we know the agent
+    if receiver_id in registered_agents:
+        # Check if the agent is online
+        if registered_agents[receiver_id]["is_online"]:
+            # Add routing info for the server
+            outgoing_message["_target_agent_id"] = receiver_id
+            publish_to_server_response_queue(outgoing_message)
+            log.info(f"Routed message from {sender_id} to agent {receiver_id}")
+        else:
+            # Agent is offline, send an error message back
+            error_response = {
+                "message_type": MessageType.ERROR,
+                "sender_id": "broker",
+                "receiver_id": sender_id,
+                "text_payload": f"Agent {receiver_id} is currently offline",
+                "_client_id": message_data.get("_client_id")  # Route back to original sender
+            }
+            publish_to_server_response_queue(error_response)
+            log.warning(f"Cannot route message to offline agent {receiver_id}")
+    else:
+        # Unknown agent, send an error message back
+        error_response = {
+            "message_type": MessageType.ERROR,
+            "sender_id": "broker",
+            "receiver_id": sender_id,
+            "text_payload": f"Unknown agent ID: {receiver_id}",
+            "_client_id": message_data.get("_client_id")  # Route back to original sender
+        }
+        publish_to_server_response_queue(error_response)
+        log.warning(f"Cannot route message to unknown agent {receiver_id}")
+
+def main():
+    """Main function to start the broker service."""
+    log.info("Starting message broker service")
+    
+    # Initial request for agent status on startup
+    request_agent_status_sync()
+    
+    # Set up channels for incoming messages and control messages
+    incoming_channel = setup_rabbitmq_channel(INCOMING_QUEUE, handle_incoming_message)
+    control_channel = setup_rabbitmq_channel(BROKER_CONTROL_QUEUE, handle_control_message)
+    
+    if not incoming_channel or not control_channel:
+        log.error("Failed to set up RabbitMQ channels. Exiting.")
+        return
+    
+    # Set up periodic status sync
+    def periodic_status_sync():
+        while True:
+            try:
+                request_agent_status_sync()
+                time.sleep(30)  # Sync every 30 seconds
+            except Exception as e:
+                log.error(f"Error in periodic status sync: {e}")
+                time.sleep(5)  # Wait a bit before retrying
+    
+    # Start the periodic sync in a background thread
+    sync_thread = threading.Thread(target=periodic_status_sync, daemon=True)
+    sync_thread.start()
     
     try:
-        channel.start_consuming()
-    except Exception as e:
-        log.error(f"Control consumer encountered an error: {e}", exc_info=True)
-    finally:
-        if channel.is_open:
-            channel.close()
-        if connection.is_open:
-            connection.close()
-
-def start_message_consumer():
-    """Starts consuming regular messages from the incoming queue."""
-    connection = get_rabbitmq_connection()
-    channel = connection.channel()
-
-    channel.queue_declare(queue=INCOMING_QUEUE, durable=True)
-    log.info(f"Broker waiting for messages on {INCOMING_QUEUE}")
-
-    # Ensure fair dispatch (only fetch 1 message at a time per consumer)
-    channel.basic_qos(prefetch_count=1)
-
-    channel.basic_consume(queue=INCOMING_QUEUE, on_message_callback=message_callback)
-
-    try:
-        channel.start_consuming()
-    except Exception as e:
-        log.error(f"Message consumer encountered an error: {e}", exc_info=True)
-    finally:
-        if channel.is_open:
-            channel.close()
-        if connection.is_open:
-            connection.close()
-
-def start_consuming():
-    """Starts both control and message consumers in separate threads."""
-    # Create the server response queue
-    connection = get_rabbitmq_connection()
-    if connection:
-        try:
-            channel = connection.channel()
-            channel.queue_declare(queue="server_response_queue", durable=True)
-            log.info("Server response queue created")
-        except Exception as e:
-            log.error(f"Error creating server response queue: {e}")
-        finally:
-            if connection.is_open:
-                connection.close()
-    
-    # Start control consumer in a separate thread
-    control_thread = threading.Thread(target=start_control_consumer)
-    control_thread.daemon = True
-    control_thread.start()
-    log.info("Control message consumer thread started")
-    
-    # Start message consumer in the main thread
-    try:
-        log.info("Starting message consumer in main thread")
-        start_message_consumer()
+        log.info("Broker service is running. Press Ctrl+C to exit.")
+        
+        # Start consuming from both channels
+        threading.Thread(target=incoming_channel.start_consuming, daemon=True).start()
+        control_channel.start_consuming()
     except KeyboardInterrupt:
-        log.info("Broker shutting down...")
+        log.info("Received interrupt. Shutting down broker service...")
+        
+        # Stop consuming and close channels
+        if incoming_channel:
+            incoming_channel.stop_consuming()
+        if control_channel:
+            control_channel.stop_consuming()
+            
+        log.info("Broker service shut down successfully")
     except Exception as e:
-        log.error(f"Broker encountered an error: {e}", exc_info=True)
-    finally:
-        log.info("Broker shutdown complete")
+        log.error(f"Unexpected error in broker service: {e}")
 
-if __name__ == '__main__':
-    start_consuming() 
+if __name__ == "__main__":
+    main() 

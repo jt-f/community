@@ -12,7 +12,20 @@ export enum MessageType {
   TEXT = 'TEXT',
   REPLY = 'REPLY',
   SYSTEM = 'SYSTEM',
-  ERROR = 'ERROR'
+  ERROR = 'ERROR',
+  AGENT_STATUS_UPDATE = 'AGENT_STATUS_UPDATE'
+}
+
+export interface AgentStatus {
+  agent_id: string;
+  agent_name: string;
+  is_online: boolean;
+  last_seen: string;
+}
+
+export interface AgentStatusUpdateMessage {
+  message_type: MessageType.AGENT_STATUS_UPDATE;
+  agents: AgentStatus[];
 }
 
 // Helper function to create a new message
