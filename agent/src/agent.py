@@ -1,10 +1,9 @@
-#!/usr/bin/env python
+import pika
 import argparse
 import asyncio
 import json
 import logging
 import os
-import pika
 import signal
 import sys
 import uuid

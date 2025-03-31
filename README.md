@@ -15,4 +15,5 @@ poetry run python src/broker.py
 npm run dev
 
 # agents
-python src/agent.py --name "MyAgent"
+source ~/.bashrc
+poetry run python src/agent.py --name "MyAgent2"
