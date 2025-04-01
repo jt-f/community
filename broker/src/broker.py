@@ -191,7 +191,7 @@ def handle_agent_status_update(channel, message_data):
     agents = message_data.get("agents", [])
     
     log.info(f"Received status update for {len(agents)} agents")
-    
+    log.info(f"Agents: {message_data}")
     # Update our registry with online/offline status
     for agent in agents:
         agent_id = agent.get("agent_id")

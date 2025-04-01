@@ -192,7 +192,7 @@ async def agent_ping_service():
                     # Send ping message
                     ping_message = {
                         "message_type": MessageType.PING,
-                        "timestamp": current_time.strftime("%H:%M:%S")
+                        "timestamp": current_time.strftime("%Y-%m-%d %H:%M:%S")
                     }
                     await ws.send_text(json.dumps(ping_message))
                     logging.info(f"Sent ping to agent {agent_id}")
@@ -205,12 +205,7 @@ async def agent_ping_service():
                     if agent_id in agent_statuses:
                         # Parse the last seen time
                         last_seen_str = status.last_seen
-                        last_seen_time = datetime.strptime(last_seen_str, "%H:%M:%S")
-                        last_seen_time = last_seen_time.replace(
-                            year=current_time.year,
-                            month=current_time.month,
-                            day=current_time.day
-                        )
+                        last_seen_time = datetime.strptime(last_seen_str, "%Y-%m-%d %H:%M:%S")
                         
                         # If the agent hasn't been seen for more than 15 seconds, mark as offline
                         time_diff = (current_time - last_seen_time).total_seconds()
@@ -515,12 +510,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     agent_connections[agent_id] = websocket
                     
                     # Update agent status
-                    current_time = datetime.now().strftime("%H:%M:%S")
+                    current_time = datetime.now()
                     agent_statuses[agent_id] = AgentStatus(
                         agent_id=agent_id,
                         agent_name=agent_name,
                         is_online=True,
-                        last_seen=current_time
+                        last_seen=current_time.strftime("%Y-%m-%d %H:%M:%S")
                     )
                     
                     # Forward registration to broker
@@ -549,8 +544,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 if agent_id and agent_id in agent_statuses:
                     # Update agent's last seen timestamp
-                    current_time = datetime.now().strftime("%H:%M:%S")
-                    agent_statuses[agent_id].last_seen = current_time
+                    current_time = datetime.now()
+                    agent_statuses[agent_id].last_seen = current_time.strftime("%Y-%m-%d %H:%M:%S")
                     
                     # Ensure agent is marked as online
                     if not agent_statuses[agent_id].is_online:
