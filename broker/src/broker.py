@@ -4,6 +4,8 @@ import json
 import time
 import pika
 import os
+import asyncio
+import websockets
 from datetime import datetime
 from typing import Dict, Set, List, Optional
 
@@ -29,9 +31,31 @@ RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 INCOMING_QUEUE = "incoming_messages_queue"
 BROKER_CONTROL_QUEUE = "broker_control_queue"
 SERVER_RESPONSE_QUEUE = "server_response_queue"
+SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
+
+# Server WebSocket connection details
+SERVER_WS_URL = os.getenv('SERVER_WS_URL', 'ws://localhost:8765/ws')
+RECONNECT_DELAY = 5  # seconds
+MAX_RECONNECT_DELAY = 60  # seconds
 
 # Dictionary to store registered agents - the only state the broker needs
 registered_agents = {}  # agent_id -> agent info (capabilities, name, etc.)
+
+# Global WebSocket connection to server
+server_ws = None
+server_ws_task = None
+server_available = False  # Track server availability
+
+# Add this near the top with other global variables
+websocket_loop = None
+
+def get_websocket_loop():
+    """Get or create the WebSocket event loop."""
+    global websocket_loop
+    if websocket_loop is None:
+        websocket_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(websocket_loop)
+    return websocket_loop
 
 def setup_rabbitmq_channel(queue_name, callback_function):
     """Set up a RabbitMQ channel and consumer."""
@@ -125,8 +149,6 @@ def handle_control_message(channel, method, properties, body):
             handle_agent_registration(channel, message_data)
         elif message_type == MessageType.CLIENT_DISCONNECTED:
             handle_client_disconnected(channel, message_data)
-        elif message_type == MessageType.AGENT_STATUS_UPDATE:
-            handle_agent_status_update(channel, message_data)
         else:
             log.warning(f"Received unsupported control message type: {message_type}")
         
@@ -186,39 +208,128 @@ def handle_client_disconnected(channel, message_data):
         registered_agents[agent_id]["is_online"] = False
         log.info(f"Agent {agent_id} marked as offline")
 
-def handle_agent_status_update(channel, message_data):
-    """Handles agent status updates from the server."""
-    agents = message_data.get("agents", [])
-    
-    log.info(f"Received status update for {len(agents)} agents")
-    log.info(f"Agents: {message_data}")
-    # Update our registry with online/offline status
-    for agent in agents:
-        agent_id = agent.get("agent_id")
-        is_online = agent.get("is_online", False)
-        
-        if agent_id:
-            # If we know about this agent, update its status
-            if agent_id in registered_agents:
-                registered_agents[agent_id]["is_online"] = is_online
-                log.debug(f"Updated agent {agent_id} status: online={is_online}")
-            # Otherwise, create a minimal entry for it
-            else:
-                registered_agents[agent_id] = {
-                    "name": agent.get("agent_name", "Unknown Agent"),
-                    "is_online": is_online,
-                    "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "capabilities": []
-                }
-                log.debug(f"Added new agent {agent_id} from status update")
+    # Add WebSocket connection and message handling functions here
 
-def request_agent_status_sync():
-    """Request a full agent status update from the server."""
-    request = {
-        "message_type": MessageType.REQUEST_AGENT_STATUS
-    }
-    publish_to_server_response_queue(request)
-    log.info("Requested full agent status update from server")
+async def connect_to_server():
+    """Establish WebSocket connection to the server."""
+    global server_ws, server_ws_task
+    
+    try:
+        server_ws = await websockets.connect(SERVER_WS_URL)
+        log.info("Connected to server via WebSocket")
+        
+        # Register as broker
+        register_message = {
+            "message_type": MessageType.REGISTER_BROKER,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        await server_ws.send(json.dumps(register_message))
+        
+        # Start message handling task
+        server_ws_task = asyncio.create_task(handle_server_messages())
+        
+    except Exception as e:
+        log.error(f"Failed to connect to server: {e}")
+        server_ws = None
+        raise
+
+async def handle_server_messages():
+    """Handle messages from the server WebSocket connection."""
+    global server_ws, server_available
+    
+    try:
+        while True:
+            message = await server_ws.recv()
+            message_data = json.loads(message)
+            message_type = message_data.get("message_type")
+            
+            if message_type == MessageType.AGENT_STATUS_UPDATE:
+                # Update agent statuses
+                agents = message_data.get("agents", [])
+                log.info(f"Received agent status update with {len(agents)} agents")
+                
+                for agent in agents:
+                    agent_id = agent.get("agent_id")
+                    if agent_id:
+                        if agent_id not in registered_agents:
+                            registered_agents[agent_id] = {}
+                            log.info(f"Adding new agent: {agent.get('agent_name')} (ID: {agent_id})")
+                        
+                        # Update agent info
+                        registered_agents[agent_id].update({
+                            "name": agent.get("agent_name", "Unknown Agent"),
+                            "is_online": agent.get("is_online", False),
+                            "last_seen": agent.get("last_seen"),
+                            "capabilities": agent.get("capabilities", [])
+                        })
+                        log.info(f"Updated agent {agent.get('agent_name')} (ID: {agent_id}) - Online: {agent.get('is_online')}")
+                
+                # Log current state of all registered agents
+                log.info(f"Current registered agents: {len(registered_agents)}")
+                for agent_id, info in registered_agents.items():
+                    log.info(f"Agent: {info['name']} (ID: {agent_id}) - Online: {info['is_online']}")
+            else:
+                log.warning(f"Received unknown message type from server: {message_type}")
+                
+    except websockets.exceptions.ConnectionClosed:
+        log.warning("Server WebSocket connection closed")
+        server_ws = None
+        server_available = False  # Mark server as unavailable
+        raise
+    except Exception as e:
+        log.error(f"Error handling server messages: {e}")
+        server_ws = None
+        server_available = False  # Mark server as unavailable
+        raise
+
+async def server_connection_manager():
+    """Manage server WebSocket connection and reconnection."""
+    global server_ws, server_ws_task, server_available
+    
+    while True:
+        try:
+            if not server_ws and server_available:
+                await connect_to_server()
+            elif server_ws:
+                # Check if connection is still alive
+                try:
+                    await server_ws.ping()
+                    await server_ws.pong()
+                except:
+                    log.warning("Server connection lost")
+                    server_ws = None
+                    if server_ws_task:
+                        server_ws_task.cancel()
+                        server_ws_task = None
+                    server_available = False  # Mark server as unavailable
+                
+                await asyncio.sleep(1)  # Check connection every second
+            else:
+                # Server is not available, wait for advertisement
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            log.error(f"Error in server connection manager: {e}")
+            server_ws = None
+            if server_ws_task:
+                server_ws_task.cancel()
+                server_ws_task = None
+            server_available = False  # Mark server as unavailable
+            await asyncio.sleep(1)  # Wait before checking again
+
+def handle_server_advertisement(channel, method, properties, body):
+    """Handle server availability advertisement."""
+    try:
+        message_data = json.loads(body)
+        if message_data.get("message_type") == MessageType.SERVER_AVAILABLE:
+            global server_available
+            server_available = True
+            log.info(f"Server available at {message_data.get('websocket_url')}")
+            # No need to store the URL as it's configured via environment variable
+    except Exception as e:
+        log.error(f"Error handling server advertisement: {e}")
+    finally:
+        channel.basic_ack(delivery_tag=method.delivery_tag)
 
 def route_message(message_data):
     """Route messages to the appropriate recipients based on sender and receiver.
@@ -226,9 +337,6 @@ def route_message(message_data):
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
     receiver_id = message_data.get("receiver_id", "broadcast")
-    
-    # Request the latest agent status before routing
-    request_agent_status_sync()
     
     # Prepare the message for routing
     outgoing_message = dict(message_data)
@@ -275,49 +383,63 @@ def main():
     """Main function to start the broker service."""
     log.info("Starting message broker service")
     
-    # Initial request for agent status on startup
-    request_agent_status_sync()
-    
-    # Set up channels for incoming messages and control messages
+    # Set up channels for incoming messages, control messages, and server advertisements
     incoming_channel = setup_rabbitmq_channel(INCOMING_QUEUE, handle_incoming_message)
     control_channel = setup_rabbitmq_channel(BROKER_CONTROL_QUEUE, handle_control_message)
+    advertisement_channel = setup_rabbitmq_channel(SERVER_ADVERTISEMENT_QUEUE, handle_server_advertisement)
     
-    if not incoming_channel or not control_channel:
+    if not all([incoming_channel, control_channel, advertisement_channel]):
         log.error("Failed to set up RabbitMQ channels. Exiting.")
         return
     
-    # Set up periodic status sync
-    def periodic_status_sync():
-        while True:
-            try:
-                request_agent_status_sync()
-                time.sleep(30)  # Sync every 30 seconds
-            except Exception as e:
-                log.error(f"Error in periodic status sync: {e}")
-                time.sleep(5)  # Wait a bit before retrying
-    
-    # Start the periodic sync in a background thread
-    sync_thread = threading.Thread(target=periodic_status_sync, daemon=True)
-    sync_thread.start()
+    # Create event loop for async operations
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
     try:
+        # Start the server connection manager
+        server_manager_task = loop.create_task(server_connection_manager())
+        
+        # Start consuming from RabbitMQ channels
+        threading.Thread(target=incoming_channel.start_consuming, daemon=True).start()
+        threading.Thread(target=control_channel.start_consuming, daemon=True).start()
+        threading.Thread(target=advertisement_channel.start_consuming, daemon=True).start()
+        
         log.info("Broker service is running. Press Ctrl+C to exit.")
         
-        # Start consuming from both channels
-        threading.Thread(target=incoming_channel.start_consuming, daemon=True).start()
-        control_channel.start_consuming()
+        # Run the event loop
+        loop.run_forever()
+        
     except KeyboardInterrupt:
         log.info("Received interrupt. Shutting down broker service...")
+        
+        # Cancel server connection manager
+        if server_manager_task:
+            server_manager_task.cancel()
         
         # Stop consuming and close channels
         if incoming_channel:
             incoming_channel.stop_consuming()
         if control_channel:
             control_channel.stop_consuming()
-            
+        if advertisement_channel:
+            advertisement_channel.stop_consuming()
+        
+        # Close WebSocket connection if open
+        if server_ws:
+            loop.run_until_complete(server_ws.close())
+        
+        # Close event loops
+        loop.close()
+        if websocket_loop:
+            websocket_loop.close()
+        
         log.info("Broker service shut down successfully")
     except Exception as e:
         log.error(f"Unexpected error in broker service: {e}")
+        loop.close()
+        if websocket_loop:
+            websocket_loop.close()
 
 if __name__ == "__main__":
     main() 

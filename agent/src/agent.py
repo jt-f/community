@@ -88,6 +88,7 @@ class Agent:
             # Wait for confirmation response
             response = await self.websocket.recv()
             response_data = json.loads(response)
+            logger.info(f"Registration response: {response_data}")
             
             # Process response
 

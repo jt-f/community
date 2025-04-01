@@ -48,9 +48,14 @@ app.add_middleware(
 active_connections = set()  # All active websocket connections
 agent_connections = {}  # Dictionary to track agent websocket connections: agent_id -> websocket
 frontend_connections = set()  # Set to track frontend connections
+broker_connection = None  # Single broker WebSocket connection
 
 # Dictionary to track agent status
 agent_statuses = {}  # agent_id -> AgentStatus object
+agent_status_history = {}  # agent_id -> previous AgentStatus object for change detection
+
+# Server advertisement settings
+SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
 # Global variable for tracking the RabbitMQ connection
 rabbitmq_connection = None
@@ -230,23 +235,67 @@ async def agent_ping_service():
     except Exception as e:
         logging.error(f"Error in agent ping service: {e}")
 
-async def broadcast_agent_status():
-    """Broadcast current agent status to all frontend clients."""
+def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
+    """Check if an agent's status has changed from its previous state."""
+    if agent_id not in agent_status_history:
+        return True  # First time seeing this agent
+    
+    old_status = agent_status_history[agent_id]
+    return (old_status.is_online != new_status.is_online or 
+            old_status.last_seen != new_status.last_seen)
+
+async def advertise_server():
+    """Publish server availability to RabbitMQ."""
     try:
-        # Create status update message
-        status_list = list(agent_statuses.values())
-        status_update = AgentStatusUpdate(
-            agents=status_list
-        )
+        advertisement = {
+            "message_type": MessageType.SERVER_AVAILABLE,
+            "server_id": "server_1",  # Could be made configurable
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "websocket_url": "ws://localhost:8765/ws"  # Could be made configurable
+        }
+        publish_to_queue(SERVER_ADVERTISEMENT_QUEUE, advertisement)
+        logging.info("Published server availability advertisement")
+    except Exception as e:
+        logging.error(f"Error advertising server: {e}")
+
+async def broadcast_agent_status():
+    """Broadcast current agent status to all frontend clients and broker."""
+    global broker_connection
+    try:
+        # Create status update message with only changed agents
+        changed_agents = []
+        for agent_id, status in agent_statuses.items():
+            if has_agent_status_changed(agent_id, status):
+                changed_agents.append(status)
+                # Update history
+                agent_status_history[agent_id] = AgentStatus(
+                    agent_id=status.agent_id,
+                    agent_name=status.agent_name,
+                    is_online=status.is_online,
+                    last_seen=status.last_seen
+                )
         
-        # Broadcast to all frontend clients
-        for ws in frontend_connections:
-            try:
-                await ws.send_text(json.dumps(status_update.model_dump()))
-            except Exception as e:
-                logging.error(f"Error sending status update to frontend client: {e}")
-                
-        logging.debug(f"Broadcast agent status update to {len(frontend_connections)} frontend clients")
+        if changed_agents:
+            status_update = AgentStatusUpdate(
+                agents=changed_agents
+            )
+            
+            # Send to broker first if connected
+            if broker_connection:
+                try:
+                    await broker_connection.send_text(json.dumps(status_update.model_dump()))
+                except Exception as e:
+                    logging.error(f"Error sending status update to broker: {e}")
+                    broker_connection = None
+            
+            # Then broadcast to all frontend clients
+            for ws in frontend_connections:
+                try:
+                    await ws.send_text(json.dumps(status_update.model_dump()))
+                except Exception as e:
+                    logging.error(f"Error sending status update to frontend client: {e}")
+                    
+            logging.debug(f"Broadcast agent status update to broker and {len(frontend_connections)} frontend clients with {len(changed_agents)} changed agents")
     except Exception as e:
         logging.error(f"Error broadcasting agent status: {e}")
 
@@ -354,7 +403,7 @@ async def forward_response_to_client(response_data):
                 
                 # Send the response to the client
                 await target_websocket.send_text(json.dumps(message_to_client))
-                logging.info(f"Response forwarded to client {client_id}")
+                logging.info(f"Response forwarded to client {client_id}: {message_to_client}")
             else:
                 logging.warning(f"Client {client_id} not found for response delivery")
         else:
@@ -374,6 +423,7 @@ async def process_message(channel, method, properties, body):
         if response_data.get("message_type") == MessageType.REQUEST_AGENT_STATUS:
             logging.info("Received request for agent status from broker")
             await send_agent_status_to_broker()
+            await broadcast_agent_status()
             channel.basic_ack(delivery_tag=method.delivery_tag)
             return
             
@@ -398,6 +448,9 @@ async def startup_event():
     # Start the agent ping service
     asyncio.create_task(agent_ping_service())
     
+    # Advertise server availability
+    await advertise_server()
+    
     # Setup signal handlers for graceful shutdown
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, handle_exit)
@@ -418,6 +471,8 @@ async def shutdown_event():
     agent_connections.clear()
     frontend_connections.clear()
     active_connections.clear()
+    agent_statuses.clear()
+    agent_status_history.clear()  # Clear status history on shutdown
     
     # Close the RabbitMQ connection if it exists
     global rabbitmq_connection
@@ -470,21 +525,8 @@ async def websocket_endpoint(websocket: WebSocket):
     # Generate a unique client ID for this connection
     client_id = f"client_{len(active_connections)}_{uuid.uuid4().hex[:8]}"
     websocket.client_id = client_id  # Attach client_id to websocket object
-    websocket.connection_type = "unknown"  # Will be set to "agent" or "frontend" later
+    websocket.connection_type = "unknown"  # Will be set to "agent", "frontend", or "broker" later
     logging.info(f"New WebSocket connection: {client_id}")
-    
-    # Send initial agent status to the connection - if it's a frontend it will use it
-    # If it's an agent, it will be ignored
-    try:
-        # Assume frontend until proven otherwise
-        websocket.connection_type = "frontend"
-        frontend_connections.add(websocket)
-        logging.info(f"Client {client_id} initially identified as frontend client")
-        
-        # Send initial agent status to the new client
-        await broadcast_agent_status()
-    except Exception as e:
-        logging.error(f"Error sending initial agent status: {e}")
     
     try:
         while True:
@@ -495,8 +537,19 @@ async def websocket_endpoint(websocket: WebSocket):
             # Add client_id for routing responses back
             message_data["_client_id"] = client_id
             
+            # Handle REGISTER_BROKER messages
+            if message_type == MessageType.REGISTER_BROKER:
+                websocket.connection_type = "broker"
+                global broker_connection
+                broker_connection = websocket
+                logging.info(f"Broker connected: {client_id}")
+                
+                # Send current agent status to broker
+                await broadcast_agent_status()
+                continue
+            
             # Handle REGISTER_AGENT messages to track agent connections
-            if message_type == MessageType.REGISTER_AGENT:
+            elif message_type == MessageType.REGISTER_AGENT:
                 # If we initially thought this was a frontend, remove it
                 if websocket in frontend_connections:
                     frontend_connections.remove(websocket)
@@ -530,11 +583,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     await websocket.send_text(json.dumps(response.model_dump()))
                     
-                    # Broadcast updated agent status to frontend clients
+                    # Broadcast updated agent status to frontend clients and broker
                     await broadcast_agent_status()
-                    
-                    # Also send agent status to broker
-                    await send_agent_status_to_broker()
                     
                     logging.info(f"Agent {agent_name} (ID: {agent_id}) registered")
                     
@@ -552,8 +602,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         agent_statuses[agent_id].is_online = True
                         # Broadcast updated status since agent is back online
                         await broadcast_agent_status()
-                        # Also send agent status to broker
-                        await send_agent_status_to_broker()
                         
                     logging.info(f"Received PONG from agent {agent_id}")
                 else:
@@ -603,7 +651,11 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections.remove(websocket)
         connection_type = getattr(websocket, "connection_type", "unknown")
         
-        if connection_type == "frontend" and websocket in frontend_connections:
+        if connection_type == "broker" and websocket == broker_connection:
+            broker_connection = None
+            logging.info("Broker disconnected")
+            
+        elif connection_type == "frontend" and websocket in frontend_connections:
             frontend_connections.remove(websocket)
             logging.info(f"Frontend client disconnected: {client_id}")
             
@@ -639,6 +691,8 @@ async def websocket_endpoint(websocket: WebSocket):
             active_connections.remove(websocket)
         if websocket in frontend_connections:
             frontend_connections.remove(websocket)
+        if websocket == broker_connection:
+            broker_connection = None
         
         # Check if this was an agent connection
         for agent_id, ws in list(agent_connections.items()):
@@ -649,8 +703,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 del agent_connections[agent_id]
                 await broadcast_agent_status()
-                # Also notify broker
-                await send_agent_status_to_broker()
                 break
 
 if __name__ == "__main__":

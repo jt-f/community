@@ -3,6 +3,7 @@ import { ChatMessage, MessageType, createMessage } from '../types/message';
 
 interface ChatProps {
   wsRef: React.MutableRefObject<WebSocket | null>;
+  isConnected: boolean;
 }
 
 interface MessageWithAnimation extends ChatMessage {
@@ -10,10 +11,9 @@ interface MessageWithAnimation extends ChatMessage {
   animationPhase?: 'fadeIn' | 'vibrate' | null;
 }
 
-export function Chat({ wsRef }: ChatProps) {
+export function Chat({ wsRef, isConnected }: ChatProps) {
   const [messages, setMessages] = useState<MessageWithAnimation[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
   const userId = useRef(`user_${Math.random().toString(36).substring(2, 11)}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -21,20 +21,7 @@ export function Chat({ wsRef }: ChatProps) {
     const ws = wsRef.current;
     if (!ws) return;
 
-    // Update connection status when the component mounts
-    setIsConnected(ws.readyState === WebSocket.OPEN);
-
     // Set up event listeners for the websocket
-    const handleOpen = () => {
-      setIsConnected(true);
-      console.log('Chat: WebSocket connected');
-    };
-
-    const handleClose = () => {
-      setIsConnected(false);
-      console.log('Chat: WebSocket disconnected');
-    };
-
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -55,14 +42,10 @@ export function Chat({ wsRef }: ChatProps) {
       }
     };
 
-    ws.addEventListener('open', handleOpen);
-    ws.addEventListener('close', handleClose);
     ws.addEventListener('message', handleMessage);
 
     // Clean up event listeners
     return () => {
-      ws.removeEventListener('open', handleOpen);
-      ws.removeEventListener('close', handleClose);
       ws.removeEventListener('message', handleMessage);
     };
   }, [wsRef]);

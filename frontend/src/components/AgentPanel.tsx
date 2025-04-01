@@ -15,10 +15,13 @@ export function AgentPanel({ wsRef }: AgentPanelProps) {
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
+        console.log('Received WebSocket message:', data);
         
         // Only process agent status update messages
         if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
+          console.log('Processing agent status update:', data);
           const statusUpdate = data as AgentStatusUpdateMessage;
+          console.log('Updating agents with:', statusUpdate.agents);
           updateAgents(statusUpdate.agents);
         }
       } catch (error) {
@@ -28,16 +31,25 @@ export function AgentPanel({ wsRef }: AgentPanelProps) {
 
     // Add the message handler if the websocket is available
     if (wsRef.current) {
+      console.log('Adding message handler to WebSocket');
       wsRef.current.addEventListener('message', handleMessage);
+    } else {
+      console.warn('WebSocket not available when setting up message handler');
     }
 
     // Clean up the event listener when the component unmounts
     return () => {
       if (wsRef.current) {
+        console.log('Removing message handler from WebSocket');
         wsRef.current.removeEventListener('message', handleMessage);
       }
     };
   }, [wsRef, updateAgents]);
+
+  // Log current agents state
+  useEffect(() => {
+    console.log('Current agents state:', agents);
+  }, [agents]);
 
   // Get the agents to display based on selected filter
   const getFilteredAgents = () => {
