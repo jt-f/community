@@ -9,66 +9,95 @@ interface AgentPanelProps {
 export function AgentPanel({ wsRef }: AgentPanelProps) {
   const { agents, updateAgents, getOnlineAgents, getOfflineAgents } = useAgentStore();
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [isConnected, setIsConnected] = useState(false);
 
+  // Monitor WebSocket connection state
   useEffect(() => {
-    // Setup websocket message handler for agent status updates
+    const checkConnection = () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setIsConnected(true);
+      } else {
+        setIsConnected(false);
+      }
+    };
+
+    // Check initially
+    checkConnection();
+
+    // Set up interval to check connection state
+    const interval = setInterval(checkConnection, 1000);
+
+    return () => clearInterval(interval);
+  }, [wsRef]);
+
+  // Setup websocket message handler for agent status updates
+  useEffect(() => {
+    if (!isConnected || !wsRef.current) {
+      console.log('AgentPanel: WebSocket not connected, skipping message handler setup');
+      return;
+    }
+
+    console.log('AgentPanel: Setting up message handler for connected WebSocket');
+    
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('Received WebSocket message:', data);
+        console.log('AgentPanel: Received WebSocket message:', data);
         
         // Only process agent status update messages
         if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
-          console.log('Processing agent status update:', data);
+          console.log('AgentPanel: Processing agent status update:', data);
           const statusUpdate = data as AgentStatusUpdateMessage;
-          console.log('Updating agents with:', statusUpdate.agents);
+          console.log('AgentPanel: Updating agents with:', statusUpdate.agents);
           updateAgents(statusUpdate.agents);
+        } else {
+          console.log('AgentPanel: Ignoring non-agent-status message:', data.message_type);
         }
       } catch (error) {
-        console.error('Error processing agent status update:', error);
+        console.error('AgentPanel: Error processing agent status update:', error);
       }
     };
 
-    // Add the message handler if the websocket is available
-    if (wsRef.current) {
-      console.log('Adding message handler to WebSocket');
-      wsRef.current.addEventListener('message', handleMessage);
-    } else {
-      console.warn('WebSocket not available when setting up message handler');
-    }
+    wsRef.current.addEventListener('message', handleMessage);
+    console.log('AgentPanel: Message handler added to WebSocket');
 
-    // Clean up the event listener when the component unmounts
     return () => {
       if (wsRef.current) {
-        console.log('Removing message handler from WebSocket');
+        console.log('AgentPanel: Removing message handler from WebSocket');
         wsRef.current.removeEventListener('message', handleMessage);
       }
     };
-  }, [wsRef, updateAgents]);
+  }, [wsRef, isConnected, updateAgents]);
 
   // Log current agents state
   useEffect(() => {
-    console.log('Current agents state:', agents);
-  }, [agents]);
+    console.log('AgentPanel: Current agents state:', agents);
+    console.log('AgentPanel: Online agents:', getOnlineAgents());
+    console.log('AgentPanel: Offline agents:', getOfflineAgents());
+  }, [agents, getOnlineAgents, getOfflineAgents]);
 
   // Get the agents to display based on selected filter
   const getFilteredAgents = () => {
-    switch (selectedFilter) {
-      case 'online':
-        return getOnlineAgents();
-      case 'offline':
-        return getOfflineAgents();
-      default:
-        return agents;
-    }
+    const filtered = selectedFilter === 'online' 
+      ? getOnlineAgents()
+      : selectedFilter === 'offline'
+        ? getOfflineAgents()
+        : agents;
+    console.log('AgentPanel: Filtered agents:', filtered);
+    return filtered;
   };
 
   const filteredAgents = getFilteredAgents();
+  console.log('AgentPanel: Rendering with filtered agents:', filteredAgents);
 
   return (
     <div className="agent-panel">
       <div className="panel-header">
         <h3>Agents</h3>
+        <div className="connection-status">
+          <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
+          <span className="status-text">{isConnected ? 'Connected' : 'Disconnected'}</span>
+        </div>
         <div className="agent-filters">
           <button 
             className={`filter-btn ${selectedFilter === 'all' ? 'active' : ''}`}
@@ -92,7 +121,9 @@ export function AgentPanel({ wsRef }: AgentPanelProps) {
       </div>
       
       <div className="agents-list">
-        {filteredAgents.length === 0 ? (
+        {!isConnected ? (
+          <div className="no-agents">Connecting to server...</div>
+        ) : filteredAgents.length === 0 ? (
           <div className="no-agents">
             {selectedFilter === 'all' 
               ? 'No agents registered'
@@ -147,6 +178,14 @@ export function AgentPanel({ wsRef }: AgentPanelProps) {
           margin: 0;
           font-size: 16px;
           font-weight: 600;
+        }
+        
+        .connection-status {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: var(--color-text-secondary);
         }
         
         .agent-filters {

@@ -258,46 +258,68 @@ async def advertise_server():
     except Exception as e:
         logging.error(f"Error advertising server: {e}")
 
-async def broadcast_agent_status():
+async def broadcast_agent_status(force_full_update: bool = False):
     """Broadcast current agent status to all frontend clients and broker."""
     global broker_connection
     try:
-        # Create status update message with only changed agents
-        changed_agents = []
-        for agent_id, status in agent_statuses.items():
-            if has_agent_status_changed(agent_id, status):
-                changed_agents.append(status)
-                # Update history
-                agent_status_history[agent_id] = AgentStatus(
-                    agent_id=status.agent_id,
-                    agent_name=status.agent_name,
-                    is_online=status.is_online,
-                    last_seen=status.last_seen
-                )
-        
-        if changed_agents:
+        # Create status update message with all agents if force_full_update is True
+        if force_full_update:
             status_update = AgentStatusUpdate(
-                agents=changed_agents
+                agents=list(agent_statuses.values())
             )
+        else:
+            # Create status update message with only changed agents
+            changed_agents = []
+            for agent_id, status in agent_statuses.items():
+                if has_agent_status_changed(agent_id, status):
+                    changed_agents.append(status)
+                    # Update history
+                    agent_status_history[agent_id] = AgentStatus(
+                        agent_id=status.agent_id,
+                        agent_name=status.agent_name,
+                        is_online=status.is_online,
+                        last_seen=status.last_seen
+                    )
             
-            # Send to broker first if connected
-            if broker_connection:
-                try:
-                    await broker_connection.send_text(json.dumps(status_update.model_dump()))
-                except Exception as e:
-                    logging.error(f"Error sending status update to broker: {e}")
-                    broker_connection = None
-            
-            # Then broadcast to all frontend clients
-            for ws in frontend_connections:
-                try:
-                    await ws.send_text(json.dumps(status_update.model_dump()))
-                except Exception as e:
-                    logging.error(f"Error sending status update to frontend client: {e}")
-                    
-            logging.debug(f"Broadcast agent status update to broker and {len(frontend_connections)} frontend clients with {len(changed_agents)} changed agents")
+            if changed_agents:
+                status_update = AgentStatusUpdate(
+                    agents=changed_agents
+                )
+            else:
+                return  # No changes to broadcast
+        
+        # Send to broker first if connected
+        if broker_connection:
+            try:
+                await broker_connection.send_text(json.dumps(status_update.model_dump()))
+            except Exception as e:
+                logging.error(f"Error sending status update to broker: {e}")
+                broker_connection = None
+        
+        # Then broadcast to all frontend clients
+        for ws in frontend_connections:
+            try:
+                await ws.send_text(json.dumps(status_update.model_dump()))
+            except Exception as e:
+                logging.error(f"Error sending status update to frontend client: {e}")
+                
+        logging.info(f"Broadcast agent status update to broker and {len(frontend_connections)} frontend clients with {len(status_update.agents)} agents")
     except Exception as e:
         logging.error(f"Error broadcasting agent status: {e}")
+
+async def periodic_status_broadcast():
+    """Service to periodically broadcast full agent status to frontend clients."""
+    try:
+        while True:
+            # Broadcast full agent status every minute
+            await broadcast_agent_status(force_full_update=True)
+            await asyncio.sleep(60)  # Wait 60 seconds before next broadcast
+            
+    except asyncio.CancelledError:
+        logging.info("Periodic status broadcast service task cancelled")
+        raise
+    except Exception as e:
+        logging.error(f"Error in periodic status broadcast service: {e}")
 
 async def send_agent_status_to_broker():
     """Send current agent status to the broker."""
@@ -448,6 +470,9 @@ async def startup_event():
     # Start the agent ping service
     asyncio.create_task(agent_ping_service())
     
+    # Start the periodic status broadcast service
+    asyncio.create_task(periodic_status_broadcast())
+    
     # Advertise server availability
     await advertise_server()
     
@@ -545,7 +570,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 logging.info(f"Broker connected: {client_id}")
                 
                 # Send current agent status to broker
-                await broadcast_agent_status()
+                await broadcast_agent_status(force_full_update=True)
                 continue
             
             # Handle REGISTER_AGENT messages to track agent connections
@@ -584,10 +609,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps(response.model_dump()))
                     
                     # Broadcast updated agent status to frontend clients and broker
-                    await broadcast_agent_status()
+                    await broadcast_agent_status(force_full_update=True)
                     
                     logging.info(f"Agent {agent_name} (ID: {agent_id}) registered")
                     
+            # Handle explicit frontend registration
+            elif message_type == MessageType.REGISTER_FRONTEND:
+                websocket.connection_type = "frontend"
+                frontend_connections.add(websocket)
+                logging.info(f"Frontend client registered: {client_id}")
+                
+                # Send full agent status immediately
+                await broadcast_agent_status(force_full_update=True)
+            
             # Handle PONG messages from agents
             elif message_type == MessageType.PONG:
                 agent_id = message_data.get("agent_id")
@@ -625,14 +659,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         message_type=MessageType.ERROR
                     )
                     await websocket.send_text(json.dumps(error_message.model_dump()))
-            
-            # Handle explicit frontend registration
-            elif message_type == MessageType.REGISTER_FRONTEND:
-                # Already handled by default assumption
-                logging.info(f"Explicit frontend registration from client {client_id}")
-                
-                # Send current agent status again
-                await broadcast_agent_status()
             
             # Handle other message types
             else:

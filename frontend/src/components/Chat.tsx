@@ -59,7 +59,7 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
     if (inputMessage.trim() && wsRef.current?.readyState === WebSocket.OPEN) {
       const message = createMessage(
         userId.current,
-        'server',
+        'broker',
         inputMessage,
         MessageType.TEXT
       );
