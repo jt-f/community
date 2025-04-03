@@ -30,6 +30,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Reduce verbosity from pika library
+logging.getLogger("pika").setLevel(logging.WARNING)
+logger.info("Pika library logging level set to WARNING.")
+
 class Agent:
     def __init__(self, agent_id: str, agent_name: str, websocket_url: str, rabbitmq_host: str):
         self.agent_id = agent_id

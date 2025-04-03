@@ -25,6 +25,10 @@ logging.basicConfig(
 # Get a logger for this module
 log = logging.getLogger("broker")
 
+# Reduce verbosity from pika library
+logging.getLogger("pika").setLevel(logging.WARNING)
+log.info("Pika library logging level set to WARNING.")
+
 # RabbitMQ connection details - can be overridden with environment variables
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))

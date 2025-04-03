@@ -1,1 +1,1 @@
-poetry run python src/server.py
+poetry run python src/main.py
