@@ -75,9 +75,9 @@ def publish_to_queue(queue_name: str, message_data: dict) -> bool:
             except Exception as close_exc:
                 logger.error(f"Error closing RabbitMQ channel after publishing: {close_exc}")
 
-def publish_to_incoming_queue(message_data: dict) -> bool:
-    """Publish a message to the incoming messages queue."""
-    return publish_to_queue(config.INCOMING_QUEUE, message_data)
+def publish_to_broker_input_queue(message_data: dict) -> bool:
+    """Publish a message to the main broker input queue."""
+    return publish_to_queue(config.BROKER_INPUT_QUEUE, message_data)
 
 def publish_to_agent_metadata_queue(message_data: dict) -> bool:
     """Publish an agent metadata message (register, disconnect) to the queue."""

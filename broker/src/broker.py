@@ -32,9 +32,9 @@ log.info("Pika library logging level set to WARNING.")
 # RabbitMQ connection details - can be overridden with environment variables
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
-INCOMING_QUEUE = "incoming_messages_queue"
+BROKER_INPUT_QUEUE = "broker_input_queue"         # Formerly INCOMING_QUEUE
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
-SERVER_RESPONSE_QUEUE = "server_response_queue"
+BROKER_OUTPUT_QUEUE = "broker_output_queue"      # Formerly SERVER_RESPONSE_QUEUE
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
 # Server WebSocket connection details
@@ -83,36 +83,36 @@ def setup_rabbitmq_channel(queue_name, callback_function):
         log.error(f"Failed to set up RabbitMQ channel for {queue_name}: {e}")
         return None
 
-def publish_to_server_response_queue(message_data):
-    """Publish a message to the server response queue."""
+def publish_to_broker_output_queue(message_data):
+    """Publish a message to the broker's output queue (read by the server)."""
     try:
         connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         channel = connection.channel()
         
         # Ensure the queue exists
-        channel.queue_declare(queue=SERVER_RESPONSE_QUEUE, durable=True)
+        channel.queue_declare(queue=BROKER_OUTPUT_QUEUE, durable=True)
         
         # Publish the message
         channel.basic_publish(
             exchange='',
-            routing_key=SERVER_RESPONSE_QUEUE,
+            routing_key=BROKER_OUTPUT_QUEUE,
             body=json.dumps(message_data),
             properties=pika.BasicProperties(
                 delivery_mode=2,  # make message persistent
             )
         )
         
-        log.debug(f"Published message to {SERVER_RESPONSE_QUEUE}")
+        log.debug(f"Published message to {BROKER_OUTPUT_QUEUE}")
         
         # Clean up
         connection.close()
         return True
     except Exception as e:
-        log.error(f"Failed to publish to {SERVER_RESPONSE_QUEUE}: {e}")
+        log.error(f"Failed to publish to {BROKER_OUTPUT_QUEUE}: {e}")
         return False
 
 def handle_incoming_message(channel, method, properties, body):
-    """Handle incoming chat messages."""
+    """Handle incoming chat messages from the BROKER_INPUT_QUEUE."""
     try:
         message_data = json.loads(body)
         message_type = message_data.get("message_type")
@@ -130,7 +130,7 @@ def handle_incoming_message(channel, method, properties, body):
             # Acknowledge the message was processed
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
-            log.warning(f"Received unsupported message type in incoming queue: {message_type}")
+            log.warning(f"Received unsupported message type in broker input queue: {message_type}")
             # Acknowledge but skip processing
             channel.basic_ack(delivery_tag=method.delivery_tag)
     except json.JSONDecodeError:
@@ -197,8 +197,8 @@ def handle_agent_registration(channel, message_data):
     if client_id:
         response["client_id"] = client_id
     
-    # Send response back to the server
-    publish_to_server_response_queue(response)
+    # Send response back to the server via the broker output queue
+    publish_to_broker_output_queue(response)
 
 def handle_client_disconnected(channel, message_data):
     """Handles client disconnection notification."""
@@ -337,7 +337,8 @@ def handle_server_advertisement(channel, method, properties, body):
 
 def route_message(message_data):
     """Route messages to the appropriate recipients based on sender and receiver.
-    Server will handle the client connection mapping."""
+    Publishes messages to the BROKER_OUTPUT_QUEUE for the server to handle delivery.
+    """
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
     receiver_id = message_data.get("receiver_id", "broadcast")
@@ -348,7 +349,7 @@ def route_message(message_data):
     # For broadcast messages, add a flag for the server to broadcast
     if receiver_id == "broadcast":
         outgoing_message["_broadcast"] = True
-        publish_to_server_response_queue(outgoing_message)
+        publish_to_broker_output_queue(outgoing_message)
         log.info(f"Sent broadcast message from {sender_id} to server for distribution")
         return
         
@@ -358,7 +359,7 @@ def route_message(message_data):
         if registered_agents[receiver_id]["is_online"]:
             # Add routing info for the server
             outgoing_message["_target_agent_id"] = receiver_id
-            publish_to_server_response_queue(outgoing_message)
+            publish_to_broker_output_queue(outgoing_message)
             log.info(f"Routed message from {sender_id} to agent {receiver_id}")
         else:
             # Agent is offline, send an error message back
@@ -369,7 +370,7 @@ def route_message(message_data):
                 "text_payload": f"Agent {receiver_id} is currently offline",
                 "_client_id": message_data.get("_client_id")  # Route back to original sender
             }
-            publish_to_server_response_queue(error_response)
+            publish_to_broker_output_queue(error_response)
             log.warning(f"Cannot route message to offline agent {receiver_id}")
     else:
         # Unknown agent, send an error message back
@@ -380,7 +381,7 @@ def route_message(message_data):
             "text_payload": f"Unknown agent ID: {receiver_id}",
             "_client_id": message_data.get("_client_id")  # Route back to original sender
         }
-        publish_to_server_response_queue(error_response)
+        publish_to_broker_output_queue(error_response)
         log.warning(f"Cannot route message to unknown agent {receiver_id}")
 
 def main():
@@ -388,7 +389,7 @@ def main():
     log.info("Starting message broker service")
     
     # Set up channels for incoming messages, control messages, and server advertisements
-    incoming_channel = setup_rabbitmq_channel(INCOMING_QUEUE, handle_incoming_message)
+    incoming_channel = setup_rabbitmq_channel(BROKER_INPUT_QUEUE, handle_incoming_message)
     control_channel = setup_rabbitmq_channel(AGENT_METADATA_QUEUE, handle_control_message)
     advertisement_channel = setup_rabbitmq_channel(SERVER_ADVERTISEMENT_QUEUE, handle_server_advertisement)
     

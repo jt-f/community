@@ -100,8 +100,8 @@ async def websocket_endpoint(websocket: WebSocket):
             elif message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
                 # Add connection type metadata before forwarding
                 message_data["_connection_type"] = websocket.connection_type 
-                logger.debug(f"Forwarding {message_type} message from {client_id} ({websocket.connection_type}) to incoming queue.")
-                if not rabbitmq_utils.publish_to_incoming_queue(message_data):
+                logger.debug(f"Forwarding {message_type} message from {client_id} ({websocket.connection_type}) to broker input queue.")
+                if not rabbitmq_utils.publish_to_broker_input_queue(message_data):
                     logger.error(f"Failed to publish incoming message from {client_id} to RabbitMQ.")
                     # Optionally notify sender of the error
                     error_resp = ChatMessage.create(

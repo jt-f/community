@@ -152,6 +152,45 @@ def mark_agent_offline(agent_id: str):
     else:
         logger.warning(f"Attempted to mark unknown agent {agent_id} as offline.")
 
+async def handle_agent_disconnection(agent_id: str) -> bool:
+    """Handles the disconnection of an agent.
+
+    Removes the agent's WebSocket connection from the active state
+    and marks the agent as offline in the status registry.
+
+    Args:
+        agent_id: The ID of the agent that disconnected.
+
+    Returns:
+        True if the agent was found and marked offline, False otherwise.
+    """
+    disconnected = False
+    agent_name = state.agent_statuses.get(agent_id, AgentStatus(agent_id=agent_id, agent_name="unknown")).agent_name # Get name for logging
+
+    # Remove from active connections if present
+    if agent_id in state.agent_connections:
+        logger.warning(f"Removing connection for agent {agent_name} ({agent_id}) due to detected disconnection.")
+        # Attempt to close websocket gracefully first? Might already be closed.
+        ws = state.agent_connections.pop(agent_id, None) # Use pop with None default
+        if ws:
+             try:
+                 # Use a short timeout as the connection is likely already broken
+                 await asyncio.wait_for(ws.close(code=1011, reason="Server detected disconnection"), timeout=0.5)
+             except asyncio.TimeoutError:
+                 logger.debug(f"Timeout closing websocket for disconnected agent {agent_id}, likely already closed.")
+             except Exception as e:
+                 logger.debug(f"Error during explicit close for disconnected agent {agent_id}: {e}") # Log other potential errors during close
+        disconnected = True # Indicate connection was present and removed
+
+    # Mark as offline in the registry (safe to call even if already offline)
+    mark_agent_offline(agent_id) # This function handles logging if status changes
+
+    # If we removed the connection, it implies a change even if mark_agent_offline didn't log it
+    # But mark_agent_offline should handle the core status change logging.
+    # The return value primarily signifies that we processed a disconnect event for this agent ID.
+    # We rely on the caller to decide if a broadcast is needed based on *any* disconnections.
+    return disconnected # Return true if connection was removed or agent was marked offline
+
 def handle_pong(agent_id: str):
     """Handles a PONG message received from an agent."""
     if agent_id in state.agent_statuses:

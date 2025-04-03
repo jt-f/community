@@ -26,7 +26,7 @@ This directory contains the Python FastAPI server responsible for managing WebSo
 *   `state.py`: Shared application state (connections, statuses).
 *   `websocket_handler.py`: Logic for handling WebSocket connections and message types.
 *   `rabbitmq_utils.py`: Functions for interacting with RabbitMQ (publishing, connecting).
-*   `agent_manager.py`: Functions for managing agent status, history, and broadcasting updates.
+*   `agent_manager.py`: Functions for managing agent status, history, broadcasting updates, and handling disconnections.
 *   `services.py`: Background asyncio tasks (RabbitMQ consumer, agent pinger, periodic status broadcaster).
 *   `utils.py`: Utility functions (signal handling, graceful shutdown).
 

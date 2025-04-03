@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import json
+import pika
 from datetime import datetime, timedelta
 
 # Import shared models, config, state, and utils
@@ -12,120 +13,167 @@ import agent_manager
 
 logger = logging.getLogger(__name__)
 
-# --- Response Consumer Service --- 
+# --- Helper Functions ---
+
+def _prepare_message_for_client(response_data: dict) -> dict:
+    """Creates a copy of the response data dictionary removing internal routing keys."""
+    message_copy = response_data.copy()
+    for key in ["_broadcast", "_target_agent_id", "_client_id"]:
+        message_copy.pop(key, None) # Use pop with None to avoid KeyError if key absent
+    return message_copy
+
+async def _safe_send_websocket(ws: asyncio.Protocol, payload_str: str, client_desc: str) -> bool:
+    """Sends data to a WebSocket, handling exceptions and logging.
+    
+    Args:
+        ws: The WebSocket connection object.
+        payload_str: The JSON string payload to send.
+        client_desc: A description of the client (e.g., client_id, agent_id) for logging.
+
+    Returns:
+        True if send was successful, False otherwise.
+    """
+    try:
+        await ws.send_text(payload_str)
+        logger.debug(f"Successfully sent message to {client_desc}")
+        return True
+    except Exception as e:
+        logger.error(f"Error sending message to {client_desc}: {e}. Connection assumed lost.")
+        return False
+
+# --- Response Consumer Service ---
+
+async def _handle_broadcast(payload_str: str, response_data: dict) -> bool:
+    """Handles broadcasting a message to all connected clients and agents."""
+    needs_agent_status_broadcast = False
+    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
+    logger.info(f"Broadcasting message type {message_type}...")
+
+    # --- Send to all frontend clients ---
+    disconnected_frontend = set()
+    # Iterate over a copy in case the set is modified during iteration elsewhere
+    for ws in list(state.frontend_connections):
+        client_desc = f"frontend client {getattr(ws, 'client_id', '?')}"
+        if not await _safe_send_websocket(ws, payload_str, client_desc):
+            disconnected_frontend.add(ws)
+    if disconnected_frontend:
+        state.frontend_connections -= disconnected_frontend
+        logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
+
+    # --- Send to all agents except the sender ---
+    disconnected_agents = set()
+    sender_id = response_data.get("sender_id")
+    # Iterate over a copy of items in case the dict is modified
+    for agent_id, ws in list(state.agent_connections.items()):
+        if agent_id != sender_id:  # Don't send back to sender
+            client_desc = f"agent {agent_id}"
+            if not await _safe_send_websocket(ws, payload_str, client_desc):
+                disconnected_agents.add(agent_id)
+
+    # --- Clean up disconnected agents ---
+    if disconnected_agents:
+        processed_disconnects = False
+        for agent_id in disconnected_agents:
+            # Use the centralized handler
+            if await agent_manager.handle_agent_disconnection(agent_id):
+                 processed_disconnects = True
+        if processed_disconnects:
+             needs_agent_status_broadcast = True # Trigger broadcast if any agent was actually disconnected
+
+    logger.debug(f"Broadcast complete. Sent to {len(state.frontend_connections)} FE, {len(state.agent_connections) - len(disconnected_agents)} Agents.")
+    return needs_agent_status_broadcast
+
+
+async def _handle_direct_to_agent(payload_str: str, response_data: dict, target_agent_id: str) -> bool:
+    """Handles sending a message directly to a specific agent."""
+    needs_agent_status_broadcast = False
+    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
+
+    if target_agent_id in state.agent_connections:
+        agent_ws = state.agent_connections[target_agent_id]
+        client_desc = f"target agent {target_agent_id}"
+        if not await _safe_send_websocket(agent_ws, payload_str, client_desc):
+            # Send failed, clean up agent using the centralized handler
+            logger.warning(f"Send to agent {target_agent_id} failed. Handling disconnection.")
+            # The handler returns true if a change was made, signaling a need for broadcast
+            needs_agent_status_broadcast = await agent_manager.handle_agent_disconnection(target_agent_id)
+        else:
+            logger.info(f"Message type {message_type} forwarded to agent {target_agent_id}")
+    else:
+        logger.warning(f"Target agent {target_agent_id} not connected, cannot deliver message: {message_type}")
+
+    return needs_agent_status_broadcast
+
+
+async def _handle_direct_to_client(payload_str: str, response_data: dict, client_id: str) -> bool:
+    """Handles sending a message directly to a specific client ID."""
+    needs_agent_status_broadcast = False
+    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
+    target_websocket = None
+
+    # --- Find the target websocket ---
+    # Check active connections (could be frontend or agent)
+    for websocket in state.active_connections:
+        if getattr(websocket, "client_id", None) == client_id:
+            target_websocket = websocket
+            break
+
+    # --- Send or handle disconnection ---
+    if target_websocket:
+        client_desc = f"client {client_id} ({getattr(target_websocket, 'connection_type', '?')})"
+        if not await _safe_send_websocket(target_websocket, payload_str, client_desc):
+            # Send failed, remove the connection comprehensively
+            logger.warning(f"Removing connection for client {client_id} after send failure.")
+            state.active_connections.discard(target_websocket)
+            state.frontend_connections.discard(target_websocket)
+            found_agent_id = None
+            # Iterate over copy for safe deletion
+            for ag_id, ws in list(state.agent_connections.items()):
+                if ws == target_websocket:
+                    found_agent_id = ag_id
+                    break
+            if found_agent_id:
+                logger.warning(f"Send to client {client_id} (agent {found_agent_id}) failed. Handling disconnection.")
+                # Use centralized handler; it returns true if a change was made
+                needs_agent_status_broadcast = await agent_manager.handle_agent_disconnection(found_agent_id)
+        else:
+            logger.info(f"Response type {message_type} forwarded to client {client_id}")
+    else:
+        logger.warning(f"Client {client_id} not found for response delivery: {message_type}")
+
+    return needs_agent_status_broadcast
+
 
 async def forward_response_to_client(response_data: dict):
-    """Forward a response from the broker to the appropriate WebSocket client."""
-    try:
-        # Handle broadcast flag for sending to all clients
-        if response_data.get("_broadcast") is True:
-            # Send to all frontend clients
-            disconnected_frontend = set()
-            for ws in state.frontend_connections:
-                try:
-                    # Create a copy of the message without routing metadata
-                    message_to_client = response_data.copy()
-                    for key in ["_broadcast", "_target_agent_id", "_client_id"]:
-                        message_to_client.pop(key, None)
-                            
-                    await ws.send_text(json.dumps(message_to_client))
-                except Exception as e:
-                    logger.error(f"Error sending broadcast to frontend client {getattr(ws, 'client_id', '?')}: {e}")
-                    disconnected_frontend.add(ws)
-            state.frontend_connections -= disconnected_frontend # Clean up disconnected
-            
-            # Send to all agents except the sender
-            disconnected_agents = set()
-            sender_id = response_data.get("sender_id")
-            for agent_id, ws in state.agent_connections.items():
-                if agent_id != sender_id:  # Don't send back to sender
-                    try:
-                        message_to_agent = response_data.copy()
-                        for key in ["_broadcast", "_target_agent_id", "_client_id"]:
-                            message_to_agent.pop(key, None)
-                                
-                        await ws.send_text(json.dumps(message_to_agent))
-                    except Exception as e:
-                        logger.error(f"Error sending broadcast to agent {agent_id}: {e}")
-                        disconnected_agents.add(agent_id)
-            
-            # Clean up disconnected agents
-            for agent_id in disconnected_agents:
-                 if agent_id in state.agent_connections:
-                      del state.agent_connections[agent_id]
-                 agent_manager.mark_agent_offline(agent_id) # Mark as offline
-            if disconnected_agents:
-                await agent_manager.broadcast_agent_status() # Broadcast changes
+    """Forward a response from the broker to the appropriate WebSocket client(s)."""
+    # Prepare the message payload once (without routing keys)
+    message_to_send = _prepare_message_for_client(response_data)
+    payload_str = json.dumps(message_to_send)
+    needs_agent_status_broadcast = False
 
-            logger.info("Broadcast message sent to remaining clients and agents")
-            return
-            
-        # Handle direct messages to a specific agent
-        target_agent_id = response_data.get("_target_agent_id")
-        if target_agent_id:
-            if target_agent_id in state.agent_connections:
-                agent_ws = state.agent_connections[target_agent_id]
-                try:
-                    message_to_agent = response_data.copy()
-                    for key in ["_broadcast", "_target_agent_id", "_client_id"]:
-                        message_to_agent.pop(key, None)
-                    
-                    await agent_ws.send_text(json.dumps(message_to_agent))
-                    logger.info(f"Message forwarded to agent {target_agent_id}")
-                except Exception as e:
-                     logger.error(f"Error forwarding message to agent {target_agent_id}: {e}. Removing agent connection.")
-                     del state.agent_connections[target_agent_id]
-                     agent_manager.mark_agent_offline(target_agent_id)
-                     await agent_manager.broadcast_agent_status()
-            else:
-                logger.warning(f"Target agent {target_agent_id} not connected, cannot deliver message: {response_data.get('message_type')}")
-            return
-        
-        # Handle messages targeted at a specific client_id (usually original sender)
-        client_id = response_data.get("client_id") or response_data.get("_client_id")
-        if client_id:
-            target_websocket = None
-            # Check active connections (could be frontend or agent)
-            for websocket in state.active_connections:
-                if getattr(websocket, "client_id", None) == client_id:
-                    target_websocket = websocket
-                    break
-            
-            if target_websocket:
-                try:
-                    message_to_client = response_data.copy()
-                    for key in ["_broadcast", "_target_agent_id", "_client_id"]:
-                         message_to_client.pop(key, None)
-                    
-                    await target_websocket.send_text(json.dumps(message_to_client))
-                    logger.info(f"Response forwarded to client {client_id}: {message_to_client.get('message_type')}")
-                except Exception as e:
-                    logger.error(f"Error sending response to client {client_id}: {e}. Removing connection.")
-                    # Need to properly remove the connection from relevant sets/dicts
-                    state.active_connections.discard(target_websocket)
-                    state.frontend_connections.discard(target_websocket)
-                    found_agent_id = None
-                    for ag_id, ws in state.agent_connections.items():
-                        if ws == target_websocket:
-                            found_agent_id = ag_id
-                            break
-                    if found_agent_id:
-                        del state.agent_connections[found_agent_id]
-                        agent_manager.mark_agent_offline(found_agent_id)
-                        await agent_manager.broadcast_agent_status()
-                    # No need to mark broker_connection as None here, handled elsewhere
-            else:
-                logger.warning(f"Client {client_id} not found for response delivery: {response_data.get('message_type')}")
+    try:
+        # Determine routing and call appropriate handler
+        if response_data.get("_broadcast") is True:
+            needs_agent_status_broadcast = await _handle_broadcast(payload_str, response_data)
+        elif target_agent_id := response_data.get("_target_agent_id"):
+            needs_agent_status_broadcast = await _handle_direct_to_agent(payload_str, response_data, target_agent_id)
+        elif client_id := response_data.get("_client_id"):
+            needs_agent_status_broadcast = await _handle_direct_to_client(payload_str, response_data, client_id)
         else:
             # If no routing information, log it
             logger.warning(f"Received response without specific routing info (_broadcast, _target_agent_id, _client_id), cannot route: {response_data}")
 
+        # --- Final Step: Broadcast status if needed ---
+        if needs_agent_status_broadcast:
+             logger.info("Triggering agent status broadcast after handling disconnections or agent-specific actions.")
+             await agent_manager.broadcast_agent_status()
+
     except Exception as e:
-        logger.exception(f"Unexpected error in forward_response_to_client: {e}") # Use exception for full traceback
+        logger.exception(f"Unexpected error in forward_response_to_client processing message type {response_data.get('message_type')}: {e}")
 
 
 async def process_message(channel, method, properties, body):
-    """Callback to process a message received from the SERVER_RESPONSE_QUEUE."""
+    """Callback to process a message received from the BROKER_OUTPUT_QUEUE."""
     try:
         response_data = json.loads(body.decode('utf-8')) # Decode body
         logger.debug(f"Received response message from broker: {response_data.get('message_type', 'unknown type')}")
@@ -145,17 +193,17 @@ async def process_message(channel, method, properties, body):
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
     except json.JSONDecodeError:
-        logger.error(f"Invalid JSON received from broker response queue: {body}")
+        logger.error(f"Invalid JSON received from broker output queue: {body}")
         # Reject message, don't requeue bad JSON
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
     except Exception as e:
-        logger.exception(f"Error processing message from broker response queue: {e}") # Log traceback
+        logger.exception(f"Error processing message from broker output queue: {e}") # Log traceback
         # Reject message, possibly requeue depending on error?
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False) 
 
 
 async def response_consumer():
-    """Service that consumes messages from the SERVER_RESPONSE_QUEUE."""
+    """Service that consumes messages from the BROKER_OUTPUT_QUEUE."""
     logger.info("Starting response consumer service...")
     channel = None
     while True:
@@ -167,16 +215,16 @@ async def response_consumer():
                 continue
 
             channel = connection.channel()
-            channel.queue_declare(queue=config.SERVER_RESPONSE_QUEUE, durable=True)
+            channel.queue_declare(queue=config.BROKER_OUTPUT_QUEUE, durable=True)
             
             # Define the callback for received messages
             def callback_wrapper(ch, method, properties, body):
                 # Run the async process_message in the main event loop
                 asyncio.create_task(process_message(ch, method, properties, body))
             
-            channel.basic_consume(queue=config.SERVER_RESPONSE_QUEUE, on_message_callback=callback_wrapper)
+            channel.basic_consume(queue=config.BROKER_OUTPUT_QUEUE, on_message_callback=callback_wrapper)
             
-            logger.info(f"Response consumer started listening on {config.SERVER_RESPONSE_QUEUE}")
+            logger.info(f"Response consumer started listening on {config.BROKER_OUTPUT_QUEUE}")
             
             # Keep consuming while connection is open
             while state.rabbitmq_connection and state.rabbitmq_connection.is_open:
@@ -235,10 +283,9 @@ async def agent_ping_service():
             if disconnected_agents:
                 needs_broadcast = False
                 for agent_id in disconnected_agents:
-                    if agent_id in state.agent_connections:
-                        del state.agent_connections[agent_id]
-                        agent_manager.mark_agent_offline(agent_id)
-                        needs_broadcast = True
+                    # Use the centralized handler
+                    if await agent_manager.handle_agent_disconnection(agent_id):
+                         needs_broadcast = True # Set flag if any disconnect was handled
                 if needs_broadcast:
                     await agent_manager.broadcast_agent_status()
 
@@ -254,7 +301,8 @@ async def agent_ping_service():
                         
                         if time_diff > config.AGENT_INACTIVITY_TIMEOUT:
                             logger.warning(f"Agent {status.agent_name} ({agent_id}) timed out (last seen {time_diff:.1f}s ago). Marking offline.")
-                            agent_manager.mark_agent_offline(agent_id)
+                            # Use centralized handler (will mark offline and remove connection)
+                            await agent_manager.handle_agent_disconnection(agent_id)
                             agents_marked_offline.add(agent_id)
                             # Also remove from active connections if still present
                             if agent_id in state.agent_connections:
