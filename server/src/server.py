@@ -324,24 +324,27 @@ async def periodic_status_broadcast():
 async def send_agent_status_to_broker():
     """Send current agent status to the broker."""
     try:
-        # Prepare agent status message
+        # Prepare agent status message with only currently registered agents
         status_list = []
         for agent_id, status in agent_statuses.items():
-            status_list.append({
-                "agent_id": agent_id,
-                "agent_name": status.agent_name,
-                "is_online": status.is_online,
-                "last_seen": status.last_seen
-            })
+            # Only include agents that are currently registered
+            if agent_id in agent_connections:
+                status_list.append({
+                    "agent_id": agent_id,
+                    "agent_name": status.agent_name,
+                    "is_online": status.is_online,
+                    "last_seen": status.last_seen
+                })
         
         status_data = {
             "message_type": MessageType.AGENT_STATUS_UPDATE,
-            "agents": status_list
+            "agents": status_list,
+            "is_full_update": True  # Indicate this is a full update
         }
         
         # Send to broker
         publish_to_broker_control_queue(status_data)
-        logging.info(f"Sent agent status update to broker with {len(status_list)} agents")
+        logging.info(f"Sent agent status update to broker with {len(status_list)} active agents")
     except Exception as e:
         logging.error(f"Error sending agent status to broker: {e}")
 
@@ -569,8 +572,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 broker_connection = websocket
                 logging.info(f"Broker connected: {client_id}")
                 
-                # Send current agent status to broker
-                await broadcast_agent_status(force_full_update=True)
+                # Send current agent status to broker with only active agents
+                await send_agent_status_to_broker()
                 continue
             
             # Handle REGISTER_AGENT messages to track agent connections
@@ -621,7 +624,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Send full agent status immediately
                 await broadcast_agent_status(force_full_update=True)
-            
+                    
             # Handle PONG messages from agents
             elif message_type == MessageType.PONG:
                 agent_id = message_data.get("agent_id")
@@ -704,7 +707,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     disconnect_message = {
                         "message_type": MessageType.CLIENT_DISCONNECTED,
                         "agent_id": agent_id,
-                        "connection_type": "agent"
+                        "connection_type": "agent",
+                        "is_full_update": True  # Indicate this is a full update
                     }
                     publish_to_broker_control_queue(disconnect_message)
                     break
@@ -729,6 +733,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 del agent_connections[agent_id]
                 await broadcast_agent_status()
+                
+                # Notify broker about agent disconnection
+                disconnect_message = {
+                    "message_type": MessageType.CLIENT_DISCONNECTED,
+                    "agent_id": agent_id,
+                    "connection_type": "agent",
+                    "is_full_update": True  # Indicate this is a full update
+                }
+                publish_to_broker_control_queue(disconnect_message)
                 break
 
 if __name__ == "__main__":
