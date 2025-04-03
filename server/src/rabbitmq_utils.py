@@ -79,9 +79,9 @@ def publish_to_incoming_queue(message_data: dict) -> bool:
     """Publish a message to the incoming messages queue."""
     return publish_to_queue(config.INCOMING_QUEUE, message_data)
 
-def publish_to_broker_control_queue(message_data: dict) -> bool:
-    """Publish a control message to the broker control queue."""
-    return publish_to_queue(config.BROKER_CONTROL_QUEUE, message_data)
+def publish_to_agent_metadata_queue(message_data: dict) -> bool:
+    """Publish an agent metadata message (register, disconnect) to the queue."""
+    return publish_to_queue(config.AGENT_METADATA_QUEUE, message_data)
 
 def publish_server_advertisement():
     """Publish server availability to the advertisement queue."""

@@ -69,7 +69,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 agent_manager.update_agent_status(agent_id, agent_name, is_online=True)
                 
                 # Forward registration message to broker via RabbitMQ
-                rabbitmq_utils.publish_to_broker_control_queue(message_data)
+                rabbitmq_utils.publish_to_agent_metadata_queue(message_data)
                 
                 # Send registration success response back to agent
                 response = AgentRegistrationResponse(
@@ -174,8 +174,8 @@ async def websocket_endpoint(websocket: WebSocket):
                      "agent_id": disconnected_agent_id,
                      "connection_type": "agent",
                  }
-                 rabbitmq_utils.publish_to_broker_control_queue(disconnect_message)
-                 logger.info(f"Published disconnect notification for agent {disconnected_agent_id} to broker control queue.")
+                 rabbitmq_utils.publish_to_agent_metadata_queue(disconnect_message)
+                 logger.info(f"Published disconnect notification for agent {disconnected_agent_id} to agent metadata queue.")
             else:
                  logger.warning(f"Could not find agent_id for disconnected agent websocket {client_id}")
 

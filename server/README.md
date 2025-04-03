@@ -16,7 +16,7 @@ This directory contains the Python FastAPI server responsible for managing WebSo
     *   Listens for `PONG` responses to update `last_seen` status.
     *   Marks agents as offline if they disconnect or fail to respond to pings.
     *   Broadcasts agent status updates (`AGENT_STATUS_UPDATE`) to connected Frontends and the Broker via WebSocket.
-*   Sends full lists of *active* agents to the Broker via the RabbitMQ `broker_control_queue` upon Broker registration and handles agent disconnection notifications.
+*   Sends full lists of *active* agents to the Broker via the RabbitMQ `agent_metadata_queue` upon Broker registration and handles agent disconnection notifications.
 *   Advertises its availability via the RabbitMQ `server_advertisement_queue`.
 
 ## Project Structure (`src/`)
@@ -55,14 +55,14 @@ sequenceDiagram
         C->>Srv: Send REGISTER_AGENT (WS) { agent_id, agent_name }
         Note over Srv: Add WS to agent_connections[agent_id],\nUpdate agent_statuses[agent_id]
         Srv-->>C: Send REGISTER_AGENT_RESPONSE (WS) { status: SUCCESS }
-        Srv->>RMQ: Publish REGISTER_AGENT (broker_control_queue)
+        Srv->>RMQ: Publish REGISTER_AGENT (agent_metadata_queue)
         Srv->>Srv: Trigger Full Status Broadcast
         Srv->>Bkr: Broadcast AGENT_STATUS_UPDATE (WS)
         Srv->>C: Broadcast AGENT_STATUS_UPDATE (WS) (To all FE clients)
     else Broker Registration
         C->>Srv: Send REGISTER_BROKER (WS)
         Note over Srv: Store WS in broker_connection
-        Srv->>RMQ: Publish AGENT_STATUS_UPDATE (Active Agents Only) (broker_control_queue)
+        Srv->>RMQ: Publish AGENT_STATUS_UPDATE (Active Agents Only) (agent_metadata_queue)
     end
 
 ```
@@ -148,7 +148,7 @@ sequenceDiagram
     Ag--xSrv: WebSocket Disconnect / Error
     Note over Srv: Remove Ag from active_connections, agent_connections
     Note over Srv: Mark Agent offline in agent_statuses
-    Srv->>RMQ: Publish CLIENT_DISCONNECTED (broker_control_queue) { agent_id: AgentX_id }
+    Srv->>RMQ: Publish CLIENT_DISCONNECTED (agent_metadata_queue) { agent_id: AgentX_id }
     Note over Srv: Prepare AGENT_STATUS_UPDATE (Delta)
     Srv->>FE: Broadcast AGENT_STATUS_UPDATE (WS)
     Srv->>Bkr: Broadcast AGENT_STATUS_UPDATE (WS)

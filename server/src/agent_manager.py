@@ -1,6 +1,7 @@
 import logging
 import json
 from datetime import datetime
+import asyncio
 
 # Import shared models, config, state, and utils
 from shared_models import AgentStatus, AgentStatusUpdate, MessageType
@@ -25,33 +26,32 @@ def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
 async def broadcast_agent_status(force_full_update: bool = False):
     """Broadcast current agent status to all frontend clients and the broker."""
     agents_to_broadcast = []
-    is_update = False # Flag if there's anything to broadcast
+    changes_detected = False # Flag if delta changes were detected
 
     if force_full_update:
         agents_to_broadcast = list(state.agent_statuses.values())
-        is_update = True # Always send if forcing full update
         # Update history for all agents when sending full update
         for agent_status in agents_to_broadcast:
+            # Use model_copy to avoid modifying the original state object if it's complex later
             state.agent_status_history[agent_status.agent_id] = agent_status.model_copy()
     else:
-        # Check for changed agents
+        # Check for changed agents for delta update
         for agent_id, current_status in state.agent_statuses.items():
             if has_agent_status_changed(agent_id, current_status):
                 agents_to_broadcast.append(current_status)
-                # Update history for the changed agent
+                # Update history only for the changed agent
                 state.agent_status_history[agent_id] = current_status.model_copy()
-                is_update = True
+                changes_detected = True
 
-    if not is_update:
-        logger.debug("No agent status changes detected, skipping broadcast.")
+    # --- Decision to broadcast ---
+    # Proceed if forcing a full update OR if delta changes were detected
+    if not force_full_update and not changes_detected:
+        logger.debug("No agent status changes detected for delta update, skipping broadcast.")
         return
 
-    if not agents_to_broadcast:
-         logger.debug("No agents to include in status broadcast.")
-         # Optionally send an empty update if force_full_update was true?
-         # If force_full_update and agent_statuses is empty, maybe send empty list.
-         if not force_full_update:
-             return
+    # If force_full_update is true, agents_to_broadcast might be empty if no agents exist.
+    # If it's a delta update, agents_to_broadcast will only be non-empty if changes_detected is true.
+    logger.debug(f"Preparing to broadcast status for {len(agents_to_broadcast)} agents (Forced: {force_full_update})")
 
     status_update = AgentStatusUpdate(agents=agents_to_broadcast)
     status_payload = status_update.model_dump_json() # Use model_dump_json for efficiency
@@ -83,7 +83,11 @@ async def broadcast_agent_status(force_full_update: bool = False):
         if disconnected_clients:
             logger.info(f"Removed {len(disconnected_clients)} disconnected frontend clients during status broadcast.")
             
-        logger.info(f"Broadcast agent status update ({len(agents_to_broadcast)} agents) to {len(state.frontend_connections)} frontend clients.")
+        # Log count *after* removing disconnected clients
+        if state.frontend_connections:
+             logger.info(f"Broadcast agent status update ({len(agents_to_broadcast)} agents) to {len(state.frontend_connections)} frontend clients.")
+        else:
+             logger.debug("No remaining frontend clients after attempting broadcast.")
     else:
         logger.debug("No frontend clients connected for status broadcast.")
 
@@ -102,7 +106,7 @@ async def send_agent_status_to_broker():
             "is_full_update": True  # Indicate this is a full, active list
         }
         
-        if rabbitmq_utils.publish_to_broker_control_queue(status_data):
+        if rabbitmq_utils.publish_to_agent_metadata_queue(status_data):
              logger.info(f"Sent full active agent status update ({len(active_agent_list)} agents) to broker via RabbitMQ.")
         else:
             logger.error("Failed to send active agent status update to broker via RabbitMQ.")
@@ -162,8 +166,7 @@ def handle_pong(agent_id: str):
         # If agent was marked offline, trigger an immediate status broadcast
         if was_offline:
             logger.info(f"Agent {agent_id} is back online after PONG. Triggering status update.")
-            # Using create_task to avoid blocking the caller
-            import asyncio
+            # Using create_task to avoid blocking the caller (asyncio imported at top)
             asyncio.create_task(broadcast_agent_status())
     else:
         logger.warning(f"Received PONG for unknown or unregistered agent ID: {agent_id}") 

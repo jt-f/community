@@ -33,7 +33,7 @@ log.info("Pika library logging level set to WARNING.")
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 INCOMING_QUEUE = "incoming_messages_queue"
-BROKER_CONTROL_QUEUE = "broker_control_queue"
+AGENT_METADATA_QUEUE = "agent_metadata_queue"
 SERVER_RESPONSE_QUEUE = "server_response_queue"
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
@@ -389,7 +389,7 @@ def main():
     
     # Set up channels for incoming messages, control messages, and server advertisements
     incoming_channel = setup_rabbitmq_channel(INCOMING_QUEUE, handle_incoming_message)
-    control_channel = setup_rabbitmq_channel(BROKER_CONTROL_QUEUE, handle_control_message)
+    control_channel = setup_rabbitmq_channel(AGENT_METADATA_QUEUE, handle_control_message)
     advertisement_channel = setup_rabbitmq_channel(SERVER_ADVERTISEMENT_QUEUE, handle_server_advertisement)
     
     if not all([incoming_channel, control_channel, advertisement_channel]):

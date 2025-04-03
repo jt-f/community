@@ -4,7 +4,7 @@ import os
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 INCOMING_QUEUE = "incoming_messages_queue"
-BROKER_CONTROL_QUEUE = "broker_control_queue"
+AGENT_METADATA_QUEUE = "agent_metadata_queue"
 SERVER_RESPONSE_QUEUE = "server_response_queue"
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
