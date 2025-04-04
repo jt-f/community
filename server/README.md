@@ -39,28 +39,28 @@ This directory contains the Python FastAPI server responsible for managing WebSo
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as Client (FE/Ag/Bkr)
+    participant Client as Client (FE/Ag/Bkr)
     participant Srv as Server
-    participant Bkr as Broker
+    participant Broker as Broker
     participant RMQ as RabbitMQ Queues
 
-    C->>+Srv: WebSocket Connect (/ws)
-    Srv-->>-C: WebSocket Accept
+    Client->>+Srv: WebSocket Connect (/ws)
+    Srv-->>-Client: WebSocket Accept
 
     alt Frontend Registration
-        C->>Srv: Send REGISTER_FRONTEND (WS)
+        Client->>Srv: Send REGISTER_FRONTEND (WS)
         Note over Srv: Add WS to frontend_connections
-        Srv->>C: Broadcast AGENT_STATUS_UPDATE (Full List) (WS)
+        Srv->>Client: Broadcast AGENT_STATUS_UPDATE (Full List) (WS)
     else Agent Registration
-        C->>Srv: Send REGISTER_AGENT (WS) { agent_id, agent_name }
+        Client->>Srv: Send REGISTER_AGENT (WS) { agent_id, agent_name }
         Note over Srv: Add WS to agent_connections[agent_id],\nUpdate agent_statuses[agent_id]
-        Srv-->>C: Send REGISTER_AGENT_RESPONSE (WS) { status: SUCCESS }
+        Srv-->>Client: Send REGISTER_AGENT_RESPONSE (WS) { status: SUCCESS }
         Srv->>RMQ: Publish REGISTER_AGENT (agent_metadata_queue)
         Srv->>Srv: Trigger Full Status Broadcast
-        Srv->>Bkr: Broadcast AGENT_STATUS_UPDATE (WS)
-        Srv->>C: Broadcast AGENT_STATUS_UPDATE (WS) (To all FE clients)
+        Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
+        Srv->>Client: Broadcast AGENT_STATUS_UPDATE (WS) (To all FE clients)
     else Broker Registration
-        C->>Srv: Send REGISTER_BROKER (WS)
+        Client->>Srv: Send REGISTER_BROKER (WS)
         Note over Srv: Store WS in broker_connection
         Srv->>RMQ: Publish AGENT_STATUS_UPDATE (Active Agents Only) (agent_metadata_queue)
     end
@@ -72,21 +72,21 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant FE as Frontend
+    participant Frontend as Frontend
     participant Srv as Server
-    participant Bkr as Broker
-    participant Ag as Agent
+    participant Broker as Broker
+    participant Agent as Agent
     participant RMQ as RabbitMQ Queues
 
-    FE->>Srv: Send TEXT Message (WS) { receiver: 'broker', sender: FE_user_id, text: "Hi!" }
+    Frontend->>Srv: Send TEXT Message (WS) { receiver: 'broker', sender: FE_user_id, text: "Hi!" }
     Note over Srv: Add internal _client_id
     Srv->>RMQ: Publish TEXT Message (incoming_messages_queue) { ..., _client_id: Srv_FE_conn_id }
-    Note over Bkr: Consume from incoming_messages_queue
-    Note over Bkr: Determine target Agent X based on logic/receiver_id
-    Bkr->>RMQ: Publish TEXT Message (server_response_queue) { ..., _target_agent_id: AgentX_id }
+    Note over Broker: Consume from incoming_messages_queue
+    Note over Broker: Determine target Agent X based on logic/receiver_id
+    Broker->>RMQ: Publish TEXT Message (server_response_queue) { ..., _target_agent_id: AgentX_id }
     Note over Srv: Consume from server_response_queue
     Note over Srv: Find AgentX WebSocket using _target_agent_id
-    Srv->>Ag: Forward TEXT Message (WS) { sender: FE_user_id, text: "Hi!" }
+    Srv->>Agent: Forward TEXT Message (WS) { sender: FE_user_id, text: "Hi!" }
 ```
 
 ### 3. Agent Replying to Frontend
@@ -94,21 +94,21 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant FE as Frontend
+    participant Frontend as Frontend
     participant Srv as Server
-    participant Bkr as Broker
-    participant Ag as Agent
+    participant Broker as Broker
+    participant Agent as Agent
     participant RMQ as RabbitMQ Queues
 
-    Ag->>Srv: Send REPLY Message (WS) { receiver: FE_user_id, sender: AgentX_id, text: "Got it!" }
+    Agent->>Srv: Send REPLY Message (WS) { receiver: FE_user_id, sender: AgentX_id, text: "Got it!" }
     Note over Srv: Add internal _client_id
     Srv->>RMQ: Publish REPLY Message (incoming_messages_queue) { ..., _client_id: Srv_Ag_conn_id }
-    Note over Bkr: Consume from incoming_messages_queue
-    Note over Bkr: Determine target Frontend based on receiver_id or original _client_id mapping
-    Bkr->>RMQ: Publish REPLY Message (server_response_queue) { ..., _client_id: Srv_FE_conn_id }
+    Note over Broker: Consume from incoming_messages_queue
+    Note over Broker: Determine target Frontend based on receiver_id or original _client_id mapping
+    Broker->>RMQ: Publish REPLY Message (server_response_queue) { ..., _client_id: Srv_FE_conn_id }
     Note over Srv: Consume from server_response_queue
     Note over Srv: Find Frontend WebSocket using _client_id
-    Srv->>FE: Forward REPLY Message (WS) { sender: AgentX_id, text: "Got it!" }
+    Srv->>Frontend: Forward REPLY Message (WS) { sender: AgentX_id, text: "Got it!" }
 ```
 
 ### 4. Agent Status Updates & Pings
@@ -116,21 +116,21 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant FE as Frontend
+    participant Frontend as Frontend
     participant Srv as Server
-    participant Bkr as Broker (WS Connected)
-    participant Ag as Agent
+    participant Broker as Broker (WS Connected)
+    participant Agent as Agent
 
     loop Periodic Ping Service (every ~10s)
-        Srv->>Ag: Send PING (WS)
-        Ag->>Srv: Send PONG (WS) { agent_id }
+        Srv->>Agent: Send PING (WS)
+        Agent->>Srv: Send PONG (WS) { agent_id }
         Note over Srv: Update agent_statuses[agent_id].last_seen
     end
 
     Note over Srv: Agent status changes (e.g., timeout, PONG received after offline) OR Periodic Broadcast Timer (~60s)
     Note over Srv: Prepare AGENT_STATUS_UPDATE (Delta or Full)
-    Srv->>FE: Broadcast AGENT_STATUS_UPDATE (WS)
-    Srv->>Bkr: Broadcast AGENT_STATUS_UPDATE (WS)
+    Srv->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS)
+    Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
 
 ```
 
@@ -139,19 +139,19 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant FE as Frontend
+    participant Frontend as Frontend
     participant Srv as Server
-    participant Bkr as Broker (WS Connected)
-    participant Ag as Agent
+    participant Broker as Broker (WS Connected)
+    participant Agent as Agent
     participant RMQ as RabbitMQ Queues
 
-    Ag--xSrv: WebSocket Disconnect / Error
-    Note over Srv: Remove Ag from active_connections, agent_connections
+    Agent--xSrv: WebSocket Disconnect / Error
+    Note over Srv: Remove Agent from active_connections, agent_connections
     Note over Srv: Mark Agent offline in agent_statuses
     Srv->>RMQ: Publish CLIENT_DISCONNECTED (agent_metadata_queue) { agent_id: AgentX_id }
     Note over Srv: Prepare AGENT_STATUS_UPDATE (Delta)
-    Srv->>FE: Broadcast AGENT_STATUS_UPDATE (WS)
-    Srv->>Bkr: Broadcast AGENT_STATUS_UPDATE (WS)
+    Srv->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS)
+    Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
 
 ```
 
