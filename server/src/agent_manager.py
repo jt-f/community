@@ -92,7 +92,7 @@ async def broadcast_agent_status(force_full_update: bool = False):
         logger.debug("No frontend clients connected for status broadcast.")
 
 async def send_agent_status_to_broker():
-    """Send current ACTIVE agent status list to the broker via RabbitMQ."""
+    """Send current ACTIVE agent status list to the broker via WebSocket if connected."""
     try:
         active_agent_list = []
         for agent_id, status in state.agent_statuses.items():
@@ -103,16 +103,20 @@ async def send_agent_status_to_broker():
         status_data = {
             "message_type": MessageType.AGENT_STATUS_UPDATE,
             "agents": active_agent_list,
-            "is_full_update": True  # Indicate this is a full, active list
+            "is_full_update": True, # Indicate this is a full, active list
+            "_origin": "server_response_to_request" # Add origin for clarity
         }
         
-        if rabbitmq_utils.publish_to_agent_metadata_queue(status_data):
-             logger.info(f"Sent full active agent status update ({len(active_agent_list)} agents) to broker via RabbitMQ.")
+        status_payload = json.dumps(status_data) # Convert to JSON string
+
+        if state.broker_connection:
+            await state.broker_connection.send_text(status_payload)
+            logger.info(f"Sent requested active agent status update ({len(active_agent_list)} agents) to broker via WebSocket.")
         else:
-            logger.error("Failed to send active agent status update to broker via RabbitMQ.")
+            logger.warning("Broker requested agent status, but WebSocket connection is not active. Cannot send update.")
 
     except Exception as e:
-        logger.error(f"Error preparing or sending active agent status to broker: {e}")
+        logger.error(f"Error preparing or sending requested active agent status to broker via WebSocket: {e}")
 
 def update_agent_status(agent_id: str, agent_name: str, is_online: bool):
     """Updates the status of a specific agent."""

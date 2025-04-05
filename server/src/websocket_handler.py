@@ -12,8 +12,14 @@ import config
 import state
 import rabbitmq_utils
 import agent_manager
+# Revert to direct import as main.py is run directly
+import services
 
 logger = logging.getLogger(__name__)
+
+# --- WebSocket Send Helper (_safe_send_websocket is now in services.py) ---
+
+# --- Error Response Helper (Removed as previous request was rejected) ---
 
 # --- Helper Functions for Message Handling ---
 
@@ -55,6 +61,20 @@ async def _handle_register_frontend(websocket: WebSocket, client_id: str, messag
     websocket.connection_type = "frontend"
     state.frontend_connections.add(websocket)
     logger.info(f"Frontend client registered: {client_id}")
+    # Send ACK back to frontend with its assigned client_id
+    ack_message = {
+        "message_type": "REGISTER_FRONTEND_ACK",
+        "client_id": client_id,
+        "status": "success"
+    }
+    try:
+        await services._safe_send_websocket(websocket, json.dumps(ack_message), f"frontend client {client_id}")
+        logger.info(f"Sent REGISTER_FRONTEND_ACK to {client_id}")
+    except Exception as e:
+        logger.error(f"Failed to send REGISTER_FRONTEND_ACK to {client_id}: {e}")
+        # Proceed with status broadcast even if ACK fails
+
+    # Send full agent status immediately upon registration
     await agent_manager.broadcast_agent_status(force_full_update=True)
 
 async def _handle_pong(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
@@ -66,20 +86,48 @@ async def _handle_pong(websocket: WebSocket, client_id: str, message_data: Dict[
          logger.warning(f"Received PONG without agent_id from {client_id}")
 
 async def _handle_chat_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handles standard chat, reply, and system messages."""
+    """Handles standard chat, reply, and system messages.
+
+    Also broadcasts these messages to all connected frontends before sending to RabbitMQ.
+    """
     message_type = message_data.get("message_type", "UNKNOWN")
-    message_data["_connection_type"] = websocket.connection_type
-    logger.debug(f"Forwarding {message_type} message from {client_id} ({websocket.connection_type}) to broker input queue.")
+    # Add connection type metadata before forwarding
+    message_data["_connection_type"] = getattr(websocket, "connection_type", "unknown")
+    logger.debug(f"Processing {message_type} from {client_id} ({message_data['_connection_type']}).")
+
+    # --- Broadcast to all connected Frontends FIRST --- 
+    payload_str = json.dumps(message_data)
+    disconnected_frontend = set()
+    frontend_count = len(state.frontend_connections)
+    if frontend_count > 0:
+        logger.info(f"Broadcasting incoming {message_type} from {client_id} to {frontend_count} frontend clients.")
+        for fe_ws in list(state.frontend_connections):
+            fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
+            if not await services._safe_send_websocket(fe_ws, payload_str, fe_client_desc):
+                disconnected_frontend.add(fe_ws)
+        # Clean up disconnected frontends immediately
+        if disconnected_frontend:
+            state.frontend_connections -= disconnected_frontend
+            logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during incoming message broadcast.")
+
+    # --- Forward to Broker via RabbitMQ --- 
+    logger.debug(f"Forwarding {message_type} message from {client_id} to broker input queue.")
     if not rabbitmq_utils.publish_to_broker_input_queue(message_data):
         logger.error(f"Failed to publish incoming message from {client_id} to RabbitMQ.")
+        # Reverted: Optionally notify sender of the error
         error_resp = ChatMessage.create(
             sender_id="server",
-            receiver_id=message_data.get("sender_id", client_id),
+            receiver_id=message_data.get("sender_id", client_id), # Send back to sender
             text_payload="Error: Could not forward message to broker.",
             message_type=MessageType.ERROR
         )
-        try: await websocket.send_text(error_resp.model_dump_json())
-        except Exception: pass # Ignore error sending error message
+        try: 
+            await websocket.send_text(error_resp.model_dump_json()) 
+            logger.warning(f"Sent broker publish error back to client {client_id}")
+        except Exception as e:
+            logger.error(f"Failed to send broker publish error back to client {client_id}: {e}")
+            # If sending error fails, the connection might be dead. 
+            # The disconnect will likely be handled by the main loop's finally block.
 
 async def _handle_client_disconnected_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handles (unexpected) client disconnected messages."""
@@ -88,15 +136,38 @@ async def _handle_client_disconnected_message(websocket: WebSocket, client_id: s
 async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handles unrecognized message types."""
     message_type = message_data.get("message_type", "UNKNOWN")
-    logger.warning(f"Received unhandled message type '{message_type}' from {client_id}. Data: {message_data}")
+    error_text = f"Error: Unsupported message type '{message_type}' received."
+    logger.warning(f"{error_text} from {client_id}. Data: {message_data}")
+    # Reverted: Optionally send an error message back
     error_resp = ChatMessage.create(
         sender_id="server",
         receiver_id=message_data.get("sender_id", client_id),
-        text_payload=f"Error: Unsupported message type '{message_type}' received.",
+        text_payload=error_text,
         message_type=MessageType.ERROR
     )
-    try: await websocket.send_text(error_resp.model_dump_json())
-    except Exception: pass
+    try: 
+        await websocket.send_text(error_resp.model_dump_json()) 
+    except Exception as e:
+         logger.error(f"Failed to send unknown message type error back to client {client_id}: {e}")
+
+async def _handle_request_agent_status(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
+    """Handles agent status requests specifically from the broker."""
+    if getattr(websocket, 'connection_type', None) == "broker":
+        logger.info(f"Broker ({client_id}) requested agent status via WebSocket.")
+        # Call the function that now sends the response via WebSocket
+        await agent_manager.send_agent_status_to_broker()
+    else:
+        logger.warning(f"Received REQUEST_AGENT_STATUS from non-broker client: {client_id} ({getattr(websocket, 'connection_type', 'unknown')}). Ignoring.")
+        # Optionally send an error back to the sender
+        error_resp = {
+            "message_type": MessageType.ERROR,
+            "text_payload": "Only the broker can request agent status.",
+            "sender_id": "server"
+        }
+        try:
+            await websocket.send_text(json.dumps(error_resp))
+        except Exception as e:
+             logger.error(f"Failed to send 'broker only' error to client {client_id}: {e}")
 
 # --- Helper Function for Disconnect Cleanup ---
 
@@ -170,6 +241,7 @@ async def websocket_endpoint(websocket: WebSocket):
         MessageType.REGISTER_BROKER: _handle_register_broker,
         MessageType.REGISTER_AGENT: _handle_register_agent,
         MessageType.REGISTER_FRONTEND: _handle_register_frontend,
+        MessageType.REQUEST_AGENT_STATUS: _handle_request_agent_status,
         MessageType.PONG: _handle_pong,
         MessageType.TEXT: _handle_chat_message,
         MessageType.REPLY: _handle_chat_message,
@@ -180,12 +252,15 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             message_text = await websocket.receive_text()
+            message_data = None # Initialize for error handling scope
             try:
                 message_data = json.loads(message_text)
             except json.JSONDecodeError:
                 logger.warning(f"Received invalid JSON from {client_id}: {message_text}")
-                await websocket.send_text(json.dumps({"error": "Invalid JSON format"}))
-                continue
+                # Reverted: Optionally send an error message back
+                try: await websocket.send_text(json.dumps({"error": "Invalid JSON format"}))
+                except Exception as e: logger.error(f"Failed to send invalid JSON error to {client_id}: {e}")
+                continue # Skip processing this message
 
             message_type_str = message_data.get("message_type")
             logger.debug(f"Received message from {client_id}: Type={message_type_str}")
@@ -195,12 +270,24 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # --- Dispatch to appropriate handler ---
             try:
-                message_type = MessageType(message_type_str) # Validate against Enum
-                handler = message_handlers.get(message_type, _handle_unknown_message)
-            except ValueError: # Handle if message_type_str is not a valid MessageType member
-                logger.warning(f"Received message with invalid message_type enum value: {message_type_str} from {client_id}")
-                handler = _handle_unknown_message
-            
+                # Attempt to convert string to MessageType Enum
+                message_type_enum = MessageType(message_type_str)
+                handler = message_handlers.get(message_type_enum, _handle_unknown_message)
+            except ValueError:
+                # Handle cases where message_type_str is not a valid member of MessageType
+                error_text = f"Error: Invalid message type value '{message_type_str}' received."
+                logger.warning(f"{error_text} from {client_id}")
+                # Reverted: Send simple error back
+                error_resp = ChatMessage.create(
+                    sender_id="server",
+                    receiver_id=message_data.get("sender_id", client_id),
+                    text_payload=error_text,
+                    message_type=MessageType.ERROR
+                 )
+                try: await websocket.send_text(error_resp.model_dump_json())
+                except Exception as e: logger.error(f"Failed to send invalid message type error to {client_id}: {e}")
+                continue # Skip further processing for this invalid message type
+
             await handler(websocket, client_id, message_data)
                 
     except WebSocketDisconnect as e:

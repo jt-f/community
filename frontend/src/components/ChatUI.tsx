@@ -7,14 +7,20 @@ import { API_CONFIG, WS_CONFIG } from '../config';
 export function ChatUI() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
-  const reconnectTimeoutRef = useRef<number>();
+  const reconnectTimeoutRef = useRef<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   
   const connectWebSocket = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      console.log("WebSocket connection attempt already in progress or open.");
       return;
     }
+    if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+    }
 
+    console.log(`Attempting WebSocket connection to ${API_CONFIG.WS_URL}...`);
     try {
       const ws = new WebSocket(API_CONFIG.WS_URL);
       wsRef.current = ws;
@@ -62,22 +68,42 @@ export function ChatUI() {
 
     // Cleanup on unmount
     return () => {
+      console.log("ChatUI unmounting - cleaning up WebSocket and timers.");
+      // Clear any pending reconnect timeout
       if (reconnectTimeoutRef.current) {
         window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
-      if (wsRef.current) {
-        wsRef.current.close();
+      
+      const ws = wsRef.current;
+      if (ws) {
+        console.log(`Cleaning up WebSocket connection (readyState: ${ws.readyState})`);
+        // Remove listeners to prevent handlers firing during/after cleanup
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+
+        // Only call close() if the connection was actually open
+        if (ws.readyState === WebSocket.OPEN) {
+            console.log("Closing OPEN WebSocket connection.");
+            ws.close();
+        } else {
+            console.log("WebSocket was not OPEN, skipping explicit close(). Browser will handle cleanup.");
+        }
+        
         wsRef.current = null;
       }
+      setIsConnected(false); // Ensure state reflects closed connection
     };
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
   
   return (
     <div className="chat-ui">
       <div className="chat-container">
         <Chat wsRef={wsRef} isConnected={isConnected} />
       </div>
-      <AgentPanel wsRef={wsRef} />
+      <AgentPanel wsRef={wsRef} isConnected={isConnected} />
       
       <style>
         {`

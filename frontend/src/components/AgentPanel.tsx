@@ -4,68 +4,44 @@ import { useAgentStore } from '../store/agentStore';
 
 interface AgentPanelProps {
   wsRef: React.MutableRefObject<WebSocket | null>;
+  isConnected: boolean;
 }
 
-export function AgentPanel({ wsRef }: AgentPanelProps) {
+export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
   const { agents, updateAgents, getOnlineAgents, getOfflineAgents } = useAgentStore();
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const [isConnected, setIsConnected] = useState(false);
-
-  // Monitor WebSocket connection state
-  useEffect(() => {
-    const checkConnection = () => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        setIsConnected(true);
-      } else {
-        setIsConnected(false);
-      }
-    };
-
-    // Check initially
-    checkConnection();
-
-    // Set up interval to check connection state
-    const interval = setInterval(checkConnection, 1000);
-
-    return () => clearInterval(interval);
-  }, [wsRef]);
 
   // Setup websocket message handler for agent status updates
   useEffect(() => {
     if (!isConnected || !wsRef.current) {
-      console.log('AgentPanel: WebSocket not connected, skipping message handler setup');
+      console.log('AgentPanel: WebSocket not connected or ready, skipping message handler setup');
       return;
     }
 
     console.log('AgentPanel: Setting up message handler for connected WebSocket');
     
+    const ws = wsRef.current;
+
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('AgentPanel: Received WebSocket message:', data);
         
         // Only process agent status update messages
         if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
-          console.log('AgentPanel: Processing agent status update:', data);
           const statusUpdate = data as AgentStatusUpdateMessage;
-          console.log('AgentPanel: Updating agents with:', statusUpdate.agents);
           updateAgents(statusUpdate.agents);
-        } else {
-          console.log('AgentPanel: Ignoring non-agent-status message:', data.message_type);
         }
       } catch (error) {
-        console.error('AgentPanel: Error processing agent status update:', error);
+        console.error('AgentPanel: Error processing message:', error);
       }
     };
 
-    wsRef.current.addEventListener('message', handleMessage);
+    ws.addEventListener('message', handleMessage);
     console.log('AgentPanel: Message handler added to WebSocket');
 
     return () => {
-      if (wsRef.current) {
-        console.log('AgentPanel: Removing message handler from WebSocket');
-        wsRef.current.removeEventListener('message', handleMessage);
-      }
+      console.log('AgentPanel: Removing message handler from WebSocket');
+      ws.removeEventListener('message', handleMessage);
     };
   }, [wsRef, isConnected, updateAgents]);
 
@@ -150,7 +126,7 @@ export function AgentPanel({ wsRef }: AgentPanelProps) {
           ))
         )}
       </div>
-      
+
       <style>
         {`
         .agent-panel {

@@ -102,7 +102,7 @@ def publish_to_broker_output_queue(message_data):
             )
         )
         
-        log.debug(f"Published message to {BROKER_OUTPUT_QUEUE}")
+        log.info(f"Published message to {BROKER_OUTPUT_QUEUE}")
         
         # Clean up
         connection.close()
@@ -228,6 +228,14 @@ async def connect_to_server():
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         await server_ws.send(json.dumps(register_message))
+        log.info("Sent REGISTER_BROKER message to server.")
+        
+        # Immediately request the current agent status list
+        request_status_message = {
+            "message_type": MessageType.REQUEST_AGENT_STATUS
+        }
+        await server_ws.send(json.dumps(request_status_message))
+        log.info("Sent REQUEST_AGENT_STATUS message to server.")
         
         # Start message handling task
         server_ws_task = asyncio.create_task(handle_server_messages())
@@ -381,8 +389,9 @@ def route_message(message_data):
             "text_payload": f"Unknown agent ID: {receiver_id}",
             "_client_id": message_data.get("_client_id")  # Route back to original sender
         }
+        log.warning(f"{error_response}")
         publish_to_broker_output_queue(error_response)
-        log.warning(f"Cannot route message to unknown agent {receiver_id}")
+
 
 def main():
     """Main function to start the broker service."""

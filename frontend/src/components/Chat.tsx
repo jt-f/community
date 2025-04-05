@@ -18,37 +18,52 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const ws = wsRef.current;
-    if (!ws) return;
+    // Only proceed if the WebSocket is connected
+    if (!isConnected || !wsRef.current) {
+      // Optional: Clean up any potential stale listeners if isConnected becomes false
+      // This might not be strictly necessary if the parent correctly nullifies wsRef.current on disconnect
+      // but can add robustness.
+      // if (wsRef.current) { wsRef.current.onmessage = null; }
+      return;
+    }
 
-    // Set up event listeners for the websocket
+    const ws = wsRef.current; // We know wsRef.current is not null here
+
+    // Define the message handler
     const handleMessage = (event: MessageEvent) => {
+      console.log("Chat.tsx: Received raw message data:", event.data); // Log raw data
       try {
         const data = JSON.parse(event.data);
-        
-        // Only process chat messages, not agent status updates
+
+        // Use MessageType enum for comparison
         if (data.message_type !== MessageType.AGENT_STATUS_UPDATE) {
           const message = data as ChatMessage;
-          // Add animation status to new messages
           const messageWithAnimation: MessageWithAnimation = {
             ...message,
             isNew: true,
-            animationPhase: 'fadeIn' // Start with fade in
+            animationPhase: 'fadeIn'
           };
           setMessages(prev => [...prev, messageWithAnimation]);
+        } else {
+          // Optionally log skipped status updates for debugging
+          // console.log("Chat.tsx: Skipped AGENT_STATUS_UPDATE message.");
         }
       } catch (error) {
-        console.error('Failed to parse message:', error);
+        console.error('Chat.tsx: Failed to parse message:', error);
       }
     };
 
+    // Attach the listener
     ws.addEventListener('message', handleMessage);
+    console.log("Chat.tsx: Attached message listener."); // Confirm attachment
 
-    // Clean up event listeners
+    // Clean up the listener when the component unmounts or isConnected changes
     return () => {
       ws.removeEventListener('message', handleMessage);
+      console.log("Chat.tsx: Removed message listener."); // Confirm removal
     };
-  }, [wsRef]);
+    // Depend on the connection status and the ref object itself
+  }, [isConnected, wsRef]);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -131,7 +146,8 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
               className={`message 
                 ${message.sender_id === userId.current ? 'sent' : 'received'} 
                 ${message.animationPhase === 'fadeIn' ? 'fade-in' : ''}
-                ${message.animationPhase === 'vibrate' ? 'vibrate' : ''}`}
+                ${message.animationPhase === 'vibrate' ? 'vibrate' : ''}
+                ${message.message_type === MessageType.ERROR ? 'error' : ''}`}
               onAnimationEnd={() => {
                 if (message.animationPhase === 'fadeIn') {
                   handleFadeInComplete(index);
@@ -420,6 +436,13 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
             margin-right: auto;
             margin-left: 4px;
             border-left: 3px solid var(--color-accent);
+          }
+          
+          /* Style for error messages */
+          .message.error {
+            background-color: #ffebee; /* Light red background */
+            color: #b71c1c; /* Darker red text */
+            border-left-color: #d32f2f; /* Red border */
           }
           
           .message-header {

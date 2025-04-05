@@ -3,6 +3,7 @@ import logging
 import json
 import pika
 from datetime import datetime, timedelta
+from fastapi import WebSocket # Added for _safe_send_websocket type hint
 
 # Import shared models, config, state, and utils
 from shared_models import MessageType, ChatMessage
@@ -10,6 +11,7 @@ import config
 import state
 import rabbitmq_utils
 import agent_manager
+# No longer need to import websocket_handler
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +24,10 @@ def _prepare_message_for_client(response_data: dict) -> dict:
         message_copy.pop(key, None) # Use pop with None to avoid KeyError if key absent
     return message_copy
 
-async def _safe_send_websocket(ws: asyncio.Protocol, payload_str: str, client_desc: str) -> bool:
+# Re-added _safe_send_websocket as it's needed for frontend broadcasting
+async def _safe_send_websocket(ws: WebSocket, payload_str: str, client_desc: str) -> bool:
     """Sends data to a WebSocket, handling exceptions and logging.
-    
+
     Args:
         ws: The WebSocket connection object.
         payload_str: The JSON string payload to send.
@@ -38,34 +41,44 @@ async def _safe_send_websocket(ws: asyncio.Protocol, payload_str: str, client_de
         logger.debug(f"Successfully sent message to {client_desc}")
         return True
     except Exception as e:
+        # Catch WebSocketDisconnect, ConnectionClosedOK, ConnectionClosedError, etc.
         logger.error(f"Error sending message to {client_desc}: {e}. Connection assumed lost.")
         return False
 
 # --- Response Consumer Service ---
 
+async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_desc: str = "broker"):
+    """Helper to broadcast a message payload to all connected frontends."""
+    disconnected_frontend = set()
+    frontend_count = len(state.frontend_connections)
+    if frontend_count > 0:
+        logger.info(f"Broadcasting {message_type} from {origin_desc} to {frontend_count} frontend clients.")
+        # Iterate over a copy in case the set is modified during iteration
+        for fe_ws in list(state.frontend_connections):
+            fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
+            if not await _safe_send_websocket(fe_ws, payload_str, fe_client_desc):
+                disconnected_frontend.add(fe_ws)
+        # Clean up disconnected frontends immediately
+        if disconnected_frontend:
+            state.frontend_connections -= disconnected_frontend
+            logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
+
 async def _handle_broadcast(payload_str: str, response_data: dict) -> bool:
     """Handles broadcasting a message to all connected clients and agents."""
+    # This function handles broadcasting to frontends, agents (and the broker implicitly if connected)
     needs_agent_status_broadcast = False
-    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
-    logger.info(f"Broadcasting message type {message_type}...")
+    message_type = response_data.get("message_type", "unknown type")
+    logger.info(f"Handling broadcast request for message type {message_type}...")
 
-    # --- Send to all frontend clients ---
-    disconnected_frontend = set()
-    # Iterate over a copy in case the set is modified during iteration elsewhere
-    for ws in list(state.frontend_connections):
-        client_desc = f"frontend client {getattr(ws, 'client_id', '?')}"
-        if not await _safe_send_websocket(ws, payload_str, client_desc):
-            disconnected_frontend.add(ws)
-    if disconnected_frontend:
-        state.frontend_connections -= disconnected_frontend
-        logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
+    # --- Send to all frontend clients (using the helper) ---
+    await _broadcast_to_frontends(payload_str, message_type, "broker (broadcast request)")
 
     # --- Send to all agents except the sender ---
     disconnected_agents = set()
     sender_id = response_data.get("sender_id")
     # Iterate over a copy of items in case the dict is modified
     for agent_id, ws in list(state.agent_connections.items()):
-        if agent_id != sender_id:  # Don't send back to sender
+        if agent_id != sender_id:
             client_desc = f"agent {agent_id}"
             if not await _safe_send_websocket(ws, payload_str, client_desc):
                 disconnected_agents.add(agent_id)
@@ -80,14 +93,14 @@ async def _handle_broadcast(payload_str: str, response_data: dict) -> bool:
         if processed_disconnects:
              needs_agent_status_broadcast = True # Trigger broadcast if any agent was actually disconnected
 
-    logger.debug(f"Broadcast complete. Sent to {len(state.frontend_connections)} FE, {len(state.agent_connections) - len(disconnected_agents)} Agents.")
+    logger.debug(f"Broker broadcast request complete.")
     return needs_agent_status_broadcast
 
 
 async def _handle_direct_to_agent(payload_str: str, response_data: dict, target_agent_id: str) -> bool:
     """Handles sending a message directly to a specific agent."""
     needs_agent_status_broadcast = False
-    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
+    message_type = response_data.get("message_type", "unknown type")
 
     if target_agent_id in state.agent_connections:
         agent_ws = state.agent_connections[target_agent_id]
@@ -108,22 +121,26 @@ async def _handle_direct_to_agent(payload_str: str, response_data: dict, target_
 async def _handle_direct_to_client(payload_str: str, response_data: dict, client_id: str) -> bool:
     """Handles sending a message directly to a specific client ID."""
     needs_agent_status_broadcast = False
-    message_type = json.loads(payload_str).get("message_type", "unknown type") # Get type for logging
+    message_type = response_data.get("message_type", "unknown type")
     target_websocket = None
 
     # --- Find the target websocket ---
     # Check active connections (could be frontend or agent)
+    logger.debug(f"Attempting to find websocket for client_id: {client_id}")
     for websocket in state.active_connections:
         if getattr(websocket, "client_id", None) == client_id:
             target_websocket = websocket
+            logger.debug(f"Found target websocket for {client_id}: {getattr(target_websocket, 'connection_type', '?')}")
             break
 
     # --- Send or handle disconnection ---
     if target_websocket:
         client_desc = f"client {client_id} ({getattr(target_websocket, 'connection_type', '?')})"
-        if not await _safe_send_websocket(target_websocket, payload_str, client_desc):
+        logger.debug(f"Attempting to send {message_type} message to {client_desc}")
+        send_successful = await _safe_send_websocket(target_websocket, payload_str, client_desc)
+        if not send_successful:
             # Send failed, remove the connection comprehensively
-            logger.warning(f"Removing connection for client {client_id} after send failure.")
+            logger.warning(f"Send failed. Removing connection for client {client_id}.")
             state.active_connections.discard(target_websocket)
             state.frontend_connections.discard(target_websocket)
             found_agent_id = None
@@ -145,15 +162,36 @@ async def _handle_direct_to_client(payload_str: str, response_data: dict, client
 
 
 async def forward_response_to_client(response_data: dict):
-    """Forward a response from the broker to the appropriate WebSocket client(s)."""
+    """Forward a response from the broker to the appropriate WebSocket client(s).
+
+    Also broadcasts chat messages (TEXT, REPLY, SYSTEM) to all frontends.
+    """
     # Prepare the message payload once (without routing keys)
     message_to_send = _prepare_message_for_client(response_data)
     payload_str = json.dumps(message_to_send)
     needs_agent_status_broadcast = False
+    message_type_str = response_data.get("message_type", "unknown type")
 
     try:
+        # --- Broadcast Chat Messages to Frontends ---
+        # Check if it's a chat message type and not already a broadcast request
+        is_chat_message = False
+        try:
+            # Check against enum values directly
+            message_type_enum = MessageType(message_type_str)
+            if message_type_enum in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+                is_chat_message = True
+        except ValueError:
+            pass # Not a valid MessageType enum member, definitely not a chat message we handle here
+
+        if is_chat_message and response_data.get("_broadcast") is not True:
+            logger.debug(f"Broadcasting incoming chat message ({message_type_str}) from broker to frontends.")
+            await _broadcast_to_frontends(payload_str, message_type_str, "broker (incoming chat)")
+
+        # --- Original Routing Logic ---
         # Determine routing and call appropriate handler
         if response_data.get("_broadcast") is True:
+            # _handle_broadcast already includes frontend broadcast, no need to do it twice
             needs_agent_status_broadcast = await _handle_broadcast(payload_str, response_data)
         elif target_agent_id := response_data.get("_target_agent_id"):
             needs_agent_status_broadcast = await _handle_direct_to_agent(payload_str, response_data, target_agent_id)
@@ -169,25 +207,16 @@ async def forward_response_to_client(response_data: dict):
              await agent_manager.broadcast_agent_status()
 
     except Exception as e:
-        logger.exception(f"Unexpected error in forward_response_to_client processing message type {response_data.get('message_type')}: {e}")
-
+        logger.exception(f"Unexpected error in forward_response_to_client processing message type {message_type_str}: {e}")
 
 async def process_message(channel, method, properties, body):
     """Callback to process a message received from the BROKER_OUTPUT_QUEUE."""
     try:
         response_data = json.loads(body.decode('utf-8')) # Decode body
-        logger.debug(f"Received response message from broker: {response_data.get('message_type', 'unknown type')}")
+        logger.info(f"Received response message from broker: {response_data.get('message_type', 'unknown type')}")
         
-        # Handle broker explicitly requesting agent status update
-        if response_data.get("message_type") == MessageType.REQUEST_AGENT_STATUS:
-            logger.info("Received agent status request from broker via RabbitMQ.")
-            # Send the current ACTIVE agent list via RabbitMQ
-            await agent_manager.send_agent_status_to_broker() 
-            # Also broadcast any recent changes via WebSocket (optional, depends on desired sync)
-            # await agent_manager.broadcast_agent_status() 
-        else:
-            # Forward other messages to the appropriate WebSocket client
-            await forward_response_to_client(response_data)
+        # Forward other messages to the appropriate WebSocket client
+        await forward_response_to_client(response_data)
         
         # Acknowledge message processing to RabbitMQ
         channel.basic_ack(delivery_tag=method.delivery_tag)
