@@ -106,4 +106,47 @@ def process_rabbitmq_events():
             logger.error(f"Error processing RabbitMQ data events: {e}")
             close_rabbitmq_connection()
             return False
-    return False 
+    return False
+
+def setup_agent_queue(queue_name: str) -> bool:
+    """Create or verify an agent's message queue exists.
+    
+    Args:
+        queue_name: The name of the queue to create/verify (usually agent_queue_{agent_id})
+        
+    Returns:
+        bool: True if queue is successfully created or already exists
+    """
+    connection = get_rabbitmq_connection()
+    if not connection:
+        logger.error(f"Cannot setup queue {queue_name}: No RabbitMQ connection")
+        return False
+        
+    try:
+        channel = connection.channel()
+        # Ensure queue exists and is durable
+        channel.queue_declare(queue=queue_name, durable=True)
+        logger.info(f"Successfully created/verified queue: {queue_name}")
+        channel.close()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to setup queue {queue_name}: {e}")
+        return False
+
+def publish_to_agent_queue(agent_id: str, message_data: dict) -> bool:
+    """Publish a message directly to an agent's queue.
+    
+    Args:
+        agent_id: The ID of the agent to send the message to
+        message_data: The message to send
+        
+    Returns:
+        bool: True if message is successfully published
+    """
+    queue_name = f"agent_queue_{agent_id}"
+    result = publish_to_queue(queue_name, message_data)
+    if result:
+        logger.info(f"Published message to agent {agent_id} queue")
+    else:
+        logger.error(f"Failed to publish message to agent {agent_id} queue")
+    return result 

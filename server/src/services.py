@@ -162,60 +162,77 @@ async def _handle_direct_to_client(payload_str: str, response_data: dict, client
 
 
 async def forward_response_to_client(response_data: dict):
-    """Forward a response from the broker to the appropriate WebSocket client(s).
-
-    Also broadcasts chat messages (TEXT, REPLY, SYSTEM) to all frontends.
+    """Forward a response from the broker to the appropriate destination.
+    
+    For messages with a receiver_id that matches an agent,
+    routes to that agent's queue for message processing.
+    
+    ALL messages are broadcast to all frontends for monitoring,
+    regardless of message type.
     """
-    # Prepare the message payload once (without routing keys)
+    # Prepare the message payload once (without internal routing keys)
+    logger.info(f"Forward response to client: {response_data}")
     message_to_send = _prepare_message_for_client(response_data)
     payload_str = json.dumps(message_to_send)
     needs_agent_status_broadcast = False
     message_type_str = response_data.get("message_type", "unknown type")
+    receiver_id = response_data.get("receiver_id")
+    sender_id = response_data.get("sender_id", "unknown")
 
     try:
-        # --- Broadcast Chat Messages to Frontends ---
-        # Check if it's a chat message type and not already a broadcast request
-        is_chat_message = False
-        try:
-            # Check against enum values directly
-            message_type_enum = MessageType(message_type_str)
-            if message_type_enum in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
-                is_chat_message = True
-        except ValueError:
-            pass # Not a valid MessageType enum member, definitely not a chat message we handle here
+        # --- Step 1: ALWAYS Broadcast Messages to ALL Frontends via WebSocket ---
+        # This happens for ALL message types now, not just chat messages
+        logger.info(f"Broadcasting message type={message_type_str} from {sender_id} to all frontends")
+        await _broadcast_to_frontends(payload_str, message_type_str, "message monitoring")
 
-        if is_chat_message and response_data.get("_broadcast") is not True:
-            logger.debug(f"Broadcasting incoming chat message ({message_type_str}) from broker to frontends.")
-            await _broadcast_to_frontends(payload_str, message_type_str, "broker (incoming chat)")
-
-        # --- Original Routing Logic ---
-        # Determine routing and call appropriate handler
-        if response_data.get("_broadcast") is True:
-            # _handle_broadcast already includes frontend broadcast, no need to do it twice
-            needs_agent_status_broadcast = await _handle_broadcast(payload_str, response_data)
-        elif target_agent_id := response_data.get("_target_agent_id"):
-            needs_agent_status_broadcast = await _handle_direct_to_agent(payload_str, response_data, target_agent_id)
-        elif client_id := response_data.get("_client_id"):
-            needs_agent_status_broadcast = await _handle_direct_to_client(payload_str, response_data, client_id)
+        # --- Step 2: Route the message based on receiver_id ---
+        # If receiver is an agent, publish to that agent's queue for processing
+        if receiver_id and receiver_id in state.agent_statuses and state.agent_statuses[receiver_id].is_online:
+            # Use the helper function to publish to the agent's queue
+            from rabbitmq_utils import publish_to_agent_queue
+            if publish_to_agent_queue(receiver_id, response_data):
+                logger.info(f"Routed message from {sender_id} to agent {receiver_id}'s queue")
+            else:
+                logger.error(f"Failed to route message to agent {receiver_id}'s queue")
+        
+        # Handle error responses or control messages
+        elif message_type_str == MessageType.ERROR:
+            # Error messages from broker, route back to original sender if client_id exists
+            if client_id := response_data.get("_client_id"):
+                logger.info(f"Routing error message to client {client_id} via WebSocket")
+                needs_agent_status_broadcast = await _handle_direct_to_client(payload_str, response_data, client_id)
+            else:
+                # Just log the error if no client to send to
+                logger.warning(f"Error message with no client_id: {response_data.get('text_payload', 'No details')}")
+        
+        # For non-agent receivers (like responses to frontends)
+        elif receiver_id == "server" or (receiver_id and receiver_id not in state.agent_statuses):
+            # Potential direct message to a frontend client
+            if client_id := response_data.get("_client_id"):
+                logger.info(f"Routing message to frontend client {client_id} via WebSocket")
+                needs_agent_status_broadcast = await _handle_direct_to_client(payload_str, response_data, client_id)
+            else:
+                # No specific client to send to, log warning
+                logger.warning(f"Message for receiver {receiver_id} has no client_id routing information")
         else:
-            # If no routing information, log it
-            logger.warning(f"Received response without specific routing info (_broadcast, _target_agent_id, _client_id), cannot route: {response_data}")
+            # If no valid receiver found, log warning
+            logger.warning(f"Received message without valid routing info, cannot route: type={message_type_str}, receiver={receiver_id}")
 
-        # --- Final Step: Broadcast status if needed ---
+        # --- Step 3: Broadcast status updates if needed ---
         if needs_agent_status_broadcast:
-             logger.info("Triggering agent status broadcast after handling disconnections or agent-specific actions.")
+             logger.info("Triggering agent status broadcast via WebSocket after handling disconnections")
              await agent_manager.broadcast_agent_status()
 
     except Exception as e:
-        logger.exception(f"Unexpected error in forward_response_to_client processing message type {message_type_str}: {e}")
+        logger.exception(f"Unexpected error routing message type {message_type_str}: {e}")
 
 async def process_message(channel, method, properties, body):
     """Callback to process a message received from the BROKER_OUTPUT_QUEUE."""
     try:
         response_data = json.loads(body.decode('utf-8')) # Decode body
-        logger.info(f"Received response message from broker: {response_data.get('message_type', 'unknown type')}")
+        logger.info(f"Received message from broker: {response_data.get('message_type', 'unknown type')} to {response_data.get('receiver_id', 'unknown')}")
         
-        # Forward other messages to the appropriate WebSocket client
+        # Forward messages to appropriate destinations
         await forward_response_to_client(response_data)
         
         # Acknowledge message processing to RabbitMQ
@@ -228,7 +245,7 @@ async def process_message(channel, method, properties, body):
     except Exception as e:
         logger.exception(f"Error processing message from broker output queue: {e}") # Log traceback
         # Reject message, possibly requeue depending on error?
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False) 
+        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 async def response_consumer():
@@ -284,15 +301,15 @@ async def response_consumer():
 # --- Agent Ping Service --- 
 
 async def agent_ping_service():
-    """Service to periodically ping agents and mark inactive ones as offline."""
+    """Service to periodically ping agents via WebSocket and mark inactive ones as offline."""
     logger.info("Starting agent ping service...")
     while True:
         try:
             current_time = datetime.now()
-            agents_to_ping = list(state.agent_connections.keys()) # Ping currently connected agents
+            agents_to_ping = list(state.agent_connections.keys()) # Ping currently connected agents via WebSocket
             disconnected_agents = set()
 
-            # 1. Send PING to all connected agents
+            # 1. Send PING to all connected agents via WebSocket (maintain real-time status updates)
             for agent_id in agents_to_ping:
                 ws = state.agent_connections.get(agent_id)
                 if not ws:
@@ -303,7 +320,7 @@ async def agent_ping_service():
                         "timestamp": current_time.isoformat() # Use ISO format
                     }
                     await ws.send_text(json.dumps(ping_message))
-                    logger.debug(f"Sent PING to agent {agent_id}")
+                    logger.debug(f"Sent PING to agent {agent_id} via WebSocket")
                 except Exception as e:
                     logger.error(f"Error sending PING to agent {agent_id}: {e}. Marking for disconnect.")
                     disconnected_agents.add(agent_id)

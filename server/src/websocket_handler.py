@@ -32,7 +32,7 @@ async def _handle_register_broker(websocket: WebSocket, client_id: str, message_
     await agent_manager.send_agent_status_to_broker()
 
 async def _handle_register_agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handles agent registration."""
+    """Handles agent registration - sets up WebSocket for status updates and queue for message processing."""
     websocket.connection_type = "agent"
     agent_id = message_data.get("agent_id")
     agent_name = message_data.get("agent_name", "UnknownAgent")
@@ -42,18 +42,41 @@ async def _handle_register_agent(websocket: WebSocket, client_id: str, message_d
         await websocket.send_text(json.dumps({"error": "Missing agent_id"}))
         return
 
+    # Register WebSocket connection for status updates and ping/pong
     state.agent_connections[agent_id] = websocket
-    logger.info(f"Agent {agent_name} ({agent_id}) registered via WebSocket: {client_id}")
+    logger.info(f"Agent {agent_name} ({agent_id}) registered WebSocket for status updates: {client_id}")
     
+    # Update agent status
     agent_manager.update_agent_status(agent_id, agent_name, is_online=True)
-    rabbitmq_utils.publish_to_agent_metadata_queue(message_data)
     
-    response = AgentRegistrationResponse(
-        status=ResponseStatus.SUCCESS,
-        agent_id=agent_id,
-        message="Agent registered with server successfully"
-    )
-    await websocket.send_text(response.model_dump_json())
+    # Setup message processing queue for this agent if it doesn't exist
+    agent_queue_name = f"agent_queue_{agent_id}"
+    try:
+        from rabbitmq_utils import setup_agent_queue
+        if setup_agent_queue(agent_queue_name):
+            logger.info(f"Created or verified message queue for agent {agent_id}: {agent_queue_name}")
+        else:
+            logger.error(f"Failed to setup message queue for agent {agent_id}")
+    except Exception as e:
+        logger.error(f"Error setting up agent queue: {e}")
+
+    # Forward registration to broker for message routing via metadata queue
+    rabbitmq_utils.publish_to_agent_metadata_queue(message_data)
+    logger.info(f"Forwarded agent {agent_id} registration to broker via metadata queue")
+    
+    # Send confirmation response to agent
+    response = {
+        "message_type": MessageType.REGISTER_AGENT_RESPONSE,
+        "status": ResponseStatus.SUCCESS,
+        "agent_id": agent_id,
+        "message": "Agent registered with server successfully",
+        "queue_name": agent_queue_name
+    }
+    
+    await websocket.send_text(json.dumps(response))
+    logger.info(f"Sent registration confirmation to agent {agent_id}")
+    
+    # Broadcast updated agent status to all frontends
     await agent_manager.broadcast_agent_status(force_full_update=True)
 
 async def _handle_register_frontend(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
