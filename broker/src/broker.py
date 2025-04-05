@@ -204,6 +204,7 @@ def route_message(message_data):
     If receiver_id is 'broadcast' or not specified, randomly selects an online agent.
     Otherwise, attempts direct routing to the specified agent.
     
+    Never routes a message back to the agent who sent it.
     All messages are published to BROKER_OUTPUT_QUEUE with appropriate receiver_id set.
     """
     message_type = message_data.get("message_type")
@@ -219,15 +220,14 @@ def route_message(message_data):
         if field in outgoing_message:
             outgoing_message.pop(field)
 
-
-    # Get list of online agents
+    # Get list of online agents, EXCLUDING the sender if it's an agent
     online_agents = [
         agent_id for agent_id, info in registered_agents.items()
-        if info.get("is_online", False)
+        if info.get("is_online", False) and agent_id != sender_id  # Exclude the sender
     ]
 
     if online_agents:
-        # Randomly select an agent
+        # Randomly select an agent (that is not the sender)
         chosen_agent_id = random.choice(online_agents)
         
         # Set the receiver_id to the chosen agent
@@ -237,16 +237,27 @@ def route_message(message_data):
         publish_to_broker_output_queue(outgoing_message)
         log.info(f"Randomly routed message from {sender_id} to agent {chosen_agent_id}")
         return
-    else:
-        # No online agents available - generate error response
+    elif sender_id in registered_agents and len(registered_agents) > 1:
+        # Special case: sender is the only online agent, but other offline agents exist
+        log.warning(f"Only the sending agent {sender_id} is online. Cannot route message to another agent.")
         error_response = {
             "message_type": MessageType.ERROR,
             "sender_id": "broker",
-            "receiver_id":"server",
+            "receiver_id": "server",
+            "text_payload": "Cannot route message: sender is the only online agent."
+        }
+        publish_to_broker_output_queue(error_response)
+        return
+    else:
+        # No online agents available or all other agents are offline
+        error_response = {
+            "message_type": MessageType.ERROR,
+            "sender_id": "broker",
+            "receiver_id": "server",
             "text_payload": "No online agents available to handle the request."
         }
         publish_to_broker_output_queue(error_response)
-        log.warning(f"Could not route message from {sender_id}: No online agents found")
+        log.warning(f"Could not route message from {sender_id}: No other online agents found")
         return
 
 def main():
