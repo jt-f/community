@@ -6,6 +6,7 @@ import pika
 import os
 import asyncio
 import websockets
+import random
 from datetime import datetime
 from typing import Dict, Set, List, Optional
 
@@ -344,53 +345,77 @@ def handle_server_advertisement(channel, method, properties, body):
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
 def route_message(message_data):
-    """Route messages to the appropriate recipients based on sender and receiver.
-    Publishes messages to the BROKER_OUTPUT_QUEUE for the server to handle delivery.
+    """Route messages to the appropriate recipients.
+    If receiver_id is 'broadcast', randomly selects an online agent.
+    Otherwise, attempts direct routing. Publishes messages to the
+    BROKER_OUTPUT_QUEUE for the server to handle delivery.
     """
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
-    receiver_id = message_data.get("receiver_id", "broadcast")
-    
-    # Prepare the message for routing
+    receiver_id = message_data.get("receiver_id", "broadcast") # Default to broadcast if not specified
+
     outgoing_message = dict(message_data)
-    
-    # For broadcast messages, add a flag for the server to broadcast
+    log.info(f"Routing message {message_data}")
     if receiver_id == "broadcast":
-        outgoing_message["_broadcast"] = True
-        publish_to_broker_output_queue(outgoing_message)
-        log.info(f"Sent broadcast message from {sender_id} to server for distribution")
-        return
-        
-    # For direct messages to specific agents, check if we know the agent
+        # --- New Logic: Randomly select an online agent ---
+        online_agents = [
+            agent_id for agent_id, info in registered_agents.items()
+            if info.get("is_online", False)
+        ]
+
+        if online_agents:
+            chosen_agent_id = random.choice(online_agents)
+            outgoing_message["_target_agent_id"] = chosen_agent_id
+            # Ensure receiver_id reflects the chosen agent for clarity downstream, if needed
+            outgoing_message["receiver_id"] = chosen_agent_id
+            # Remove broadcast flag if present
+            outgoing_message.pop("_broadcast", None)
+
+            publish_to_broker_output_queue(outgoing_message)
+            log.info(f"Randomly routed message from {sender_id} to agent {chosen_agent_id}")
+        else:
+            # No online agents available
+            error_response = {
+                "message_type": MessageType.ERROR,
+                "sender_id": "broker",
+                "receiver_id": sender_id, # Send error back to original sender
+                "text_payload": "No online agents available to handle the request.",
+                "_client_id": message_data.get("_client_id") # Route back to original client
+            }
+            publish_to_broker_output_queue(error_response)
+            log.warning(f"Could not route broadcast message from {sender_id}: No online agents found.")
+        # --- End New Logic ---
+        return # Exit after handling broadcast
+
+    # --- Existing Logic for Direct Routing ---
     if receiver_id in registered_agents:
-        # Check if the agent is online
-        if registered_agents[receiver_id]["is_online"]:
-            # Add routing info for the server
+        if registered_agents[receiver_id].get("is_online", False):
             outgoing_message["_target_agent_id"] = receiver_id
             publish_to_broker_output_queue(outgoing_message)
-            log.info(f"Routed message from {sender_id} to agent {receiver_id}")
+            log.info(f"Routed direct message from {sender_id} to agent {receiver_id}")
         else:
-            # Agent is offline, send an error message back
+            # Agent is offline
             error_response = {
                 "message_type": MessageType.ERROR,
                 "sender_id": "broker",
                 "receiver_id": sender_id,
-                "text_payload": f"Agent {receiver_id} is currently offline",
-                "_client_id": message_data.get("_client_id")  # Route back to original sender
+                "text_payload": f"Agent {receiver_id} is currently offline.",
+                "_client_id": message_data.get("_client_id")
             }
             publish_to_broker_output_queue(error_response)
-            log.warning(f"Cannot route message to offline agent {receiver_id}")
+            log.warning(f"Could not route message from {sender_id}: Agent {receiver_id} is offline.")
     else:
-        # Unknown agent, send an error message back
+        # Unknown agent ID
         error_response = {
             "message_type": MessageType.ERROR,
             "sender_id": "broker",
             "receiver_id": sender_id,
             "text_payload": f"Unknown agent ID: {receiver_id}",
-            "_client_id": message_data.get("_client_id")  # Route back to original sender
+            "_client_id": message_data.get("_client_id")
         }
-        log.warning(f"{error_response}")
         publish_to_broker_output_queue(error_response)
+        log.warning(f"Could not route message from {sender_id}: Unknown agent ID {receiver_id}.")
+    # --- End Existing Logic ---
 
 
 def main():
