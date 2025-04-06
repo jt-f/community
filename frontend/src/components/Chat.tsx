@@ -1,92 +1,91 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { ChatMessage, MessageType, createMessage } from '../types/message';
+import { WebSocketContext } from './ChatUI';
 
 interface ChatProps {
-  wsRef: React.MutableRefObject<WebSocket | null>;
+  wsRef: React.RefObject<WebSocket | null>;
   isConnected: boolean;
+  userId: string;
 }
 
 interface MessageWithAnimation extends ChatMessage {
   isNew?: boolean;
   animationPhase?: 'fadeIn' | 'vibrate' | null;
+  status?: 'pending' | 'routed' | 'error';
+  routedTo?: string;
 }
 
-export function Chat({ wsRef, isConnected }: ChatProps) {
+const Chat: React.FC<ChatProps> = ({ wsRef, isConnected, userId }) => {
   const [messages, setMessages] = useState<MessageWithAnimation[]>([]);
   const [inputMessage, setInputMessage] = useState('');
-  const userId = useRef(`user_${Math.random().toString(36).substring(2, 11)}`);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sentMessageIds = useRef<Set<string>>(new Set());
+  const [clientId, setClientId] = useState<string | null>(userId);
+  const { lastMessage, sendMessage } = useContext(WebSocketContext);
 
+  // Handle incoming messages from WebSocketContext
   useEffect(() => {
-    // Only proceed if the WebSocket is connected
-    if (!isConnected || !wsRef.current) {
-      // Optional: Clean up any potential stale listeners if isConnected becomes false
-      // This might not be strictly necessary if the parent correctly nullifies wsRef.current on disconnect
-      // but can add robustness.
-      // if (wsRef.current) { wsRef.current.onmessage = null; }
-      return;
-    }
-
-    const ws = wsRef.current; // We know wsRef.current is not null here
-
-    // Define the message handler
-    const handleMessage = (event: MessageEvent) => {
-      console.log("Chat.tsx: Received raw message data:", event.data); // Log raw data
-      try {
-        const data = JSON.parse(event.data);
-
-        // Use MessageType enum for comparison
-        if (data.message_type !== MessageType.AGENT_STATUS_UPDATE) {
-          const message = data as ChatMessage;
-          const messageWithAnimation: MessageWithAnimation = {
-            ...message,
-            isNew: true,
-            animationPhase: 'fadeIn'
-          };
-          setMessages(prev => [...prev, messageWithAnimation]);
-        } else {
-          // Optionally log skipped status updates for debugging
-          // console.log("Chat.tsx: Skipped AGENT_STATUS_UPDATE message.");
-        }
-      } catch (error) {
-        console.error('Chat.tsx: Failed to parse message:', error);
+    if (lastMessage) {
+      console.log('Chat component received message from context:', lastMessage);
+      
+      // Handle registration response
+      if (lastMessage.message_type === MessageType.REGISTER_FRONTEND_RESPONSE) {
+        console.log('Registration confirmed in Chat:', lastMessage);
+        setClientId(lastMessage.frontend_id);
+        return;
       }
-    };
-
-    // Attach the listener
-    ws.addEventListener('message', handleMessage);
-    console.log("Chat.tsx: Attached message listener."); // Confirm attachment
-
-    // Clean up the listener when the component unmounts or isConnected changes
-    return () => {
-      ws.removeEventListener('message', handleMessage);
-      console.log("Chat.tsx: Removed message listener."); // Confirm removal
-    };
-    // Depend on the connection status and the ref object itself
-  }, [isConnected, wsRef]);
+      
+      // Always handle error messages, regardless of receiver_id
+      if (lastMessage.message_type === MessageType.ERROR) {
+        console.log('Received error message in Chat:', lastMessage);
+        // Create a copy of the message with proper styling
+        const errorMessage: MessageWithAnimation = {
+          ...lastMessage,
+          isNew: true,
+          animationPhase: 'fadeIn',
+          status: 'error'
+        };
+        // Add to messages regardless of sender/receiver
+        setMessages(prev => [...prev, errorMessage]);
+        return;
+      }
+      
+      // For non-error messages, only show if not from self
+      if (lastMessage.message_type === MessageType.TEXT && lastMessage.sender_id !== clientId) {
+        const newMessage: MessageWithAnimation = {
+          ...lastMessage,
+          isNew: true,
+          animationPhase: 'fadeIn',
+          status: 'routed'
+        };
+        setMessages(prev => [...prev, newMessage]);
+      }
+    }
+  }, [lastMessage, clientId]);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = () => {
-    if (inputMessage.trim() && wsRef.current?.readyState === WebSocket.OPEN) {
+  const handleSendMessage = () => {
+    if (inputMessage.trim() && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const message = createMessage(
-        userId.current,
-        'broker',
+        clientId || '',
+        'server',
         inputMessage,
         MessageType.TEXT
       );
       
-      // Add animation status to sent messages
       const messageWithAnimation: MessageWithAnimation = {
         ...message,
         isNew: true,
-        animationPhase: 'fadeIn' // Start with fade in
+        animationPhase: 'fadeIn',
+        status: 'pending'
       };
       
-      wsRef.current.send(JSON.stringify(message));
+      sentMessageIds.current.add(message.message_id);
+      sendMessage(message); // Use the context's sendMessage function
       setMessages(prev => [...prev, messageWithAnimation]);
       setInputMessage('');
     }
@@ -94,7 +93,7 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      sendMessage();
+      handleSendMessage();
     }
   };
 
@@ -125,8 +124,8 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
           <h3>SECURE COMMUNICATIONS</h3>
         </div>
         <div className="connection-status">
-          <div className={`status-indicator ${isConnected ? 'connected' : 'disconnected'}`}></div>
-          <span className="status-text">{isConnected ? 'CONNECTED' : 'DISCONNECTED'}</span>
+          <div className={`status-indicator ${wsRef.current ? 'connected' : 'disconnected'}`}></div>
+          <span className="status-text">{wsRef.current ? 'CONNECTED' : 'DISCONNECTED'}</span>
         </div>
       </div>
       <div className="messages-container">
@@ -142,12 +141,14 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
         <div className="messages">
           {messages.map((message, index) => (
             <div
-              key={message.message_id}
+              key={message.message_id || `msg_${index}_${Date.now()}`}
               className={`message 
-                ${message.sender_id === userId.current ? 'sent' : 'received'} 
+                ${message.sender_id === clientId ? 'sent' : 'received'} 
                 ${message.animationPhase === 'fadeIn' ? 'fade-in' : ''}
                 ${message.animationPhase === 'vibrate' ? 'vibrate' : ''}
-                ${message.message_type === MessageType.ERROR ? 'error' : ''}`}
+                ${message.status === 'error' ? 'error' : ''}
+                ${message.status === 'pending' ? 'pending' : ''}
+                ${message.status === 'routed' ? 'routed' : ''}`}
               onAnimationEnd={() => {
                 if (message.animationPhase === 'fadeIn') {
                   handleFadeInComplete(index);
@@ -155,23 +156,30 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
               }}
             >
               <div className="message-header">
-                <span className="sender">{message.sender_id}</span>
+                <div className="message-directions">
+                  <span className="message-from">FROM: {message.sender_id === clientId ? 'You' : message.sender_id}</span>
+                  <span className="message-to">TO: {message.receiver_id || 'server'}</span>
+                </div>
                 <span className="timestamp">{message.send_timestamp}</span>
               </div>
               <div className="message-content">
                 {message.text_payload}
               </div>
-              {message.message_type === MessageType.REPLY && (
-                <div className="message-footer reply">
-                  <span className="message-id">ID: {message.message_id.substring(0, 8)}</span>
-                  <span className="reply-to">↩ {message.in_reply_to_message_id?.substring(0, 8)}</span>
-                </div>
-              )}
-              {message.message_type === MessageType.TEXT && (
-                <div className="message-footer">
-                  <span className="message-id">ID: {message.message_id.substring(0, 8)}</span>
-                </div>
-              )}
+              <div className="message-footer">
+                <span className="message-id">ID: {message.message_id ? message.message_id.substring(0, 8) : 'unknown'}</span>
+                {message.status === 'pending' && (
+                  <span className="routing-status pending">AWAITING ROUTING</span>
+                )}
+                {message.status === 'routed' && (
+                  <span className="routing-status routed">ROUTED TO: {message.routedTo}</span>
+                )}
+                {message.status === 'error' && (
+                  <span className="routing-status error">ERROR</span>
+                )}
+                {message.message_type === MessageType.REPLY && message.in_reply_to_message_id && (
+                  <span className="reply-to">↩ {message.in_reply_to_message_id.substring(0, 8)}</span>
+                )}
+              </div>
             </div>
           ))}
           <div ref={messagesEndRef} />
@@ -184,9 +192,9 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyUp={handleKeyPress}
           placeholder="Enter message..."
-          disabled={!isConnected}
+          disabled={!wsRef.current}
         />
-        <button onClick={sendMessage} disabled={!isConnected}>
+        <button onClick={handleSendMessage} disabled={!wsRef.current}>
           TRANSMIT
         </button>
       </div>
@@ -430,6 +438,18 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
             border-left: 3px solid var(--color-primary);
           }
           
+          /* Pending message style - amber/yellow highlight */
+          .message.sent.pending {
+            background-color: rgba(255, 193, 7, 0.1);
+            border-left: 3px solid #FFC107; /* Amber color */
+          }
+          
+          /* Routed message style - green highlight */
+          .message.sent.routed {
+            background-color: rgba(76, 175, 80, 0.1);
+            border-left: 3px solid #4CAF50; /* Green color */
+          }
+          
           .message.received {
             background-color: var(--color-surface-raised);
             color: var(--color-text);
@@ -445,6 +465,13 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
             border-left-color: #d32f2f; /* Red border */
           }
           
+          /* Style for informational messages */
+          .message.info {
+            background-color: #f5f5f5; /* Light grey background */
+            color: #424242; /* Darker grey text */
+            border-left-color: #9e9e9e; /* Grey border */
+          }
+          
           .message-header {
             display: flex;
             justify-content: space-between;
@@ -454,6 +481,25 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+          }
+          
+          .message-directions {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+          
+          .message-from, .message-to {
+            display: flex;
+            align-items: center;
+          }
+          
+          .message-from {
+            color: var(--color-primary);
+          }
+          
+          .message-to {
+            color: var(--color-accent);
           }
           
           .message-content {
@@ -471,6 +517,23 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
             font-size: 0.65em;
             color: var(--color-text-tertiary);
             font-family: monospace;
+          }
+          
+          .routing-status {
+            font-weight: bold;
+            letter-spacing: 0.5px;
+          }
+          
+          .routing-status.pending {
+            color: #FFC107; /* Amber color */
+          }
+          
+          .routing-status.routed {
+            color: #4CAF50; /* Green color */
+          }
+          
+          .routing-status.error {
+            color: #b71c1c; /* Red color */
           }
           
           .message-id {
@@ -547,4 +610,6 @@ export function Chat({ wsRef, isConnected }: ChatProps) {
       </style>
     </div>
   );
-} 
+};
+
+export default Chat; 

@@ -1,6 +1,20 @@
+import { useState, useRef, useEffect } from 'react'
 import { ChatUI } from './components/ChatUI'
 
 function App() {
+  // Generate and store the user ID in format 'Human-<3 random characters>'
+  const userId = useRef(`Human-${Math.random().toString(36).substring(2, 5)}`);
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  
+  // Update time every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString());
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <div className="app">
       <header>
@@ -13,7 +27,7 @@ function App() {
         <div className="header-center">
           <div className="status-bar">
             <div className="status-pill">SYSTEM ACTIVE</div>
-            <div className="status-time">{new Date().toLocaleTimeString()}</div>
+            <div className="status-time">{currentTime}</div>
           </div>
         </div>
         <div className="header-right">
@@ -21,10 +35,14 @@ function App() {
             <div className="session-label">SESSION ID</div>
             <div className="session-value">CB-{Math.floor(Math.random() * 9000) + 1000}</div>
           </div>
+          <div className="user-info">
+            <div className="user-label">USER ID</div>
+            <div className="user-value">{userId.current}</div>
+          </div>
         </div>
       </header>
       <main>
-        <ChatUI />
+        <ChatUI userId={userId.current} />
       </main>
       <style>{`
         .app {
@@ -65,6 +83,11 @@ function App() {
         .header-left, .header-center, .header-right {
           display: flex;
           align-items: center;
+        }
+        
+        .header-right {
+          display: flex;
+          gap: 20px;
         }
         
         .logo {
@@ -113,24 +136,28 @@ function App() {
           color: var(--color-text-secondary);
         }
         
-        .session-info {
+        .session-info, .user-info {
           display: flex;
           flex-direction: column;
           align-items: flex-end;
           gap: 2px;
         }
         
-        .session-label {
+        .session-label, .user-label {
           font-size: 0.65rem;
           color: var(--color-text-tertiary);
           letter-spacing: 0.5px;
         }
         
-        .session-value {
+        .session-value, .user-value {
           font-family: monospace;
           font-size: 0.9rem;
           color: var(--color-primary);
           font-weight: 600;
+        }
+        
+        .user-value {
+          color: var(--color-accent);
         }
 
         main {

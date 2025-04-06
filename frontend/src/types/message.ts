@@ -6,6 +6,7 @@ export interface ChatMessage {
   send_timestamp: string;
   message_type: MessageType;
   in_reply_to_message_id?: string; // Optional, only present for reply messages
+  client_id?: string;
 }
 
 export enum MessageType {
@@ -14,7 +15,9 @@ export enum MessageType {
   SYSTEM = 'SYSTEM',
   ERROR = 'ERROR',
   AGENT_STATUS_UPDATE = 'AGENT_STATUS_UPDATE',
-  REGISTER_FRONTEND = 'REGISTER_FRONTEND'
+  REGISTER_FRONTEND = 'REGISTER_FRONTEND',
+  REGISTER_FRONTEND_RESPONSE = 'REGISTER_FRONTEND_RESPONSE',
+  REGISTER_AGENT_RESPONSE = 'REGISTER_AGENT_RESPONSE'
 }
 
 export interface AgentStatus {
@@ -35,7 +38,8 @@ export function createMessage(
   receiver_id: string,
   text_payload: string,
   message_type: MessageType = MessageType.TEXT,
-  in_reply_to_message_id?: string
+  in_reply_to_message_id?: string,
+  client_id?: string
 ): ChatMessage {
   return {
     message_id: Math.random().toString(36).substring(2, 8),
@@ -44,6 +48,7 @@ export function createMessage(
     text_payload,
     send_timestamp: new Date().toLocaleTimeString(),
     message_type,
-    ...(in_reply_to_message_id && { in_reply_to_message_id })
+    in_reply_to_message_id,
+    client_id
   };
 } 

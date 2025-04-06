@@ -24,7 +24,7 @@ def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
            )
 
 async def broadcast_agent_status(force_full_update: bool = False):
-    """Broadcast current agent status to all frontend clients and the broker."""
+    """Broadcast current agent status to all frontend clients and brokers."""
     agents_to_broadcast = []
     changes_detected = False # Flag if delta changes were detected
 
@@ -53,19 +53,28 @@ async def broadcast_agent_status(force_full_update: bool = False):
     # If it's a delta update, agents_to_broadcast will only be non-empty if changes_detected is true.
     logger.debug(f"Preparing to broadcast status for {len(agents_to_broadcast)} agents (Forced: {force_full_update})")
 
-    status_update = AgentStatusUpdate(agents=agents_to_broadcast)
-    status_payload = status_update.model_dump_json() # Use model_dump_json for efficiency
+    status_update = {
+        "message_type": MessageType.AGENT_STATUS_UPDATE,
+        "agents": [agent.model_dump() for agent in agents_to_broadcast],
+        "is_full_update": force_full_update
+    }
+    status_payload = json.dumps(status_update)
 
-    # Send to broker first if connected
-    if state.broker_connection:
+    # Send to all connected brokers
+    disconnected_brokers = set()
+    for broker_id, websocket in state.broker_connections.items():
         try:
-            await state.broker_connection.send_text(status_payload)
-            logger.debug(f"Sent agent status update ({len(agents_to_broadcast)} agents) directly to broker.")
+            await websocket.send_text(status_payload)
+            logger.debug(f"Sent agent status update ({len(agents_to_broadcast)} agents) to broker {broker_id}.")
         except Exception as e:
-            logger.error(f"Error sending status update directly to broker: {e}. Marking broker disconnected.")
-            state.broker_connection = None # Assume disconnect on error
-    else:
-        logger.debug("Broker not connected via WebSocket, status not sent directly.")
+            logger.error(f"Error sending status update to broker {broker_id}: {e}. Marking broker disconnected.")
+            disconnected_brokers.add(broker_id)
+
+    # Remove disconnected brokers
+    for broker_id in disconnected_brokers:
+        if broker_id in state.broker_connections:
+            del state.broker_connections[broker_id]
+            logger.info(f"Removed disconnected broker {broker_id}")
 
     # Then broadcast to all connected frontend clients
     if state.frontend_connections:
@@ -73,72 +82,69 @@ async def broadcast_agent_status(force_full_update: bool = False):
         for ws in state.frontend_connections:
             try:
                 await ws.send_text(status_payload)
+                logger.debug(f"Sent agent status update ({len(agents_to_broadcast)} agents) to frontend client.")
             except Exception as e:
-                # Handle potential errors (e.g., client disconnected between check and send)
-                logger.error(f"Error sending status update to frontend client {getattr(ws, 'client_id', '?')}: {e}")
+                logger.error(f"Error sending status update to frontend client: {e}. Marking client disconnected.")
                 disconnected_clients.add(ws)
         
-        # Remove clients that failed to send
+        # Remove disconnected clients
         state.frontend_connections -= disconnected_clients
         if disconnected_clients:
-            logger.info(f"Removed {len(disconnected_clients)} disconnected frontend clients during status broadcast.")
-            
-        # Log count *after* removing disconnected clients
-        if state.frontend_connections:
-             logger.info(f"Broadcast agent status update ({len(agents_to_broadcast)} agents) to {len(state.frontend_connections)} frontend clients.")
-        else:
-             logger.debug("No remaining frontend clients after attempting broadcast.")
+            logger.info(f"Removed {len(disconnected_clients)} disconnected frontend clients.")
     else:
         logger.debug("No frontend clients connected for status broadcast.")
 
 async def send_agent_status_to_broker():
-    """Send current ACTIVE agent status list to the broker via WebSocket if connected."""
+    """Sends the current agent status list to the broker."""
     try:
-        active_agent_list = []
-        for agent_id, status in state.agent_statuses.items():
-            # Only include agents that are currently connected via WebSocket
-            if agent_id in state.agent_connections:
-                active_agent_list.append(status.model_dump()) # Use model_dump for dict
+        # Get list of active agents
+        active_agents = [
+            {
+                "agent_id": agent_id,
+                "agent_name": status.agent_name,
+                "is_online": status.is_online,
+                "last_seen": status.last_seen
+            }
+            for agent_id, status in state.agent_statuses.items()
+        ]
         
-        status_data = {
+        # Prepare the status update message
+        status_message = {
             "message_type": MessageType.AGENT_STATUS_UPDATE,
-            "agents": active_agent_list,
-            "is_full_update": True, # Indicate this is a full, active list
-            "_origin": "server_response_to_request" # Add origin for clarity
+            "agents": active_agents,
+            "is_full_update": True
         }
         
-        status_payload = json.dumps(status_data) # Convert to JSON string
-
-        if state.broker_connection:
-            await state.broker_connection.send_text(status_payload)
-            logger.info(f"Sent requested active agent status update ({len(active_agent_list)} agents) to broker via WebSocket.")
-        else:
-            logger.warning("Broker requested agent status, but WebSocket connection is not active. Cannot send update.")
-
+        # Send to all connected brokers
+        disconnected_brokers = set()
+        for broker_id, websocket in state.broker_connections.items():
+            try:
+                await websocket.send_text(json.dumps(status_message))
+                logger.debug(f"Sent agent status update to broker {broker_id}")
+            except Exception as e:
+                logger.error(f"Error sending status update to broker {broker_id}: {e}")
+                disconnected_brokers.add(broker_id)
+        
+        # Remove disconnected brokers
+        for broker_id in disconnected_brokers:
+            if broker_id in state.broker_connections:
+                del state.broker_connections[broker_id]
+                logger.info(f"Removed disconnected broker {broker_id}")
+                
     except Exception as e:
         logger.error(f"Error preparing or sending requested active agent status to broker via WebSocket: {e}")
 
 def update_agent_status(agent_id: str, agent_name: str, is_online: bool):
-    """Updates the status of a specific agent."""
-    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    if agent_id in state.agent_statuses:
-        # Update existing agent
-        state.agent_statuses[agent_id].is_online = is_online
-        state.agent_statuses[agent_id].last_seen = current_time_str
-        state.agent_statuses[agent_id].agent_name = agent_name # Update name if changed
-        logger.debug(f"Updated status for agent {agent_name} ({agent_id}): online={is_online}")
-    else:
-        # Add new agent
-        state.agent_statuses[agent_id] = AgentStatus(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            is_online=is_online,
-            last_seen=current_time_str
-        )
-        logger.info(f"Added new agent status for {agent_name} ({agent_id}): online={is_online}")
-    
-    # No broadcast here, broadcast is handled by services or handlers
+    """Update the status of an agent in the state."""
+    current_time = datetime.now().isoformat()
+    agent_status = AgentStatus(
+        agent_id=agent_id,
+        agent_name=agent_name,
+        is_online=is_online,
+        last_seen=current_time
+    )
+    state.agent_statuses[agent_id] = agent_status
+    logger.info(f"Updated agent status: {agent_id} ({agent_name}) - Online: {is_online}")
 
 def mark_agent_offline(agent_id: str):
     """Marks an agent as offline if they exist."""
@@ -196,7 +202,26 @@ async def handle_agent_disconnection(agent_id: str) -> bool:
     return disconnected # Return true if connection was removed or agent was marked offline
 
 def handle_pong(agent_id: str):
-    """Handles a PONG message received from an agent."""
+    """Handles a PONG message received from an agent or broker."""
+    if agent_id.startswith("broker_"):
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with state.broker_status_lock:
+            if agent_id not in state.broker_statuses:
+                state.broker_statuses[agent_id] = {
+                    "is_online": False,
+                    "last_seen": None
+                }
+            was_offline = not state.broker_statuses[agent_id]["is_online"]
+            state.broker_statuses[agent_id]["is_online"] = True
+            state.broker_statuses[agent_id]["last_seen"] = current_time_str
+            
+        logger.info(f"Received PONG from broker {agent_id}. Updated last_seen.")
+        if was_offline:
+            logger.info(f"Broker {agent_id} is back online after PONG.")
+            # Using create_task to avoid blocking the caller
+            asyncio.create_task(broadcast_agent_status())
+        return
+        
     if agent_id in state.agent_statuses:
         current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         state.agent_statuses[agent_id].last_seen = current_time_str
@@ -204,7 +229,7 @@ def handle_pong(agent_id: str):
         was_offline = not state.agent_statuses[agent_id].is_online
         state.agent_statuses[agent_id].is_online = True
         
-        logger.debug(f"Received PONG from agent {agent_id}. Updated last_seen.")
+        logger.info(f"Received PONG from agent {agent_id}. Updated last_seen.")
         
         # If agent was marked offline, trigger an immediate status broadcast
         if was_offline:

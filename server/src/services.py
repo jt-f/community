@@ -13,6 +13,18 @@ import rabbitmq_utils
 import agent_manager
 # No longer need to import websocket_handler
 
+# Import the publish_to_agent_queue function
+from rabbitmq_utils import publish_to_agent_queue
+
+# Create shutdown event for graceful service termination
+shutdown_event = asyncio.Event()
+
+# Create lock for thread-safe access to agent connections
+agent_connections_lock = asyncio.Lock()
+
+# Use the same ping interval as configured for agents
+PING_INTERVAL = config.AGENT_PING_INTERVAL
+
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
@@ -37,6 +49,8 @@ async def _safe_send_websocket(ws: WebSocket, payload_str: str, client_desc: str
         True if send was successful, False otherwise.
     """
     try:
+        # Don't check client_state since FastAPI WebSocket objects actually
+        # use a different attribute that's not directly accessible
         await ws.send_text(payload_str)
         logger.debug(f"Successfully sent message to {client_desc}")
         return True
@@ -53,15 +67,21 @@ async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_de
     frontend_count = len(state.frontend_connections)
     if frontend_count > 0:
         logger.info(f"Broadcasting {message_type} from {origin_desc} to {frontend_count} frontend clients.")
-        # Iterate over a copy in case the set is modified during iteration
+        # Iterate over a copy of the set to avoid modification during iteration
         for fe_ws in list(state.frontend_connections):
-            fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
+            # Get the client_id for better logging
+            fe_client_id = getattr(fe_ws, 'client_id', '?')
+            fe_client_desc = f"frontend client {fe_client_id}"
+                
             if not await _safe_send_websocket(fe_ws, payload_str, fe_client_desc):
                 disconnected_frontend.add(fe_ws)
+        
         # Clean up disconnected frontends immediately
         if disconnected_frontend:
             state.frontend_connections -= disconnected_frontend
             logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
+    else:
+        logger.info("No frontend clients connected, skipping broadcast.")
 
 async def _handle_broadcast(payload_str: str, response_data: dict) -> bool:
     """Handles broadcasting a message to all connected clients and agents."""
@@ -166,17 +186,26 @@ async def forward_response_to_client(response_data: dict):
     
     For messages with a receiver_id that matches an agent,
     routes to that agent's queue for message processing.
-    
+
     ALL messages are broadcast to all frontends for monitoring,
     regardless of message type.
     """
     # Prepare the message payload once (without internal routing keys)
     logger.info(f"Forward response to client: {response_data}")
     message_to_send = _prepare_message_for_client(response_data)
+    
+    # Special handling for error messages coming from the broker
+    if message_to_send.get("message_type") == MessageType.ERROR and message_to_send.get("sender_id") == "BrokerService":
+        original_client_id = response_data.get("_client_id")
+        if original_client_id:
+            # Update the receiver_id to target the original client that sent the message
+            message_to_send["receiver_id"] = original_client_id
+            logger.info(f"Redirecting error message to original sender: {original_client_id}")
+    
     payload_str = json.dumps(message_to_send)
     needs_agent_status_broadcast = False
     message_type_str = response_data.get("message_type", "unknown type")
-    receiver_id = response_data.get("receiver_id")
+    receiver_id = message_to_send.get("receiver_id")  # Use the potentially modified receiver_id
     sender_id = response_data.get("sender_id", "unknown")
 
     try:
@@ -189,7 +218,6 @@ async def forward_response_to_client(response_data: dict):
         # If receiver is an agent, publish to that agent's queue for processing
         if receiver_id and receiver_id in state.agent_statuses and state.agent_statuses[receiver_id].is_online:
             # Use the helper function to publish to the agent's queue
-            from rabbitmq_utils import publish_to_agent_queue
             if publish_to_agent_queue(receiver_id, response_data):
                 logger.info(f"Routed message from {sender_id} to agent {receiver_id}'s queue")
             else:
@@ -226,31 +254,54 @@ async def forward_response_to_client(response_data: dict):
     except Exception as e:
         logger.exception(f"Unexpected error routing message type {message_type_str}: {e}")
 
-async def process_message(channel, method, properties, body):
-    """Callback to process a message received from the BROKER_OUTPUT_QUEUE."""
+async def process_message(message_data):
+    """Process messages received from the broker_output_queue."""
     try:
-        response_data = json.loads(body.decode('utf-8')) # Decode body
-        logger.info(f"Received message from broker: {response_data.get('message_type', 'unknown type')} to {response_data.get('receiver_id', 'unknown')}")
+        message_type = message_data.get("message_type")
+        sender_id = message_data.get("sender_id", "unknown")
+        receiver_id = message_data.get("receiver_id")
         
-        # Forward messages to appropriate destinations
-        await forward_response_to_client(response_data)
+        logger.info(f"Processing message from {sender_id} with type {message_type}")
         
-        # Acknowledge message processing to RabbitMQ
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-
-    except json.JSONDecodeError:
-        logger.error(f"Invalid JSON received from broker output queue: {body}")
-        # Reject message, don't requeue bad JSON
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        # Handle different message types
+        # REMOVED Handling for REQUEST_AGENT_STATUS from queue
+        # if message_type == MessageType.REQUEST_AGENT_STATUS:
+        #     ...
+        
+        # If this is a message intended for an agent
+        if receiver_id and receiver_id in state.agent_statuses:
+            # The message has a specific receiver, check if it's an agent
+            if state.agent_statuses[receiver_id].is_online:
+                # Agent is online, publish to their queue
+                if publish_to_agent_queue(receiver_id, message_data):
+                    logger.info(f"Published message to agent {receiver_id}'s queue")
+                else:
+                    logger.error(f"Failed to publish message to agent {receiver_id}'s queue")
+                
+                # If this is a chat message, also broadcast to frontends for monitoring
+                if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+                    logger.debug(f"Broadcasting {message_type} message to frontends for monitoring")
+                    await _broadcast_to_frontends(json.dumps(message_data))
+            else:
+                logger.warning(f"Message for agent {receiver_id}, but agent is offline")
+                # Send error back to sender
+                error_response = {
+                    "message_type": MessageType.ERROR,
+                    "sender_id": "server",
+                    "receiver_id": sender_id,
+                    "text_payload": f"Agent {receiver_id} is offline. Message could not be delivered."
+                }
+                await forward_response_to_client(error_response)
+        else:
+            # Otherwise, broadcast message to all frontends
+            await forward_response_to_client(message_data)
     except Exception as e:
-        logger.exception(f"Error processing message from broker output queue: {e}") # Log traceback
-        # Reject message, possibly requeue depending on error?
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        logger.error(f"Error processing message from broker_output_queue: {e}")
+        logger.exception(e)
 
 
 async def response_consumer():
     """Service that consumes messages from the BROKER_OUTPUT_QUEUE."""
-    logger.info("Starting response consumer service...")
     channel = None
     while True:
         try:
@@ -266,7 +317,7 @@ async def response_consumer():
             # Define the callback for received messages
             def callback_wrapper(ch, method, properties, body):
                 # Run the async process_message in the main event loop
-                asyncio.create_task(process_message(ch, method, properties, body))
+                asyncio.create_task(process_message(json.loads(body.decode('utf-8'))))
             
             channel.basic_consume(queue=config.BROKER_OUTPUT_QUEUE, on_message_callback=callback_wrapper)
             
@@ -301,83 +352,61 @@ async def response_consumer():
 # --- Agent Ping Service --- 
 
 async def agent_ping_service():
-    """Service to periodically ping agents via WebSocket and mark inactive ones as offline."""
-    logger.info("Starting agent ping service...")
-    while True:
+    """Periodically pings all connected agents and brokers to check their status."""
+    while not shutdown_event.is_set():
         try:
-            current_time = datetime.now()
-            agents_to_ping = list(state.agent_connections.keys()) # Ping currently connected agents via WebSocket
+            # Get list of current agents and brokers
+            async with agent_connections_lock:
+                current_agents = list(state.agent_connections.items())
+                current_brokers = list(state.broker_connections.items())
+            
+            # Ping all agents
             disconnected_agents = set()
-
-            # 1. Send PING to all connected agents via WebSocket (maintain real-time status updates)
-            for agent_id in agents_to_ping:
-                ws = state.agent_connections.get(agent_id)
-                if not ws:
-                    continue # Agent disconnected between getting keys and now
+            for agent_id, ws in current_agents:
                 try:
-                    ping_message = {
-                        "message_type": MessageType.PING,
-                        "timestamp": current_time.isoformat() # Use ISO format
-                    }
-                    await ws.send_text(json.dumps(ping_message))
-                    logger.debug(f"Sent PING to agent {agent_id} via WebSocket")
+                    logger.info(f"Pinging agent {agent_id}")
+                    await ws.send_text(json.dumps({"message_type": MessageType.PING}))
                 except Exception as e:
-                    logger.error(f"Error sending PING to agent {agent_id}: {e}. Marking for disconnect.")
+                    logger.error(f"Error sending PING to agent {agent_id}: {e}")
                     disconnected_agents.add(agent_id)
             
-            # Clean up agents that failed ping send
+            # Ping all brokers
+            disconnected_brokers = set()
+            for broker_id, ws in current_brokers:
+                try:
+                    logger.info(f"Pinging broker {broker_id}")
+                    await ws.send_text(json.dumps({"message_type": MessageType.PING}))
+                except Exception as e:
+                    logger.error(f"Error sending PING to broker {broker_id}: {e}")
+                    disconnected_brokers.add(broker_id)
+            
+            # Mark disconnected agents as offline
             if disconnected_agents:
-                needs_broadcast = False
-                for agent_id in disconnected_agents:
-                    # Use the centralized handler
-                    if await agent_manager.handle_agent_disconnection(agent_id):
-                         needs_broadcast = True # Set flag if any disconnect was handled
-                if needs_broadcast:
-                    await agent_manager.broadcast_agent_status()
-
-            # 2. Check for agents that haven't responded (based on last_seen)
-            agents_marked_offline = set()
-            # Iterate over a copy of agent_statuses items
-            for agent_id, status in list(state.agent_statuses.items()):
-                 # Only check agents that are supposed to be online
-                 if status.is_online:
-                    try:
-                        last_seen_time = datetime.fromisoformat(status.last_seen)
-                        time_diff = (current_time - last_seen_time).total_seconds()
-                        
-                        if time_diff > config.AGENT_INACTIVITY_TIMEOUT:
-                            logger.warning(f"Agent {status.agent_name} ({agent_id}) timed out (last seen {time_diff:.1f}s ago). Marking offline.")
-                            # Use centralized handler (will mark offline and remove connection)
-                            await agent_manager.handle_agent_disconnection(agent_id)
-                            agents_marked_offline.add(agent_id)
-                            # Also remove from active connections if still present
-                            if agent_id in state.agent_connections:
-                                 logger.warning(f"Removing timed-out agent {agent_id} from active connections.")
-                                 # Attempt to close websocket gracefully?
-                                 try: await state.agent_connections[agent_id].close(code=1011, reason="Inactivity timeout") 
-                                 except: pass
-                                 del state.agent_connections[agent_id]
-                                 
-                    except ValueError:
-                         logger.error(f"Invalid last_seen format for agent {agent_id}: {status.last_seen}")
-                    except Exception as e:
-                         logger.exception(f"Error checking inactivity for agent {agent_id}: {e}")
+                async with agent_connections_lock:
+                    for agent_id in disconnected_agents:
+                        if agent_id in state.agent_connections:
+                            del state.agent_connections[agent_id]
+                        agent_manager.mark_agent_offline(agent_id)
+                        logger.info(f"Marked agent {agent_id} as offline due to ping failure")
             
-            # 3. Broadcast status if any agents were marked offline due to timeout
-            if agents_marked_offline:
+            # Remove disconnected brokers
+            if disconnected_brokers:
+                async with agent_connections_lock:
+                    for broker_id in disconnected_brokers:
+                        if broker_id in state.broker_connections:
+                            del state.broker_connections[broker_id]
+                            logger.info(f"Removed broker {broker_id} due to ping failure")
+            
+            # Broadcast status update if needed
+            if disconnected_agents or disconnected_brokers:
+                logger.info("Triggering agent status broadcast via WebSocket after handling disconnections")
                 await agent_manager.broadcast_agent_status()
-
-            # Wait for the next cycle
-            await asyncio.sleep(config.AGENT_PING_INTERVAL)
             
-        except asyncio.CancelledError:
-            logger.info("Agent ping service task cancelled.")
-            raise # Re-raise cancellation
         except Exception as e:
-            logger.exception(f"Unexpected error in agent ping service: {e}. Continuing after 5s...")
-            await asyncio.sleep(5) # Avoid rapid failure loops
+            logger.error(f"Error in agent ping service: {e}")
 
-    logger.info("Agent ping service stopped.") # Should not happen
+        # Wait for next ping cycle
+        await asyncio.sleep(PING_INTERVAL)
 
 
 # --- Periodic Status Broadcast Service --- 
@@ -404,6 +433,79 @@ async def periodic_status_broadcast():
     logger.info("Periodic status broadcast service stopped.") # Should not happen
 
 
+# --- Server Heartbeat Service ---
+
+async def server_heartbeat_service():
+    """Service to periodically send heartbeat messages to all connected clients."""
+    logger.info("Starting server heartbeat service...")
+    while not shutdown_event.is_set():
+        try:
+            heartbeat_message = {
+                "message_type": MessageType.SERVER_HEARTBEAT,
+                "timestamp": datetime.now().isoformat(),
+                "sender_id": "server"
+            }
+            
+            heartbeat_str = json.dumps(heartbeat_message)
+            
+            # Count clients
+            frontend_count = len(state.frontend_connections)
+            agent_count = len(state.agent_connections)
+            broker_count = len(state.broker_connections)
+            
+            logger.debug(f"Sending heartbeat to {frontend_count} frontends, {agent_count} agents, {broker_count} brokers")
+            
+            # Send to all frontends
+            disconnected_frontends = set()
+            for fe_ws in list(state.frontend_connections):
+                fe_client_id = getattr(fe_ws, 'client_id', '?')
+                if not await _safe_send_websocket(fe_ws, heartbeat_str, f"frontend {fe_client_id}"):
+                    disconnected_frontends.add(fe_ws)
+            
+            # Send to all agents
+            disconnected_agents = set()
+            for agent_id, agent_ws in list(state.agent_connections.items()):
+                if not await _safe_send_websocket(agent_ws, heartbeat_str, f"agent {agent_id}"):
+                    disconnected_agents.add(agent_id)
+            
+            # Send to all brokers
+            disconnected_brokers = set()
+            for broker_id, broker_ws in list(state.broker_connections.items()):
+                if not await _safe_send_websocket(broker_ws, heartbeat_str, f"broker {broker_id}"):
+                    disconnected_brokers.add(broker_id)
+            
+            # Handle disconnected clients
+            if disconnected_frontends:
+                state.frontend_connections -= disconnected_frontends
+                logger.info(f"Removed {len(disconnected_frontends)} disconnected frontend clients during heartbeat")
+            
+            async with agent_connections_lock:
+                for agent_id in disconnected_agents:
+                    if agent_id in state.agent_connections:
+                        del state.agent_connections[agent_id]
+                    agent_manager.mark_agent_offline(agent_id)
+                
+                for broker_id in disconnected_brokers:
+                    if broker_id in state.broker_connections:
+                        del state.broker_connections[broker_id]
+            
+            # Broadcast agent status if any agents were disconnected
+            if disconnected_agents:
+                await agent_manager.broadcast_agent_status()
+            
+            # Wait for next heartbeat interval
+            await asyncio.sleep(10)  # Send heartbeat every 10 seconds
+            
+        except asyncio.CancelledError:
+            logger.info("Server heartbeat service task cancelled.")
+            break
+        except Exception as e:
+            logger.exception(f"Error in server heartbeat service: {e}")
+            await asyncio.sleep(5)  # Wait a bit before retrying
+    
+    logger.info("Server heartbeat service stopped.")
+
+
 # --- Service Management --- 
 
 async def start_services():
@@ -418,9 +520,12 @@ async def start_services():
     service_tasks = [
         asyncio.create_task(response_consumer(), name="ResponseConsumer"),
         asyncio.create_task(agent_ping_service(), name="AgentPingService"),
-        asyncio.create_task(periodic_status_broadcast(), name="PeriodicStatusBroadcast")
+        asyncio.create_task(periodic_status_broadcast(), name="PeriodicStatusBroadcast"),
+        asyncio.create_task(server_heartbeat_service(), name="ServerHeartbeat")
     ]
-    logger.info(f"Started {len(service_tasks)} background services.")
+    logger.info(f"Started {len(service_tasks)} background services:")
+    for task in service_tasks:
+        logger.info(f"  - {task.get_name()}")
     # No need to await tasks here, they run in the background
 
 async def stop_services():

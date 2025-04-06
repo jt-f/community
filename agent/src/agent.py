@@ -83,13 +83,12 @@ class Agent:
             return False
             
         try:
-            # Create registration message
-            registration_message = AgentRegistrationMessage(
-                agent_id=self.agent_id,
-                agent_name=self.agent_name,
-                message_type=MessageType.REGISTER_AGENT
-            )
-            await self.websocket.send(json.dumps(registration_message.to_dict()))
+            # Create registration message with just the name
+            registration_message = {
+                "message_type": MessageType.REGISTER_AGENT,
+                "agent_name": self.agent_name
+            }
+            await self.websocket.send(json.dumps(registration_message))
             logger.info(f"Sent registration request to server")
 
             # Wait for confirmation response
@@ -98,20 +97,16 @@ class Agent:
             logger.info(f"Registration response: {response_data}")
             
             # Process response
-            success = response_data.get("status") == ResponseStatus.SUCCESS
-            message = response_data.get("message", "No message provided")
-            
-            # Get queue name if provided (otherwise use default)
-            if "queue_name" in response_data:
-                self.queue_name = response_data["queue_name"]
-                logger.info(f"Using queue name from server: {self.queue_name}")
-
-            if success:
-                logger.info(f"Agent {self.agent_name} successfully registered with server")
+            if (response_data.get("message_type") == MessageType.REGISTER_AGENT_RESPONSE and 
+                response_data.get("status") == ResponseStatus.SUCCESS):
+                # Store the assigned agent ID
+                self.agent_id = response_data["agent_id"]
+                logger.info(f"Agent {self.agent_name} successfully registered with ID: {self.agent_id}")
                 self.is_registered = True
                 return True
             else:
-                logger.error(f"Registration failed: {message}")
+                error_msg = response_data.get("text_payload", "Unknown error during registration")
+                logger.error(f"Registration failed: {error_msg}")
                 return False
                 
         except Exception as e:

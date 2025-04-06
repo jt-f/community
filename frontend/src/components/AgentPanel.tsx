@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { AgentStatusUpdateMessage, MessageType } from '../types/message';
 import { useAgentStore } from '../store/agentStore';
+import { WebSocketContext } from './ChatUI';
 
 interface AgentPanelProps {
   wsRef: React.MutableRefObject<WebSocket | null>;
@@ -10,40 +11,15 @@ interface AgentPanelProps {
 export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
   const { agents, updateAgents, getOnlineAgents, getOfflineAgents } = useAgentStore();
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const { lastMessage } = useContext(WebSocketContext);
 
-  // Setup websocket message handler for agent status updates
+  // Process messages from WebSocketContext
   useEffect(() => {
-    if (!isConnected || !wsRef.current) {
-      console.log('AgentPanel: WebSocket not connected or ready, skipping message handler setup');
-      return;
+    if (lastMessage && lastMessage.message_type === MessageType.AGENT_STATUS_UPDATE) {
+      console.log('AgentPanel: Received agent status update from context:', lastMessage);
+      updateAgents(lastMessage.agents, lastMessage.is_full_update);
     }
-
-    console.log('AgentPanel: Setting up message handler for connected WebSocket');
-    
-    const ws = wsRef.current;
-
-    const handleMessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        // Only process agent status update messages
-        if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
-          const statusUpdate = data as AgentStatusUpdateMessage;
-          updateAgents(statusUpdate.agents);
-        }
-      } catch (error) {
-        console.error('AgentPanel: Error processing message:', error);
-      }
-    };
-
-    ws.addEventListener('message', handleMessage);
-    console.log('AgentPanel: Message handler added to WebSocket');
-
-    return () => {
-      console.log('AgentPanel: Removing message handler from WebSocket');
-      ws.removeEventListener('message', handleMessage);
-    };
-  }, [wsRef, isConnected, updateAgents]);
+  }, [lastMessage, updateAgents]);
 
   // Log current agents state
   useEffect(() => {

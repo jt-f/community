@@ -14,7 +14,9 @@ class MessageType(str, Enum):
     REGISTER_AGENT = "REGISTER_AGENT"
     REGISTER_AGENT_RESPONSE = "REGISTER_AGENT_RESPONSE"
     REGISTER_BROKER = "REGISTER_BROKER"
+    REGISTER_BROKER_RESPONSE = "REGISTER_BROKER_RESPONSE"
     REGISTER_FRONTEND = "REGISTER_FRONTEND"
+    REGISTER_FRONTEND_RESPONSE = "REGISTER_FRONTEND_RESPONSE"
     REQUEST_AGENT_STATUS = "REQUEST_AGENT_STATUS"
     REPLY = "REPLY"
     SERVER_AVAILABLE = "SERVER_AVAILABLE"
@@ -30,7 +32,6 @@ class ResponseStatus(str, Enum):
 class ChatMessage(BaseModel):
     message_id: str
     sender_id: str
-    receiver_id: str
     text_payload: str
     send_timestamp: str
     message_type: MessageType
@@ -40,7 +41,6 @@ class ChatMessage(BaseModel):
     def create(
         cls,
         sender_id: str,
-        receiver_id: str,
         text_payload: str,
         message_type: MessageType = MessageType.TEXT,
         in_reply_to_message_id: Optional[str] = None
@@ -48,7 +48,6 @@ class ChatMessage(BaseModel):
         return cls(
             message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=6)),
             sender_id=sender_id,
-            receiver_id=receiver_id,
             text_payload=text_payload,
             send_timestamp=datetime.now().strftime("%H:%M:%S"),
             message_type=message_type,
@@ -60,7 +59,6 @@ class ChatMessage(BaseModel):
         return {
             "message_id": self.message_id,
             "sender_id": self.sender_id,
-            "receiver_id": self.receiver_id,
             "text_payload": self.text_payload,
             "send_timestamp": self.send_timestamp,
             "message_type": self.message_type,
@@ -73,7 +71,6 @@ class ChatMessage(BaseModel):
         return cls(
             message_id=data.get("message_id", ""),
             sender_id=data.get("sender_id", ""),
-            receiver_id=data.get("receiver_id", ""),
             text_payload=data.get("text_payload", ""),
             send_timestamp=data.get("send_timestamp", ""),
             message_type=data.get("message_type", MessageType.TEXT),
@@ -129,14 +126,13 @@ class AgentRegistrationResponse(BaseModel):
             message_type=data.get("message_type", MessageType.REGISTER_AGENT_RESPONSE)
         )
 
-def create_text_message(sender_id: str, receiver_id: str, text_payload: str, 
+def create_text_message(sender_id: str, text_payload: str, 
                         in_reply_to_message_id: Optional[str] = None,
                         message_type: MessageType = MessageType.TEXT) -> ChatMessage:
     """Helper function to create a new text message."""
     return ChatMessage(
         message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
         sender_id=sender_id,
-        receiver_id=receiver_id,
         text_payload=text_payload,
         send_timestamp=datetime.now().isoformat(),
         message_type=message_type,
@@ -148,7 +144,6 @@ def create_reply_message(original_message: ChatMessage, sender_id: str, text_pay
     return ChatMessage(
         message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
         sender_id=sender_id,
-        receiver_id=original_message.sender_id,  # Reply goes back to the original sender
         text_payload=text_payload,
         send_timestamp=datetime.now().isoformat(),
         message_type=MessageType.REPLY,
