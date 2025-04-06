@@ -105,19 +105,6 @@ export function ChatUI({ userId }: ChatUIProps) {
           timestamp: new Date().toISOString()
         };
         ws.send(JSON.stringify(registerMessage));
-        
-        // Set up a ping interval to keep the connection alive
-        const pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            console.log("Sending ping to keep connection alive");
-            ws.send(JSON.stringify({ message_type: "PING" }));
-          } else {
-            clearInterval(pingInterval);
-          }
-        }, 30000); // Send ping every 30 seconds
-        
-        // Clear interval when connection closes
-        ws.addEventListener('close', () => clearInterval(pingInterval));
       };
       
       ws.onmessage = handleWebSocketMessage;

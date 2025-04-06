@@ -2,6 +2,15 @@ from typing import Dict, Set, Optional
 from fastapi import WebSocket
 import pika
 import asyncio
+import logging
+
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("state")
 
 # Import shared models only for type hints if necessary, avoid circular dependencies
 from shared_models import AgentStatus

@@ -8,7 +8,13 @@ from datetime import datetime
 import config
 import state
 
-logger = logging.getLogger(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("rabbitmq_utils")
 
 def get_rabbitmq_connection() -> Optional[pika.BlockingConnection]:
     """Gets or establishes a RabbitMQ connection."""

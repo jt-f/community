@@ -131,23 +131,33 @@ def handle_incoming_message(channel, method, properties, body):
 
 def handle_agent_status_update(message_data):
     """Process agent status updates received via WebSocket."""
+    log.info(f"[DEBUG] Received agent status update: {message_data}")
+    
     if message_data.get("message_type") != MessageType.AGENT_STATUS_UPDATE:
         log.warning(f"Received non-status update message in status handler: {message_data.get('message_type')}")
         return
     
     agents_data = message_data.get("agents", [])
+    is_full_update = message_data.get("is_full_update", False)
+    
     if not agents_data:
-        log.info("Received empty agent status update.")
+        log.info("[DEBUG] Received empty agent status update.")
         return
         
-    log.info(f"Processing status update for {len(agents_data)} agents via WebSocket")
+    log.info(f"[DEBUG] Processing status update for {len(agents_data)} agents via WebSocket (is_full_update={is_full_update})")
+    
+    # If this is a full update, we could optionally clear our previous state
+    if is_full_update:
+        log.info("[DEBUG] This is a full update - current registered agents before update: " + 
+                json.dumps({id: {"name": info["name"], "is_online": info["is_online"]} 
+                          for id, info in registered_agents.items()}))
     
     updated_ids = set()
     # Update our internal state with the current agent statuses
     for agent in agents_data:
         agent_id = agent.get("agent_id")
         if not agent_id:
-            log.warning("Received agent status entry with no ID")
+            log.warning("[DEBUG] Received agent status entry with no ID")
             continue
         
         updated_ids.add(agent_id)
@@ -161,29 +171,44 @@ def handle_agent_status_update(message_data):
                 "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "is_online": is_online
             }
-            log.info(f"Added new agent from status update: {agent_name} ({agent_id}), Online: {is_online}")
+            log.info(f"[DEBUG] Added new agent from status update: {agent_name} ({agent_id}), Online: {is_online}")
         else:
             # Update existing agent's online status if it changed
             if registered_agents[agent_id].get("is_online") != is_online:
+                old_status = registered_agents[agent_id].get("is_online")
                 registered_agents[agent_id]["is_online"] = is_online
-                log.info(f"Updated agent status: {agent_name} ({agent_id}), Online: {is_online}")
+                log.info(f"[DEBUG] Updated agent status: {agent_name} ({agent_id}), Online status changed: {old_status} -> {is_online}")
             # Optionally update name if it changed
             if registered_agents[agent_id].get("name") != agent_name:
-                 registered_agents[agent_id]["name"] = agent_name
-                 log.info(f"Updated agent name: {agent_id} to {agent_name}")
-
+                old_name = registered_agents[agent_id].get("name")
+                registered_agents[agent_id]["name"] = agent_name
+                log.info(f"[DEBUG] Updated agent name: {agent_id} from '{old_name}' to '{agent_name}'")
+    
     # If it was a full update, mark any agents not in the update as offline
-    if message_data.get("is_full_update", False):
-        log.info("Processing full status update - marking missing agents as offline.")
+    if is_full_update:
+        log.info("[DEBUG] Processing full status update - marking missing agents as offline")
         agents_to_mark_offline = set(registered_agents.keys()) - updated_ids
         for agent_id in agents_to_mark_offline:
             if registered_agents[agent_id].get("is_online", False):
                 registered_agents[agent_id]["is_online"] = False
-                log.info(f"Marked agent {registered_agents[agent_id].get('name', agent_id)} ({agent_id}) as offline (not in full update).")
-            
-    # Log the current state of agents
-    online_count = sum(1 for agent in registered_agents.values() if agent.get("is_online", False))
-    log.info(f"Agent status updated: {online_count} agents online out of {len(registered_agents)} total registered.")
+                log.info(f"[DEBUG] Marked agent {registered_agents[agent_id].get('name', agent_id)} ({agent_id}) as offline (not in full update)")
+    
+    # Log the final state after processing
+    online_agents = [agent_id for agent_id, info in registered_agents.items() if info.get("is_online", False)]
+    log.info(f"[DEBUG] After status update: Total agents: {len(registered_agents)}, Online agents: {len(online_agents)}")
+    log.info(f"[DEBUG] Online agents: {online_agents}")
+    
+    # Removed update to undefined agent_statuses
+    # agent_statuses.update({id: info["is_online"] for id, info in registered_agents.items()})
+    
+    # Commented out block using undefined wait_for_online_callbacks
+    # if online_agents and any(id in online_agents for id in wait_for_online_callbacks):
+    #     log.info(f"[DEBUG] Notifying wait_for_online callbacks for newly online agents")
+    #     for agent_id in list(wait_for_online_callbacks.keys()):
+    #         if agent_id in online_agents:
+    #             callbacks = wait_for_online_callbacks.pop(agent_id, [])
+    #             for callback in callbacks:
+    #                 callback()
 
 def handle_control_message(channel, method, properties, body):
     """Handle control messages for the broker."""
@@ -277,7 +302,7 @@ def route_message(message_data):
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
 
-    log.info(f"Routing message from {sender_id} type={message_type}")
+    log.info(f"[DEBUG] Routing message from {sender_id} type={message_type}")
     
     # Create a clean copy of the message for routing
     outgoing_message = dict(message_data)
@@ -291,13 +316,21 @@ def route_message(message_data):
     original_text = message_data.get("text_payload", "")
     truncated_text = (original_text[:20] + '...') if len(original_text) > 20 else original_text
 
+    # Thoroughly log the state of all agents
+    log.info(f"[DEBUG] All registered agents: {json.dumps(registered_agents)}")
+    
+    # Log all agent statuses
+    for agent_id, info in registered_agents.items():
+        log.info(f"[DEBUG] Agent {agent_id}: name={info.get('name', 'unknown')}, is_online={info.get('is_online', False)}")
+    
     # Get list of online agents, EXCLUDING the sender if it's an agent
     online_agents = [
         agent_id for agent_id, info in registered_agents.items()
         if info.get("is_online", False) and agent_id != sender_id  # Exclude the sender
     ]
 
-    log.info(f"Online agents: {online_agents}")
+    log.info(f"[DEBUG] Online agents (excluding sender): {online_agents}")
+    
     if online_agents:
         # Randomly select an agent (that is not the sender)
         chosen_agent_id = random.choice(online_agents)
@@ -306,8 +339,8 @@ def route_message(message_data):
         outgoing_message["receiver_id"] = chosen_agent_id
         
         # Send the message
+        log.info(f"Randomly routing message '{truncated_text}' from {sender_id} to agent {chosen_agent_id}")
         publish_to_broker_output_queue(outgoing_message)
-        log.info(f"Randomly routed message '{truncated_text}' from {sender_id} to agent {chosen_agent_id}")
         return
     else:
         # Count how many total online agents we have
@@ -315,6 +348,8 @@ def route_message(message_data):
             agent_id for agent_id, info in registered_agents.items()
             if info.get("is_online", False)
         ]
+        
+        log.info(f"[DEBUG] All online agents (including sender): {all_online_agents}")
         
         # If sender is the only online agent
         if sender_id in all_online_agents and len(all_online_agents) == 1:
@@ -324,21 +359,21 @@ def route_message(message_data):
             error_response = {
                 "message_type": MessageType.ERROR,
                 "sender_id": "BrokerService", # Keep sender as Broker
-                "receiver_id": "server",
-                "text_payload": f"Only the sending agent {agent_name} ({sender_id}) is online. Cannot route message '{truncated_text}' to another agent."
+                "receiver_id": "Server",     # Send error back to the server
+                "text_payload": f"The sender is the only online agent. No other agents are available to receive the message."
             }
             publish_to_broker_output_queue(error_response)
             return
         else:
-            # No online agents available or sender isn't an agent
+            # No online agents available
             error_response = {
                 "message_type": MessageType.ERROR,
                 "sender_id": "BrokerService", # Keep sender as Broker
-                "receiver_id": "server",
-                "text_payload": f"No online agents available to handle the message '{truncated_text}'."
+                "receiver_id": sender_id if sender_id != "unknown" else "server",
+                "text_payload": f"No online agents available to handle the message."
             }
             publish_to_broker_output_queue(error_response)
-            log.warning(f"Could not route message '{truncated_text}' from {sender_id}: No other online agents found")
+            log.warning(f"Could not route message '{truncated_text}' from {sender_id}: No online agents found")
             return
 
 async def websocket_listener():
@@ -378,11 +413,11 @@ async def websocket_listener():
                         
                         if message_type == MessageType.AGENT_STATUS_UPDATE:
                             handle_agent_status_update(message_data)
-                        elif message_type == MessageType.PING:
-                            # Respond to PING from server
+                        elif message_type in [MessageType.PING, MessageType.SERVER_HEARTBEAT]: # Respond to both PING and HEARTBEAT
+                            # Respond to PING/HEARTBEAT from server
                             pong_message = {"message_type": MessageType.PONG}
                             await websocket.send(json.dumps(pong_message))
-                            log.debug("Sent PONG to server")
+                            log.info(f"Received {message_type}, sent PONG to server")
                         elif message_type == MessageType.ERROR:
                             # Server might send ERROR if it doesn't handle our PING; ignore it.
                             log.debug(f"Received ERROR message via WebSocket, likely due to PING: {message_data.get('text_payload')}")

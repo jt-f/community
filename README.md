@@ -5,7 +5,7 @@ http://localhost:15672/#/
 
 # Websocket server
 source ~/.bashrc
-poetry run python src/server.py
+poetry run python src/main.py
 
 # frontend
 npm run dev

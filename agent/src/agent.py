@@ -10,7 +10,7 @@ import uuid
 import websockets
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
-
+import time
 
 from shared_models import (
     MessageType,
@@ -88,11 +88,14 @@ class Agent:
                 "message_type": MessageType.REGISTER_AGENT,
                 "agent_name": self.agent_name
             }
+            logger.info(f"Sending registration message to server: {registration_message}")
             await self.websocket.send(json.dumps(registration_message))
             logger.info(f"Sent registration request to server")
 
             # Wait for confirmation response
+            logger.info("Waiting for registration response from server...")
             response = await self.websocket.recv()
+            logger.info(f"Received raw response: {response}")
             response_data = json.loads(response)
             logger.info(f"Registration response: {response_data}")
             
@@ -102,6 +105,8 @@ class Agent:
                 # Store the assigned agent ID
                 self.agent_id = response_data["agent_id"]
                 logger.info(f"Agent {self.agent_name} successfully registered with ID: {self.agent_id}")
+                self.queue_name = f"agent_queue_{self.agent_id}"
+                logger.info(f"Updated queue name to: {self.queue_name}")
                 self.is_registered = True
                 return True
             else:
@@ -173,6 +178,11 @@ class Agent:
             message_id = message_dict.get("message_id", "unknown")
             sender_id = message_dict.get("sender_id", "unknown")
             logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
+            
+            # Introduce a 10-second delay
+            logger.info("Waiting 10 seconds before processing...")
+            time.sleep(10)
+            logger.info("Finished waiting, proceeding with processing.")
             
             # Process the message and generate response
             response = self.generate_response(message_dict)

@@ -51,7 +51,8 @@ const Chat: React.FC<ChatProps> = ({ wsRef, isConnected, userId }) => {
       }
       
       // For non-error messages, only show if not from self
-      if (lastMessage.message_type === MessageType.TEXT && lastMessage.sender_id !== clientId) {
+      if ((lastMessage.message_type === MessageType.TEXT || lastMessage.message_type === MessageType.REPLY) 
+          && lastMessage.sender_id !== clientId) {
         const newMessage: MessageWithAnimation = {
           ...lastMessage,
           isNew: true,

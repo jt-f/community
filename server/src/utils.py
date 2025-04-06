@@ -8,7 +8,13 @@ import state
 import services
 import rabbitmq_utils
 
-logger = logging.getLogger(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("utils")
 
 async def shutdown_server():
     """Initiates the server shutdown sequence."""

@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from 'react';
-import { AgentStatusUpdateMessage, MessageType } from '../types/message';
+import { MessageType } from '../types/message';
 import { useAgentStore } from '../store/agentStore';
 import { WebSocketContext } from './ChatUI';
 
@@ -16,31 +16,24 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
   // Process messages from WebSocketContext
   useEffect(() => {
     if (lastMessage && lastMessage.message_type === MessageType.AGENT_STATUS_UPDATE) {
-      console.log('AgentPanel: Received agent status update from context:', lastMessage);
+      // Only log full updates or when debugging is needed
+      if (lastMessage.is_full_update) {
+        console.log('AgentPanel: Received full agent status update');
+      }
       updateAgents(lastMessage.agents, lastMessage.is_full_update);
     }
   }, [lastMessage, updateAgents]);
 
-  // Log current agents state
-  useEffect(() => {
-    console.log('AgentPanel: Current agents state:', agents);
-    console.log('AgentPanel: Online agents:', getOnlineAgents());
-    console.log('AgentPanel: Offline agents:', getOfflineAgents());
-  }, [agents, getOnlineAgents, getOfflineAgents]);
-
   // Get the agents to display based on selected filter
   const getFilteredAgents = () => {
-    const filtered = selectedFilter === 'online' 
+    return selectedFilter === 'online' 
       ? getOnlineAgents()
       : selectedFilter === 'offline'
         ? getOfflineAgents()
         : agents;
-    console.log('AgentPanel: Filtered agents:', filtered);
-    return filtered;
   };
 
   const filteredAgents = getFilteredAgents();
-  console.log('AgentPanel: Rendering with filtered agents:', filteredAgents);
 
   return (
     <div className="agent-panel">

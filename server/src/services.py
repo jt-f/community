@@ -25,7 +25,13 @@ agent_connections_lock = asyncio.Lock()
 # Use the same ping interval as configured for agents
 PING_INTERVAL = config.AGENT_PING_INTERVAL
 
-logger = logging.getLogger(__name__)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("services")
 
 # --- Helper Functions ---
 
@@ -281,7 +287,7 @@ async def process_message(message_data):
                 # If this is a chat message, also broadcast to frontends for monitoring
                 if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
                     logger.debug(f"Broadcasting {message_type} message to frontends for monitoring")
-                    await _broadcast_to_frontends(json.dumps(message_data))
+                    await _broadcast_to_frontends(json.dumps(message_data), message_type, f"agent {receiver_id}")
             else:
                 logger.warning(f"Message for agent {receiver_id}, but agent is offline")
                 # Send error back to sender
@@ -352,61 +358,53 @@ async def response_consumer():
 # --- Agent Ping Service --- 
 
 async def agent_ping_service():
-    """Periodically pings all connected agents and brokers to check their status."""
+    """Periodically pings all connected agents to check their status."""
     while not shutdown_event.is_set():
         try:
-            # Get list of current agents and brokers
+            # Get list of current agents
             async with agent_connections_lock:
                 current_agents = list(state.agent_connections.items())
-                current_brokers = list(state.broker_connections.items())
             
-            # Ping all agents
             disconnected_agents = set()
-            for agent_id, ws in current_agents:
-                try:
-                    logger.info(f"Pinging agent {agent_id}")
-                    await ws.send_text(json.dumps({"message_type": MessageType.PING}))
-                except Exception as e:
-                    logger.error(f"Error sending PING to agent {agent_id}: {e}")
-                    disconnected_agents.add(agent_id)
-            
-            # Ping all brokers
-            disconnected_brokers = set()
-            for broker_id, ws in current_brokers:
-                try:
-                    logger.info(f"Pinging broker {broker_id}")
-                    await ws.send_text(json.dumps({"message_type": MessageType.PING}))
-                except Exception as e:
-                    logger.error(f"Error sending PING to broker {broker_id}: {e}")
-                    disconnected_brokers.add(broker_id)
+            if not current_agents:
+                logger.debug("Agent ping service: No agents connected, skipping ping cycle.")
+            else:
+                logger.info(f"Agent ping service: Pinging {len(current_agents)} agents...")
+                for agent_id, ws in current_agents:
+                    try:
+                        logger.debug(f"Pinging agent {agent_id}")
+                        await ws.send_text(json.dumps({"message_type": MessageType.PING}))
+                    except Exception as e:
+                        logger.error(f"Error sending PING to agent {agent_id}: {e}")
+                        disconnected_agents.add(agent_id)
             
             # Mark disconnected agents as offline
+            needs_broadcast = False
             if disconnected_agents:
                 async with agent_connections_lock:
                     for agent_id in disconnected_agents:
-                        if agent_id in state.agent_connections:
-                            del state.agent_connections[agent_id]
-                        agent_manager.mark_agent_offline(agent_id)
-                        logger.info(f"Marked agent {agent_id} as offline due to ping failure")
-            
-            # Remove disconnected brokers
-            if disconnected_brokers:
-                async with agent_connections_lock:
-                    for broker_id in disconnected_brokers:
-                        if broker_id in state.broker_connections:
-                            del state.broker_connections[broker_id]
-                            logger.info(f"Removed broker {broker_id} due to ping failure")
+                        # Use the centralized handler which also removes from state.agent_connections
+                        if await agent_manager.handle_agent_disconnection(agent_id):
+                            needs_broadcast = True
+                            logger.info(f"Marked agent {agent_id} as offline due to ping failure")
             
             # Broadcast status update if needed
-            if disconnected_agents or disconnected_brokers:
-                logger.info("Triggering agent status broadcast via WebSocket after handling disconnections")
-                await agent_manager.broadcast_agent_status()
+            if needs_broadcast:
+                logger.info("Triggering agent status broadcast via WebSocket after handling ping failures")
+                asyncio.create_task(agent_manager.broadcast_agent_status())
             
+        except asyncio.CancelledError:
+            logger.info("Agent ping service task cancelled.")
+            break # Exit the loop if cancelled
         except Exception as e:
             logger.error(f"Error in agent ping service: {e}")
 
         # Wait for next ping cycle
-        await asyncio.sleep(PING_INTERVAL)
+        try:
+            await asyncio.sleep(PING_INTERVAL)
+        except asyncio.CancelledError:
+            logger.info("Agent ping service cancelled during sleep.")
+            break
 
 
 # --- Periodic Status Broadcast Service --- 
