@@ -1,34 +1,95 @@
-# WebSocket Chat Application
+# Frontend
 
-A real-time chat application built with React, TypeScript, and Vite that connects to a WebSocket server.
+This is the web-based frontend client for the Agent Communication System. It provides a real-time chat interface and displays the status of connected agents.
+
+Built with React, TypeScript, and Vite.
+
+## Features
+
+-   **Real-time Chat:** Connects to the server via WebSocket for sending and receiving chat messages.
+-   **Agent Status Panel:** Displays a list of registered agents and their online/offline status, updated in real-time.
+-   **WebSocket Management:** Handles WebSocket connection, automatic reconnection attempts, and keepalive (via server heartbeats).
+-   **Context-based State Sharing:** Uses React Context (`WebSocketContext`) to share WebSocket connection state and received messages between components.
+-   **Agent State Management:** Utilizes Zustand (`agentStore.ts`) for managing the list of agents and their statuses received from the server.
+-   **Modern UI:** Simple, clean interface styled using CSS variables and potentially modern CSS features.
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
-- npm (v6 or higher)
-- A running WebSocket server (the Python FastAPI server should be running on port 8765)
+-   Node.js (v18 or later recommended)
+-   npm or yarn
+-   A running instance of the backend server component.
 
 ## Installation
 
-1. Clone the repository
-2. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
+1.  Navigate to the `frontend` directory.
+2.  Install dependencies:
+    ```bash
+    npm install
+    # or
+    # yarn install
+    ```
 
-## Development
+## Configuration
 
-1. Start the development server:
-   ```bash
-   npm run dev
-   ```
-2. Open your browser and navigate to the URL shown in the terminal (typically http://localhost:5173)
-3. Make sure your WebSocket server is running on port 8765
-4. Start chatting!
+The frontend requires the WebSocket URL of the backend server. This is configured via environment variables:
+
+1.  Create a `.env` file in the `frontend` root directory (if it doesn't exist).
+2.  Add the following line, replacing the URL with your actual server's WebSocket endpoint:
+    ```env
+    VITE_WS_URL=ws://localhost:8765/ws
+    ```
+
+See `src/config.ts` for how environment variables are loaded.
+
+## Running the Development Server
+
+To start the frontend in development mode with hot reloading:
+
+```bash
+npm run dev
+# or
+# yarn dev
+```
+
+This will typically start the server on `http://localhost:5173` (or the next available port).
+
+## Building for Production
+
+To create an optimized production build:
+
+```bash
+npm run build
+# or
+# yarn build
+```
+
+The production-ready files will be placed in the `dist` directory. You can serve these files using a static file server (like `serve` or Nginx).
+
+```bash
+npm install -g serve
+serve -s dist
+```
+
+## Core Components
+
+-   **`src/main.tsx`**: Entry point of the application.
+-   **`src/App.tsx`**: Main application component, sets up routing or main layout.
+-   **`src/components/ChatUI.tsx`**: Orchestrates the main UI, manages WebSocket connection, context provider, and renders `Chat` and `AgentPanel`.
+-   **`src/components/Chat.tsx`**: Implements the chat message display and input area. Consumes `WebSocketContext`.
+-   **`src/components/AgentPanel.tsx`**: Displays the list of agents and their status. Consumes `WebSocketContext` and uses `agentStore`.
+-   **`src/store/agentStore.ts`**: Zustand store for managing agent state.
+-   **`src/config.ts`**: Loads and exports configuration (like WebSocket URL).
+-   **`src/types/message.ts`**: Defines shared TypeScript types for messages.
+
+## WebSocket Communication
+
+-   Managed primarily within `ChatUI.tsx`.
+-   Connects to the URL specified by `VITE_WS_URL`.
+-   Registers itself as a `REGISTER_FRONTEND` client upon connection.
+-   Listens for incoming messages (`AGENT_STATUS_UPDATE`, `TEXT`, `REPLY`, `ERROR`, etc.).
+-   Handles `SERVER_HEARTBEAT` messages from the server to maintain connection awareness.
+-   Provides a `sendMessage` function via `WebSocketContext` for child components to send messages.
+-   Includes logic for automatic reconnection on disconnect.
 
 ## Hot Module Replacement (HMR)
 
@@ -73,25 +134,6 @@ If HMR isn't working as expected:
 2. Check if your firewall is blocking WebSocket connections
 3. Try clearing your browser cache
 4. Ensure you're running the latest version of the development server
-
-## Features
-
-- Real-time WebSocket communication
-- Connection status indicator
-- Message history with visual distinction between sent and received messages
-- Responsive design
-- Support for sending messages with Enter key
-- Auto-scrolling message container
-
-## Building for Production
-
-To create a production build:
-
-```bash
-npm run build
-```
-
-The built files will be in the `dist` directory.
 
 ## Project Structure
 
