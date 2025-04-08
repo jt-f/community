@@ -40,7 +40,7 @@ RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 WEBSOCKET_URL = os.getenv('WEBSOCKET_URL', 'ws://localhost:8765/ws')
 BROKER_INPUT_QUEUE = "broker_input_queue"         
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
-BROKER_OUTPUT_QUEUE = "broker_output_queue"       
+SERVER_INPUT_QUEUE = "server_input_queue" # Broker now sends responses/routed messages here
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
 # Dictionary to store registered agents - the only state the broker needs
@@ -71,32 +71,34 @@ def setup_rabbitmq_channel(queue_name, callback_function):
         log.error(f"Failed to set up RabbitMQ channel for {queue_name}: {e}")
         return None
 
-def publish_to_broker_output_queue(message_data):
-    """Publish a message to the broker's output queue (read by the server)."""
+def publish_to_server_input_queue(message_data: dict) -> bool:
+    """Publish a message to the server's input queue."""
     try:
+        # Re-establish connection for each publish for simplicity
+        # In high-throughput scenarios, consider a persistent connection/channel
         connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
         channel = connection.channel()
-        
-        # Ensure the queue exists
-        channel.queue_declare(queue=BROKER_OUTPUT_QUEUE, durable=True)
-        
+
+        # Ensure the queue exists (server should primarily declare it)
+        channel.queue_declare(queue=SERVER_INPUT_QUEUE, durable=True)
+
         # Publish the message
         channel.basic_publish(
             exchange='',
-            routing_key=BROKER_OUTPUT_QUEUE,
+            routing_key=SERVER_INPUT_QUEUE,
             body=json.dumps(message_data),
             properties=pika.BasicProperties(
                 delivery_mode=2,  # make message persistent
             )
         )
-        
-        log.info(f"Published message to {BROKER_OUTPUT_QUEUE}")
-        
+
+        log.info(f"Published message {message_data.get('message_id', 'N/A')} type {message_data.get('message_type', '?')} to {SERVER_INPUT_QUEUE}")
+
         # Clean up
         connection.close()
         return True
     except Exception as e:
-        log.error(f"Failed to publish to {BROKER_OUTPUT_QUEUE}: {e}")
+        log.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
         return False
 
 def handle_incoming_message(channel, method, properties, body):
@@ -119,8 +121,8 @@ def handle_incoming_message(channel, method, properties, body):
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.ERROR:
             log.warning(f"Received ERROR message from {sender_id}. Forwarding to server.")
-            # Forward error messages directly to the server via the output queue
-            publish_to_broker_output_queue(message_data)
+            # Forward error messages directly to the server via the server input queue
+            publish_to_server_input_queue(message_data)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
             log.warning(f"Received unsupported message type in broker input queue: {message_type} from {sender_id}")
@@ -271,8 +273,8 @@ def handle_agent_registration(message_data):
     if client_id:
         response["_client_id"] = client_id
     
-    # Send response back to the server via the broker output queue
-    publish_to_broker_output_queue(response)
+    # Send response back to the server via the server input queue
+    publish_to_server_input_queue(response)
 
 def handle_client_disconnected(message_data):
     """Handles client disconnection notification."""
@@ -346,7 +348,7 @@ def route_message(message_data):
         
         # Send the message
         log.info(f"Randomly routing message '{truncated_text}' from {sender_id} to agent {chosen_agent_id}")
-        publish_to_broker_output_queue(outgoing_message)
+        publish_to_server_input_queue(outgoing_message) # Send routed message to server queue
         return
     else:
         # Count how many total online agents we have
@@ -368,17 +370,17 @@ def route_message(message_data):
                 "receiver_id": "Server",     # Send error back to the server
                 "text_payload": f"The sender is the only online agent. No other agents are available to receive the message."
             }
-            publish_to_broker_output_queue(error_response)
+            publish_to_server_input_queue(error_response)
             return
         else:
             # No online agents available
             error_response = {
                 "message_type": MessageType.ERROR,
                 "sender_id": "BrokerService", # Keep sender as Broker
-                "receiver_id": sender_id if sender_id != "unknown" else "server",
+                "receiver_id": "Server", # Send error back to the server
                 "text_payload": f"No online agents available to handle the message."
             }
-            publish_to_broker_output_queue(error_response)
+            publish_to_server_input_queue(error_response)
             log.warning(f"Could not route message '{truncated_text}' from {sender_id}: No online agents found")
             return
 

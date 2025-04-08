@@ -15,7 +15,7 @@ RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 BROKER_INPUT_QUEUE = "broker_input_queue"
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
-BROKER_OUTPUT_QUEUE = "broker_output_queue"
+SERVER_INPUT_QUEUE = "server_input_queue"
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
 # WebSocket Configuration

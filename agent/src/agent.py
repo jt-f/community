@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 logging.getLogger("pika").setLevel(logging.WARNING)
 logger.info("Pika library logging level set to WARNING.")
 
+# Define the server input queue name (should match server config)
+SERVER_INPUT_QUEUE = "server_input_queue"
+
 class Agent:
     def __init__(self, agent_id: str, agent_name: str, websocket_url: str, rabbitmq_host: str):
         self.agent_id = agent_id
@@ -159,30 +162,30 @@ class Agent:
             logger.error(f"Failed to set up RabbitMQ queue: {e}")
             return False
     
-    def publish_to_broker_input_queue(self, message_data: dict) -> bool:
-        """Publish a response message to the broker input queue."""
+    def publish_to_server_input_queue(self, message_data: dict) -> bool:
+        """Publish a response message to the server input queue."""
         if not self.rabbitmq_channel:
             logger.error("Cannot publish: RabbitMQ connection not established")
             return False
-            
+
         try:
-            # Ensure the queue exists
-            self.rabbitmq_channel.queue_declare(queue="broker_input_queue", durable=True)
-            
+            # Ensure the queue exists (optional, server should declare it)
+            self.rabbitmq_channel.queue_declare(queue=SERVER_INPUT_QUEUE, durable=True)
+
             # Publish the message
             self.rabbitmq_channel.basic_publish(
                 exchange='',
-                routing_key="broker_input_queue",
+                routing_key=SERVER_INPUT_QUEUE,
                 body=json.dumps(message_data),
                 properties=pika.BasicProperties(
                     delivery_mode=2,  # make message persistent
                 )
             )
-            
-            logger.info(f"Published message {message_data} to broker_input_queue")
+
+            logger.info(f"Published response message {message_data.get('message_id', 'N/A')} to {SERVER_INPUT_QUEUE}")
             return True
         except Exception as e:
-            logger.error(f"Failed to publish to broker_input_queue: {e}")
+            logger.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
             return False
     
     def process_rabbitmq_message(self, ch, method, properties, body):
@@ -205,9 +208,9 @@ class Agent:
             # Process the message and generate response
             response = self.generate_response(message_dict)
             
-            # Send response back through broker_input_queue
-            if self.publish_to_broker_input_queue(response):
-                logger.info(f"Sent response to message {message_id} via broker_input_queue")
+            # Send response back through server_input_queue
+            if self.publish_to_server_input_queue(response):
+                logger.info(f"Sent response to message {message_id} via {SERVER_INPUT_QUEUE}")
             else:
                 logger.error(f"Failed to send response to message {message_id}")
             
@@ -261,14 +264,15 @@ class Agent:
             "sender_id": self.agent_id,
             "receiver_id": sender_id,
             "text_payload": llm_response_text,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "message_id": f"msg_{uuid.uuid4().hex}" # Add a unique ID for this reply message
         }
 
         logger.info(f"Generated response: {response}")
 
         # Add reference to original message if available
         if message_id:
-            response["in_reply_to"] = message_id
+            response["in_reply_to_message_id"] = message_id # Use the correct key
             
         return response
 
