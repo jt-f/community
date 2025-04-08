@@ -243,12 +243,6 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
                     {getStatusText(message.status, message.routedTo)}
                   </span>
                 )}
-                {message.status === 'routed' && (
-                  <span className="routing-status routed">ROUTED TO: {message.routedTo}</span>
-                )}
-                {message.status === 'error' && (
-                  <span className="routing-status error">ERROR</span>
-                )}
                 {message.message_type === MessageType.REPLY && message.in_reply_to_message_id && (
                   <span className="reply-to">↩ {message.in_reply_to_message_id.substring(0, 8)}</span>
                 )}

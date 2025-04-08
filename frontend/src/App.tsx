@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChatUI } from './components/ChatUI'
+import './App.css'
 
 function App() {
   // Generate and store the user ID in format 'Human-<3 random characters>'
   const userId = useRef(`Human-${Math.random().toString(36).substring(2, 5)}`);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [sessionValue] = useState(() => `CB-${Math.floor(Math.random() * 9000) + 1000}`);
   
   // Update time every second
   useEffect(() => {
@@ -33,7 +35,7 @@ function App() {
         <div className="header-right">
           <div className="session-info">
             <div className="session-label">SESSION ID</div>
-            <div className="session-value">CB-{Math.floor(Math.random() * 9000) + 1000}</div>
+            <div className="session-value">{sessionValue}</div>
           </div>
           <div className="user-info">
             <div className="user-label">USER ID</div>
