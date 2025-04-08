@@ -322,6 +322,7 @@ async def response_consumer():
             
             # Define the callback for received messages
             def callback_wrapper(ch, method, properties, body):
+                logger.info(f"Received message from broker_output_queue: {body}")
                 # Run the async process_message in the main event loop
                 asyncio.create_task(process_message(json.loads(body.decode('utf-8'))))
             

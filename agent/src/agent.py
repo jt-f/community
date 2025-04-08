@@ -11,6 +11,7 @@ import websockets
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import time
+from mistralai import Mistral
 
 from shared_models import (
     MessageType,
@@ -21,6 +22,9 @@ from shared_models import (
     create_text_message,
     create_reply_message
 )
+
+# Import agent configuration
+import config as agent_config
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +50,20 @@ class Agent:
         self.queue_name = f"agent_queue_{self.agent_id}"
         self.is_registered = False
         self.running = False
+        
+        # Initialize Mistral Client
+        self.mistral_client = None
+        logger.info(f"agent config key: {agent_config.MISTRAL_API_KEY}")
+        logger.info(f"agent config model: {agent_config.MISTRAL_MODEL}")
+        # Initialize Mistral Client
+        if agent_config.MISTRAL_API_KEY:
+            try:
+                self.mistral_client = Mistral(api_key=agent_config.MISTRAL_API_KEY)
+                logger.info("Mistral client initialized.")
+            except Exception as e:
+                logger.error(f"Failed to initialize Mistral client: {e}")
+        else:
+            logger.warning("Mistral API key not found, LLM features disabled.")
         
     async def connect_websocket(self) -> bool:
         """Connect to WebSocket server for status updates and ping/pong."""
@@ -206,38 +224,53 @@ class Agent:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     
     def generate_response(self, message) -> dict:
-        """Generate a response for a received message."""
-        # Default implementation - create a simple response
-        # In a real application, this method would contain agent-specific logic
+        """Generate a response for a received message using Mistral LLM."""
+        sender_id = message.get("sender_id", "unknown")
+        text_payload = message.get("text_payload", "")
+        message_id = message.get("message_id", None)
+        llm_response_text = "Sorry, I cannot generate a response right now." # Default response
         
-        if isinstance(message, dict):
-            sender_id = message.get("sender_id", "unknown")
-            text_payload = message.get("text_payload", "")
-            message_id = message.get("message_id", None)
+        message_type = MessageType.REPLY
+        if self.mistral_client and text_payload:
+            logger.info(f"Sending text to Mistral model {agent_config.MISTRAL_MODEL}...")
+            try:
+                chat_response = self.mistral_client.chat.complete(
+                    model = agent_config.MISTRAL_MODEL,
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": text_payload,
+                        },
+                    ]
+                )
+
+                logger.debug(chat_response.choices[0].message.content)
+                llm_response_text = chat_response.choices[0].message.content
+            except Exception as e:
+                logger.error(f"Error generating with Mistral: {str(e)}")
+                return {"error": str(e)}
             
-            # Create a response dictionary
-            response = {
-                "message_type": MessageType.REPLY,
-                "sender_id": self.agent_id,
-                "receiver_id": sender_id,
-                "text_payload": f"Dummy response to '{text_payload}'",
-                "timestamp": datetime.now().isoformat()
-            }
+        elif not self.mistral_client:
+            message_type = MessageType.ERROR
+            logger.warning("Mistral client not available. Cannot generate LLM response.")
+            llm_response_text = "LLM client is not configured." # Config specific response
+
+        # Create a response dictionary
+        response = {
+            "message_type": message_type,
+            "sender_id": self.agent_id,
+            "receiver_id": sender_id,
+            "text_payload": llm_response_text,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        logger.info(f"Generated response: {response}")
+
+        # Add reference to original message if available
+        if message_id:
+            response["in_reply_to"] = message_id
             
-            # Add reference to original message if available
-            if message_id:
-                response["in_reply_to"] = message_id
-                
-            return response
-        else:
-            # Create a generic response for non-dict messages
-            return {
-                "message_type": MessageType.TEXT,
-                "sender_id": self.agent_id,
-                "receiver_id": "unknown",
-                "text_payload": f"Agent {self.agent_name} received a message",
-                "timestamp": datetime.now().isoformat()
-            }
+        return response
 
     async def listen_websocket(self) -> None:
         """Listen for status updates and control messages from the WebSocket server."""
