@@ -235,18 +235,21 @@ export function ChatUI({ userId }: ChatUIProps) {
           {`
             .chat-ui {
               display: flex;
-              padding: 0 20px;
+              width: 100%; /* Ensure it fills the full width of main */
               height: calc(100vh - 120px);
               gap: 20px;
               position: relative;
             }
             
             .chat-container {
-              flex: 1;
+              flex-basis: 61.8%;
+              min-width: 0;
             }
+
+            /* AgentPanel styles are defined within AgentPanel.tsx - we will adjust that next */
           `}
         </style>
       </div>
     </WebSocketContext.Provider>
   );
-} 
+}

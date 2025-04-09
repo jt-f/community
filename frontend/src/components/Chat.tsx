@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 import { ChatMessage, MessageType, createMessage } from '../types/message';
 import { WebSocketContext } from './ChatUI';
 
+// Maximum number of messages to keep in state for better performance
+const MAX_MESSAGES = 100;
+
 interface ChatProps {
   wsRef: React.RefObject<WebSocket | null>;
   isConnected: boolean;
@@ -120,7 +123,13 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             routedTo: initialStatus === 'routed' ? lastMessage.receiver_id : undefined
         };
 
-        setMessages(prev => [...prev, newMessage]);
+        setMessages(prev => {
+            // Add new message and trim older ones if over the limit
+            const updatedMessages = [...prev, newMessage];
+            return updatedMessages.length > MAX_MESSAGES 
+                ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES) 
+                : updatedMessages;
+        });
     }
 
   }, [lastMessage, clientId]);
@@ -148,7 +157,15 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
       
       sentMessageIds.current.add(message.message_id);
       sendMessage(message);
-      setMessages(prev => [...prev, messageWithAnimation]);
+      
+      // Add new message and trim if over limit
+      setMessages(prev => {
+        const updatedMessages = [...prev, messageWithAnimation];
+        return updatedMessages.length > MAX_MESSAGES 
+            ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES)
+            : updatedMessages;
+      });
+      
       setInputMessage('');
     }
   };
@@ -514,6 +531,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             margin-left: auto;
             margin-right: 4px;
             border-left: 3px solid var(--color-primary);
+            text-align: left;
           }
           
           /* Pending message style - amber/yellow highlight */
@@ -534,6 +552,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             margin-right: auto;
             margin-left: 4px;
             border-left: 3px solid var(--color-accent);
+            text-align: left;
           }
           
           /* Style for error messages */
@@ -584,6 +603,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             word-wrap: break-word;
             font-size: 0.9em;
             line-height: 1.5;
+            text-align: left;
           }
           
           .message-footer {

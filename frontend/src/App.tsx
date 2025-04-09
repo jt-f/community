@@ -75,7 +75,7 @@ function App() {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 15px 25px;
+          padding: 15px 20px;
           background-color: var(--color-surface-raised);
           border-bottom: 1px solid var(--color-border-strong);
           height: 70px;
@@ -165,7 +165,7 @@ function App() {
         main {
           flex: 1;
           display: flex;
-          justify-content: center;
+          align-items: stretch;
           padding: 0 0 20px;
           margin: 0;
           max-width: none;

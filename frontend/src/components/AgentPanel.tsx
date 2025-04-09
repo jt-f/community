@@ -100,7 +100,8 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
       <style>
         {`
         .agent-panel {
-          width: 300px;
+          flex-basis: 38.2%;
+          min-width: 0;
           border: 1px solid var(--color-border-strong);
           border-radius: 4px;
           background-color: var(--color-surface);
@@ -242,4 +243,4 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
       </style>
     </div>
   );
-} 
+}
