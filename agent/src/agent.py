@@ -247,7 +247,7 @@ class Agent:
                     ]
                 )
 
-                logger.debug(chat_response.choices[0].message.content)
+                logger.info(f'Mistral response: {chat_response}')
                 llm_response_text = chat_response.choices[0].message.content
             except Exception as e:
                 logger.error(f"Error generating with Mistral: {str(e)}")

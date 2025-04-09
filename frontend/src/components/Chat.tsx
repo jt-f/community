@@ -22,7 +22,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sentMessageIds = useRef<Set<string>>(new Set());
   const [clientId, setClientId] = useState<string | null>(userId);
-  const { lastMessage, sendMessage } = useContext(WebSocketContext);
+  const { lastMessage, sendMessage, agentNameMap } = useContext(WebSocketContext);
 
   // Handle incoming messages from WebSocketContext
   useEffect(() => {
@@ -178,6 +178,13 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
     }, 500); // Duration of vibration animation
   };
 
+  // Helper function to get display name or ID
+  const getDisplayName = (id: string | null | undefined): string => {
+    if (!id) return '?';
+    if (id === clientId) return 'You';
+    return agentNameMap[id] || id; // Return name from map, or ID if not found
+  };
+
   // Function to get display text for status
   const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string): string => {
       switch(status) {
@@ -228,8 +235,12 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             >
               <div className="message-header">
                 <div className="message-directions">
-                  <span className="message-from">FROM: {message.sender_id === clientId ? 'You' : message.sender_id}</span>
-                  <span className="message-to">TO: {message.status === 'routed' && message.routedTo ? message.routedTo : (message.receiver_id || '?')}</span>
+                  <span className="message-from">
+                    FROM: <span title={message.sender_id}>{getDisplayName(message.sender_id)}</span>
+                  </span>
+                  <span className="message-to">
+                    TO: <span title={message.receiver_id}>{getDisplayName(message.receiver_id)}</span>
+                  </span>
                 </div>
                 <span className="timestamp">{message.send_timestamp}</span>
               </div>
@@ -240,7 +251,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
                 <span className="message-id">ID: {message.message_id ? message.message_id.substring(0, 8) : 'unknown'}</span>
                 {(message.status === 'pending' || message.status === 'routed' || message.status === 'error' || message.status === 'routing_failed') && (
                   <span className={`routing-status ${message.status}`}>
-                    {getStatusText(message.status, message.routedTo)}
+                    {getStatusText(message.status, getDisplayName(message.routedTo))}
                   </span>
                 )}
                 {message.message_type === MessageType.REPLY && message.in_reply_to_message_id && (

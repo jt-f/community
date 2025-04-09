@@ -4,13 +4,18 @@ import Chat from './Chat';
 import { MessageType } from '../types/message';
 import { API_CONFIG, WS_CONFIG } from '../config';
 
-// Create a message context to share WebSocket messages with child components
-export const WebSocketContext = createContext<{
+// Define the structure for the context value
+interface WebSocketContextValue {
   lastMessage: any | null;
   sendMessage: (message: any) => void;
-}>({
+  agentNameMap: Record<string, string>; // Add agent name map
+}
+
+// Create a message context to share WebSocket messages with child components
+export const WebSocketContext = createContext<WebSocketContextValue>({
   lastMessage: null,
-  sendMessage: () => {}
+  sendMessage: () => {},
+  agentNameMap: {} // Default empty map
 });
 
 interface ChatUIProps {
@@ -23,6 +28,7 @@ export function ChatUI({ userId }: ChatUIProps) {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<any | null>(null);
+  const [agentNameMap, setAgentNameMap] = useState<Record<string, string>>({}); // State for agent names
   
   // Function to send a message through the WebSocket
   const sendMessage = (message: any) => {
@@ -56,6 +62,19 @@ export function ChatUI({ userId }: ChatUIProps) {
         }
         // Don't forward heartbeats to children to reduce noise
         return;
+      }
+      
+      // Update agent name map if it's a status update
+      if (message.message_type === MessageType.AGENT_STATUS_UPDATE && message.agents) {
+        setAgentNameMap(prevMap => {
+          const newMap = { ...prevMap };
+          message.agents.forEach((agent: { agent_id: string; agent_name: string }) => {
+            if (agent.agent_id && agent.agent_name) {
+              newMap[agent.agent_id] = agent.agent_name;
+            }
+          });
+          return newMap;
+        });
       }
       
       // Set the last message to broadcast to child components
@@ -205,7 +224,7 @@ export function ChatUI({ userId }: ChatUIProps) {
   
   // Return the UI with the WebSocketContext provider
   return (
-    <WebSocketContext.Provider value={{ lastMessage, sendMessage }}>
+    <WebSocketContext.Provider value={{ lastMessage, sendMessage, agentNameMap }}>
       <div className="chat-ui">
         <div className="chat-container">
           <Chat wsRef={wsRef} isConnected={isConnected} userId={userId} />

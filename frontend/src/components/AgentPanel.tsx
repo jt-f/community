@@ -83,12 +83,13 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
               <div className="agent-info">
                 <div className="agent-name-container">
                   <div className={`status-indicator ${agent.is_online ? 'online' : 'offline'}`}></div>
-                  <span className="agent-name">{agent.agent_name}</span>
+                  <span className="agent-name" title={agent.agent_id}>{agent.agent_name}</span>
                 </div>
-                <span className="agent-id">ID: {agent.agent_id.substring(0, 8)}</span>
+                {/* Optionally hide or keep the explicit ID display */}
+                {/* <span className="agent-id">ID: {agent.agent_id.substring(0, 8)}</span> */}
               </div>
               <div className="agent-meta">
-                <span className="last-seen">Last seen: {agent.last_seen}</span>
+                <span className="last-seen">Last seen: {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : 'Never'}</span>
                 <span className="status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
               </div>
             </div>
