@@ -305,6 +305,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             display: flex;
             flex-direction: column;
             height: 100%;
+            min-height: 100vh;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
             overflow: hidden;
             position: relative;
@@ -433,12 +434,14 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
           }
           
           .messages-container {
-            flex-grow: 1;
+            flex: 1;
             display: flex;
             flex-direction: column;
             border-bottom: 1px solid var(--color-border-strong);
             background-color: var(--color-background);
             position: relative;
+            min-height: 0;
+            overflow: hidden;
           }
           
           /* Grid overlay effect */
@@ -495,6 +498,8 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             padding: 16px;
             position: relative;
             z-index: 1;
+            min-height: 0; /* This is crucial for flex child scrolling */
+            height: 100%; /* Ensure it fills the container */
             
             /* Custom Scrollbar */
             scrollbar-width: thin;
@@ -649,6 +654,9 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             background-color: var(--color-surface-raised);
             border-top: 1px solid var(--color-border-strong);
             height: 64px;
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
           }
           
           input[type="text"] {
