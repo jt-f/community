@@ -5,21 +5,35 @@
   font-weight: 400;
 
   /* Color Scheme - Command Center Dark */
-  --color-background: #0a0e14; /* Darker background - almost black with blue tint */
-  --color-surface: #141920; /* Slightly lighter surface color */
-  --color-surface-raised: #1c2230; /* For elements that should appear raised */
-  --color-text: rgba(255, 255, 255, 0.92); /* Crisp white text */
-  --color-text-secondary: rgba(255, 255, 255, 0.64); /* Secondary text */
-  --color-text-tertiary: rgba(255, 255, 255, 0.42); /* Less important text */
-  --color-primary: #0084ff; /* Bright blue for primary actions/highlights */
-  --color-primary-muted: rgba(0, 132, 255, 0.15); /* For backgrounds/subtle highlights */
-  --color-accent: #00ccff; /* For important highlights */
-  --color-success: #00c853; /* Success indicators */
-  --color-warning: #ffab00; /* Warning indicators */
-  --color-error: #ff3d71; /* Error indicators */
-  --color-border: rgba(255, 255, 255, 0.12); /* Subtle borders */
-  --color-border-strong: rgba(255, 255, 255, 0.2); /* More visible borders */
-  
+  --color-background: #0a0e14;
+  /* Darker background - almost black with blue tint */
+  --color-surface: #141920;
+  /* Slightly lighter surface color */
+  --color-surface-raised: #1c2230;
+  /* For elements that should appear raised */
+  --color-text: rgba(255, 255, 255, 0.92);
+  /* Crisp white text */
+  --color-text-secondary: rgba(255, 255, 255, 0.64);
+  /* Secondary text */
+  --color-text-tertiary: rgba(255, 255, 255, 0.42);
+  /* Less important text */
+  --color-primary: #0084ff;
+  /* Bright blue for primary actions/highlights */
+  --color-primary-muted: rgba(0, 132, 255, 0.15);
+  /* For backgrounds/subtle highlights */
+  --color-accent: #00ccff;
+  /* For important highlights */
+  --color-success: #00c853;
+  /* Success indicators */
+  --color-warning: #ffab00;
+  /* Warning indicators */
+  --color-error: #ff3d71;
+  /* Error indicators */
+  --color-border: rgba(255, 255, 255, 0.12);
+  /* Subtle borders */
+  --color-border-strong: rgba(255, 255, 255, 0.2);
+  /* More visible borders */
+
   /* Grid effect for tech feel */
   --grid-color: rgba(28, 114, 147, 0.07);
   --grid-size: 25px;
@@ -27,7 +41,7 @@
   color-scheme: dark;
   color: var(--color-text);
   background-color: var(--color-background);
-  background-image: 
+  background-image:
     linear-gradient(var(--grid-color) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
   background-size: var(--grid-size) var(--grid-size);
@@ -39,7 +53,9 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -70,17 +86,31 @@ a:hover::after {
 body {
   margin: 0;
   display: flex;
-  min-width: 320px;
-  min-height: 100vh;
+  flex-direction: column;
+  height: 100vh;
+  /* Ensure body takes full viewport height */
+  overflow: hidden;
+  /* Prevent scrollbars on body */
   background-color: var(--color-background);
 }
 
 #root {
-  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Ensure root takes full height of body */
+  overflow: hidden;
+  /* Prevent scrollbars on root */
   padding: 0;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: 'Inter', system-ui, sans-serif;
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -131,7 +161,9 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   background-color: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border-strong);
@@ -142,22 +174,31 @@ input, textarea, select {
   transition: all 0.2s;
 }
 
-input:focus, textarea:focus, select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px var(--color-primary-muted);
 }
 
-/* Remove media query overrides since we're committed to dark mode */
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Already dark by default */
-  }
+/* Utility classes */
+.text-success {
+  color: var(--color-success);
 }
 
-/* Utility classes */
-.text-success { color: var(--color-success); }
-.text-warning { color: var(--color-warning); }
-.text-error { color: var(--color-error); }
-.text-muted { color: var(--color-text-tertiary); }
-.bg-raised { background-color: var(--color-surface-raised); }
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-error {
+  color: var(--color-error);
+}
+
+.text-muted {
+  color: var(--color-text-tertiary);
+}
+
+.bg-raised {
+  background-color: var(--color-surface-raised);
+}

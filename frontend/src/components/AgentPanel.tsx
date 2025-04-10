@@ -26,7 +26,7 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
 
   // Get the agents to display based on selected filter
   const getFilteredAgents = () => {
-    return selectedFilter === 'online' 
+    return selectedFilter === 'online'
       ? getOnlineAgents()
       : selectedFilter === 'offline'
         ? getOfflineAgents()
@@ -44,19 +44,19 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           <span className="status-text">{isConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
         <div className="agent-filters">
-          <button 
+          <button
             className={`filter-btn ${selectedFilter === 'all' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('all')}
           >
             All ({agents.length})
           </button>
-          <button 
+          <button
             className={`filter-btn ${selectedFilter === 'online' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('online')}
           >
             Online ({getOnlineAgents().length})
           </button>
-          <button 
+          <button
             className={`filter-btn ${selectedFilter === 'offline' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('offline')}
           >
@@ -64,13 +64,13 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           </button>
         </div>
       </div>
-      
+
       <div className="agents-list">
         {!isConnected ? (
           <div className="no-agents">Connecting to server...</div>
         ) : filteredAgents.length === 0 ? (
           <div className="no-agents">
-            {selectedFilter === 'all' 
+            {selectedFilter === 'all'
               ? 'No agents registered'
               : selectedFilter === 'online'
                 ? 'No agents online'
@@ -100,16 +100,16 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
       <style>
         {`
         .agent-panel {
-          flex-basis: 38.2%;
-          min-width: 0;
-          border: 1px solid var(--color-border-strong);
-          border-radius: 4px;
-          background-color: var(--color-surface);
-          margin-left: 20px;
+          flex: 0 0 38.2%; /* Golden ratio for panel width */
+          min-width: 320px;
+          max-width: 420px;
           display: flex;
           flex-direction: column;
+          background-color: var(--color-surface);
+          border: 1px solid var(--color-border-strong);
+          border-radius: 4px;
+          overflow: hidden;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-          height: calc(100vh - 120px);
         }
         
         .panel-header {
@@ -119,20 +119,7 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           padding: 12px 16px;
           background-color: var(--color-surface-raised);
           border-bottom: 1px solid var(--color-border);
-        }
-        
-        .panel-header h3 {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 600;
-        }
-        
-        .connection-status {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 12px;
-          color: var(--color-text-secondary);
+          min-height: 92px;
         }
         
         .agent-filters {
@@ -161,9 +148,10 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
         }
         
         .agents-list {
-          padding: 8px;
+          flex: 1;
           overflow-y: auto;
-          flex-grow: 1;
+          padding: 8px;
+          min-height: 0; /* Required for Firefox */
         }
         
         .no-agents {

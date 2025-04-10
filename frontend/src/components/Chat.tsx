@@ -47,89 +47,89 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
 
     // Handle registration response separately
     if (messageType === MessageType.REGISTER_FRONTEND_RESPONSE && lastMessage.status === 'success') {
-        console.log('Registration confirmed in Chat:', lastMessage);
-        setClientId(lastMessage.frontend_id);
-        return;
+      console.log('Registration confirmed in Chat:', lastMessage);
+      setClientId(lastMessage.frontend_id);
+      return;
     }
 
     // Find existing message by ID
     const existingMessageIndex = messages.findIndex(m => m.message_id === messageId);
 
     if (existingMessageIndex !== -1) {
-        // --- Update Existing Message ---
-        // console.log(`Updating existing message ID ${messageId} with status info: ${routingStatus}`);
-        setMessages(prev =>
-            prev.map((msg, index) => {
-                if (index === existingMessageIndex) {
-                    // Determine final status based on routing status or message type
-                    let finalStatus: MessageWithAnimation['status'] = msg.status;
-                    if (routingStatus === 'routed') finalStatus = 'routed';
-                    else if (routingStatus === 'pending') finalStatus = 'pending';
-                    else if (routingStatus === 'routing_failed') finalStatus = 'error';
-                    else if (messageType === MessageType.ERROR && msg.status !== 'error') finalStatus = 'error';
+      // --- Update Existing Message ---
+      // console.log(`Updating existing message ID ${messageId} with status info: ${routingStatus}`);
+      setMessages(prev =>
+        prev.map((msg, index) => {
+          if (index === existingMessageIndex) {
+            // Determine final status based on routing status or message type
+            let finalStatus: MessageWithAnimation['status'] = msg.status;
+            if (routingStatus === 'routed') finalStatus = 'routed';
+            else if (routingStatus === 'pending') finalStatus = 'pending';
+            else if (routingStatus === 'routing_failed') finalStatus = 'error';
+            else if (messageType === MessageType.ERROR && msg.status !== 'error') finalStatus = 'error';
 
-                    return {
-                        ...msg,
-                        ...lastMessage,
-                        message_id: msg.message_id,
-                        status: finalStatus,
-                        routedTo: finalStatus === 'routed' ? lastMessage.receiver_id : msg.routedTo,
-                        animationPhase: msg.status !== finalStatus ? 'vibrate' : null,
-                        isNew: false
-                    };
-                }
-                return msg;
-            })
-        );
-        // Clear vibrate animation after a short delay if it was triggered
-        if (messages[existingMessageIndex]?.status !== (routingStatus || messages[existingMessageIndex]?.status)) {
-            setTimeout(() => {
-                setMessages(msgs =>
-                    msgs.map((m, i) =>
-                        i === existingMessageIndex ? { ...m, animationPhase: null } : m
-                    )
-                );
-            }, 300);
-        }
+            return {
+              ...msg,
+              ...lastMessage,
+              message_id: msg.message_id,
+              status: finalStatus,
+              routedTo: finalStatus === 'routed' ? lastMessage.receiver_id : msg.routedTo,
+              animationPhase: msg.status !== finalStatus ? 'vibrate' : null,
+              isNew: false
+            };
+          }
+          return msg;
+        })
+      );
+      // Clear vibrate animation after a short delay if it was triggered
+      if (messages[existingMessageIndex]?.status !== (routingStatus || messages[existingMessageIndex]?.status)) {
+        setTimeout(() => {
+          setMessages(msgs =>
+            msgs.map((m, i) =>
+              i === existingMessageIndex ? { ...m, animationPhase: null } : m
+            )
+          );
+        }, 300);
+      }
 
     } else {
-        // --- Add New Message (only if not sent by self) ---
-        if (lastMessage.sender_id === clientId) {
-             if (!sentMessageIds.current.has(messageId)) {
-                  console.warn(`Received message ID ${messageId} matching self clientId, but not found locally or in sentMessageIds. Adding.`);
-             } else {
-                  console.log(`Ignoring new message ID ${messageId} from self - already added by handleSendMessage or will be updated.`);
-                  return;
-             }
+      // --- Add New Message (only if not sent by self) ---
+      if (lastMessage.sender_id === clientId) {
+        if (!sentMessageIds.current.has(messageId)) {
+          console.warn(`Received message ID ${messageId} matching self clientId, but not found locally or in sentMessageIds. Adding.`);
+        } else {
+          console.log(`Ignoring new message ID ${messageId} from self - already added by handleSendMessage or will be updated.`);
+          return;
         }
+      }
 
-        console.log(`Adding new message ID ${messageId} from sender ${lastMessage.sender_id}`);
+      console.log(`Adding new message ID ${messageId} from sender ${lastMessage.sender_id}`);
 
-        // Determine initial status for a newly received message
-        let initialStatus: MessageWithAnimation['status'] = 'error';
-        if (routingStatus === 'routed') initialStatus = 'routed';
-        else if (routingStatus === 'pending') initialStatus = 'pending';
-        else if (routingStatus === 'routing_failed') initialStatus = 'error';
-        else if (messageType === MessageType.ERROR) initialStatus = 'error';
-        else if (messageType === MessageType.TEXT || messageType === MessageType.REPLY || messageType === MessageType.SYSTEM) {
-             initialStatus = 'routed';
-        }
+      // Determine initial status for a newly received message
+      let initialStatus: MessageWithAnimation['status'] = 'error';
+      if (routingStatus === 'routed') initialStatus = 'routed';
+      else if (routingStatus === 'pending') initialStatus = 'pending';
+      else if (routingStatus === 'routing_failed') initialStatus = 'error';
+      else if (messageType === MessageType.ERROR) initialStatus = 'error';
+      else if (messageType === MessageType.TEXT || messageType === MessageType.REPLY || messageType === MessageType.SYSTEM) {
+        initialStatus = 'routed';
+      }
 
-        const newMessage: MessageWithAnimation = {
-            ...lastMessage,
-            isNew: true,
-            animationPhase: 'fadeIn',
-            status: initialStatus,
-            routedTo: initialStatus === 'routed' ? lastMessage.receiver_id : undefined
-        };
+      const newMessage: MessageWithAnimation = {
+        ...lastMessage,
+        isNew: true,
+        animationPhase: 'fadeIn',
+        status: initialStatus,
+        routedTo: initialStatus === 'routed' ? lastMessage.receiver_id : undefined
+      };
 
-        setMessages(prev => {
-            // Add new message and trim older ones if over the limit
-            const updatedMessages = [...prev, newMessage];
-            return updatedMessages.length > MAX_MESSAGES 
-                ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES) 
-                : updatedMessages;
-        });
+      setMessages(prev => {
+        // Add new message and trim older ones if over the limit
+        const updatedMessages = [...prev, newMessage];
+        return updatedMessages.length > MAX_MESSAGES
+          ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES)
+          : updatedMessages;
+      });
     }
 
   }, [lastMessage, clientId]);
@@ -147,25 +147,25 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
         inputMessage,
         MessageType.TEXT
       );
-      
+
       const messageWithAnimation: MessageWithAnimation = {
         ...message,
         isNew: true,
         animationPhase: 'fadeIn',
         status: 'pending'
       };
-      
+
       sentMessageIds.current.add(message.message_id);
       sendMessage(message);
-      
+
       // Add new message and trim if over limit
       setMessages(prev => {
         const updatedMessages = [...prev, messageWithAnimation];
-        return updatedMessages.length > MAX_MESSAGES 
-            ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES)
-            : updatedMessages;
+        return updatedMessages.length > MAX_MESSAGES
+          ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES)
+          : updatedMessages;
       });
-      
+
       setInputMessage('');
     }
   };
@@ -179,16 +179,16 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   // Handle fade-in animation completion
   const handleFadeInComplete = (index: number) => {
     // After fade-in is complete, start vibration
-    setMessages(msgs => 
-      msgs.map((m, i) => 
+    setMessages(msgs =>
+      msgs.map((m, i) =>
         i === index ? { ...m, animationPhase: 'vibrate' } : m
       )
     );
-    
+
     // After vibration completes, clear animation status
     setTimeout(() => {
-      setMessages(msgs => 
-        msgs.map((m, i) => 
+      setMessages(msgs =>
+        msgs.map((m, i) =>
           i === index ? { ...m, isNew: false, animationPhase: null } : m
         )
       );
@@ -204,13 +204,13 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
 
   // Function to get display text for status
   const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string): string => {
-      switch(status) {
-          case 'pending': return 'AWAITING ROUTING';
-          case 'routed': return `ROUTED TO: ${routedTo || '?'}`;
-          case 'error': return 'ERROR';
-          case 'routing_failed': return 'ROUTING FAILED';
-          default: return '';
-      }
+    switch (status) {
+      case 'pending': return 'AWAITING ROUTING';
+      case 'routed': return `ROUTED TO: ${routedTo || '?'}`;
+      case 'error': return 'ERROR';
+      case 'routing_failed': return 'ROUTING FAILED';
+      default: return '';
+    }
   };
 
   return (
@@ -296,16 +296,10 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
       <style>
         {`
           .chat-container {
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            border: 1px solid var(--color-border-strong);
-            border-radius: 4px;
-            background-color: var(--color-surface);
             display: flex;
             flex-direction: column;
             height: 100%;
-            min-height: 100vh;
+            background-color: var(--color-surface);
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
             overflow: hidden;
             position: relative;
@@ -434,14 +428,12 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
           }
           
           .messages-container {
-            flex: 1;
             display: flex;
             flex-direction: column;
-            border-bottom: 1px solid var(--color-border-strong);
-            background-color: var(--color-background);
-            position: relative;
-            min-height: 0;
+            flex: 1;
+            min-height: 0; /* Required for Firefox */
             overflow: hidden;
+            position: relative;
           }
           
           /* Grid overlay effect */
@@ -493,13 +485,12 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
           }
           
           .messages {
-            flex-grow: 1;
+            flex: 1;
             overflow-y: auto;
+            min-height: 0; /* Required for Firefox */
             padding: 16px;
             position: relative;
             z-index: 1;
-            min-height: 0; /* This is crucial for flex child scrolling */
-            height: 100%; /* Ensure it fills the container */
             
             /* Custom Scrollbar */
             scrollbar-width: thin;
@@ -653,10 +644,8 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             padding: 12px 16px;
             background-color: var(--color-surface-raised);
             border-top: 1px solid var(--color-border-strong);
-            height: 64px;
+            min-height: 64px;
             flex-shrink: 0;
-            position: sticky;
-            bottom: 0;
           }
           
           input[type="text"] {
@@ -718,4 +707,4 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   );
 };
 
-export default Chat; 
+export default Chat;

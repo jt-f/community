@@ -9,9 +9,11 @@
   will-change: filter;
   transition: filter 300ms;
 }
+
 .logo:hover {
   filter: drop-shadow(0 0 2em hsla(from var(--color-primary) h s l / 0.66));
 }
+
 .logo.react:hover {
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
@@ -20,6 +22,7 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -40,4 +43,23 @@
 
 .read-the-docs {
   color: rgba(255, 255, 255, 0.6);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* Ensure the app takes the full viewport height */
+  overflow: hidden;
+  /* Prevent scrollbars */
+}
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  /* Allow scrolling within the main content area */
+  padding-top: 0px;
+  /* Add padding to ensure the top of containers is visible */
 }

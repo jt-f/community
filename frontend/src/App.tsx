@@ -7,13 +7,13 @@ function App() {
   const userId = useRef(`Human-${Math.random().toString(36).substring(2, 5)}`);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionValue] = useState(() => `CB-${Math.floor(Math.random() * 9000) + 1000}`);
-  
+
   // Update time every second
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
-    
+
     return () => clearInterval(timer);
   }, []);
 
@@ -48,11 +48,12 @@ function App() {
       </main>
       <style>{`
         .app {
-          min-height: 100vh;
+          height: 100vh;
           display: flex;
           flex-direction: column;
           background-color: var(--color-background);
           position: relative;
+          overflow: hidden;
         }
         
         /* Grid background overlay */
@@ -165,12 +166,11 @@ function App() {
         main {
           flex: 1;
           display: flex;
-          align-items: stretch;
-          padding: 0 0 20px;
-          margin: 0;
-          max-width: none;
-          width: 100%;
-          overflow: auto;
+          flex-direction: column;
+          overflow: hidden;
+          position: relative;
+          min-height: 0; /* Required for Firefox */
+          padding: 20px;
         }
       `}</style>
     </div>

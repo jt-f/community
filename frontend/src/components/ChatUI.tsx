@@ -14,7 +14,7 @@ interface WebSocketContextValue {
 // Create a message context to share WebSocket messages with child components
 export const WebSocketContext = createContext<WebSocketContextValue>({
   lastMessage: null,
-  sendMessage: () => {},
+  sendMessage: () => { },
   agentNameMap: {} // Default empty map
 });
 
@@ -29,7 +29,7 @@ export function ChatUI({ userId }: ChatUIProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<any | null>(null);
   const [agentNameMap, setAgentNameMap] = useState<Record<string, string>>({}); // State for agent names
-  
+
   // Function to send a message through the WebSocket
   const sendMessage = (message: any) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -51,7 +51,7 @@ export function ChatUI({ userId }: ChatUIProps) {
     try {
       const message = JSON.parse(event.data);
       console.log('ChatUI received message:', message);
-      
+
       // Handle server heartbeat
       if (message.message_type === "SERVER_HEARTBEAT") {
         console.log(`Received server heartbeat at ${new Date().toISOString()}`);
@@ -63,7 +63,7 @@ export function ChatUI({ userId }: ChatUIProps) {
         // Don't forward heartbeats to children to reduce noise
         return;
       }
-      
+
       // Update agent name map if it's a status update
       if (message.message_type === MessageType.AGENT_STATUS_UPDATE && message.agents) {
         setAgentNameMap(prevMap => {
@@ -76,10 +76,10 @@ export function ChatUI({ userId }: ChatUIProps) {
           return newMap;
         });
       }
-      
+
       // Set the last message to broadcast to child components
       setLastMessage(message);
-      
+
     } catch (error) {
       console.error('Error processing WebSocket message in ChatUI:', error);
     }
@@ -91,15 +91,15 @@ export function ChatUI({ userId }: ChatUIProps) {
       return;
     }
     if (reconnectTimeoutRef.current) {
-        window.clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
+      window.clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     console.log(`Attempting WebSocket connection to ${API_CONFIG.WS_URL}...`);
     try {
       const ws = new WebSocket(API_CONFIG.WS_URL);
       wsRef.current = ws;
-      
+
       // Set a connection timeout
       const connectionTimeout = setTimeout(() => {
         if (ws.readyState !== WebSocket.OPEN) {
@@ -110,13 +110,13 @@ export function ChatUI({ userId }: ChatUIProps) {
           scheduleReconnect();
         }
       }, 5000);
-      
+
       ws.onopen = () => {
         console.log('Connected to WebSocket server');
         clearTimeout(connectionTimeout);
         setIsConnected(true);
         reconnectAttemptsRef.current = 0;
-        
+
         // Register as frontend client
         const registerMessage = {
           message_type: MessageType.REGISTER_FRONTEND,
@@ -125,18 +125,18 @@ export function ChatUI({ userId }: ChatUIProps) {
         };
         ws.send(JSON.stringify(registerMessage));
       };
-      
+
       ws.onmessage = handleWebSocketMessage;
-      
+
       ws.onclose = () => {
         console.log('Disconnected from WebSocket server');
         setIsConnected(false);
         wsRef.current = null;
-        
+
         // Use our reconnect scheduler
         scheduleReconnect();
       };
-      
+
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
         setIsConnected(false);
@@ -147,7 +147,7 @@ export function ChatUI({ userId }: ChatUIProps) {
       scheduleReconnect();
     }
   };
-  
+
   const scheduleReconnect = () => {
     if (reconnectAttemptsRef.current < WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
       reconnectAttemptsRef.current += 1;
@@ -157,7 +157,7 @@ export function ChatUI({ userId }: ChatUIProps) {
       console.error('Max reconnection attempts reached. Please refresh the page.');
     }
   };
-  
+
   // Update the WebSocket when it changes
   useEffect(() => {
     if (wsRef.current) {
@@ -165,7 +165,7 @@ export function ChatUI({ userId }: ChatUIProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  
+
   // Check WebSocket connection status periodically
   useEffect(() => {
     const checkConnectionInterval = setInterval(() => {
@@ -186,7 +186,7 @@ export function ChatUI({ userId }: ChatUIProps) {
 
     return () => clearInterval(checkConnectionInterval);
   }, [isConnected]);
-  
+
   useEffect(() => {
     connectWebSocket();
 
@@ -198,7 +198,7 @@ export function ChatUI({ userId }: ChatUIProps) {
         window.clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      
+
       const ws = wsRef.current;
       if (ws) {
         console.log(`Cleaning up WebSocket connection (readyState: ${ws.readyState})`);
@@ -210,18 +210,18 @@ export function ChatUI({ userId }: ChatUIProps) {
 
         // Only call close() if the connection was actually open
         if (ws.readyState === WebSocket.OPEN) {
-            console.log("Closing OPEN WebSocket connection.");
-            ws.close();
+          console.log("Closing OPEN WebSocket connection.");
+          ws.close();
         } else {
-            console.log("WebSocket was not OPEN, skipping explicit close(). Browser will handle cleanup.");
+          console.log("WebSocket was not OPEN, skipping explicit close(). Browser will handle cleanup.");
         }
-        
+
         wsRef.current = null;
       }
       setIsConnected(false); // Ensure state reflects closed connection
     };
   }, []);
-  
+
   // Return the UI with the WebSocketContext provider
   return (
     <WebSocketContext.Provider value={{ lastMessage, sendMessage, agentNameMap }}>
@@ -230,23 +230,27 @@ export function ChatUI({ userId }: ChatUIProps) {
           <Chat wsRef={wsRef} isConnected={isConnected} userId={userId} />
         </div>
         <AgentPanel wsRef={wsRef} isConnected={isConnected} />
-        
+
         <style>
           {`
             .chat-ui {
               display: flex;
-              width: 100%; /* Ensure it fills the full width of main */
-              height: calc(100vh - 120px);
+              width: 100%;
+              height: 100%;
               gap: 20px;
               position: relative;
+              min-height: 0; /* Required for Firefox */
             }
             
             .chat-container {
-              flex-basis: 61.8%;
-              min-width: 0;
+              display: flex;
+              flex-direction: column;
+              flex: 1;
+              min-width: 0; /* Required for text truncation */
+              border: 1px solid var(--color-border-strong);
+              border-radius: 4px;
+              overflow: hidden; /* Contains all child overflows */
             }
-
-            /* AgentPanel styles are defined within AgentPanel.tsx - we will adjust that next */
           `}
         </style>
       </div>
