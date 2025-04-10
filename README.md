@@ -30,7 +30,7 @@ docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-manag
 ### 2. WebSocket Server
 ```bash
 cd server
-source .venv/bin/activate # Activate venv if you created one
+source ~/.bashrc
 poetry run python src/main.py
 ```
 
@@ -44,19 +44,17 @@ npm run dev
 ### 4. Message Routing Broker
 ```bash
 cd broker
-source .venv/bin/activate # Activate venv if you created one
+source ~/.bashrc
 poetry run python src/broker.py 
 ```
 
 ### 5. Agent(s)
 ```bash
 cd agent
-source .venv/bin/activate # Activate venv if you created one
-export MISTRAL_API_KEY='YOUR_KEY_HERE' # Set API key
+source ~/.bashrc
 poetry run python src/agent.py --name "AgentName1"
 
 # In another terminal (optional, for multiple agents):
 cd agent
-source .venv/bin/activate
-export MISTRAL_API_KEY='YOUR_KEY_HERE'
+source ~/.bashrc
 poetry run python src/agent.py --name "AgentName2"
