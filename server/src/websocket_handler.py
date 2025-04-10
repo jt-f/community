@@ -155,6 +155,10 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
     
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
     
+    # Send an immediate agent status update to the newly connected frontend
+    logger.debug(f"[DEBUG] Sending immediate agent status update to new frontend {frontend_id}")
+    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+    
     return {
         "message_type": MessageType.REGISTER_FRONTEND_RESPONSE,
         "status": ResponseStatus.SUCCESS,
@@ -422,4 +426,4 @@ async def websocket_endpoint(websocket: WebSocket):
         state.frontend_connections.discard(websocket)
         
         # Log final confirmation of cleanup
-        logger.info(f"WebSocket connection cleanup completed for: {client_id or 'unknown'}") 
+        logger.info(f"WebSocket connection cleanup completed for: {client_id or 'unknown'}")
