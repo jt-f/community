@@ -116,7 +116,7 @@ def handle_incoming_message(channel, method, properties, body):
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.AGENT_STATUS_UPDATE:
             # This shouldn't typically arrive here, but handle defensively
-            log.info(f"Received AGENT_STATUS_UPDATE from {sender_id} in input queue (unexpected)")
+            log.debug(f"Received AGENT_STATUS_UPDATE from {sender_id} in input queue (unexpected)")
             handle_agent_status_update(message_data)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.ERROR:
@@ -156,7 +156,7 @@ def handle_agent_status_update(message_data):
     
     # If this is a full update, we could optionally clear our previous state
     if is_full_update:
-        log.info("[DEBUG] This is a full update - current registered agents before update: " + 
+        log.debug("[DEBUG] This is a full update - current registered agents before update: " + 
                 json.dumps({id: {"name": info["name"], "is_online": info["is_online"]} 
                           for id, info in registered_agents.items()}))
     
@@ -194,7 +194,7 @@ def handle_agent_status_update(message_data):
     
     # If it was a full update, mark any agents not in the update as offline
     if is_full_update:
-        log.info("[DEBUG] Processing full status update - marking missing agents as offline")
+        log.debug("[DEBUG] Processing full status update - marking missing agents as offline")
         agents_to_mark_offline = set(registered_agents.keys()) - updated_ids
         for agent_id in agents_to_mark_offline:
             if registered_agents[agent_id].get("is_online", False):

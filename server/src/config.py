@@ -10,6 +10,11 @@ logging.basicConfig(
 # Configure logging
 logger = logging.getLogger("config")
 
+# Set log level to WARNING for ping/pong related messages
+logging.getLogger("agent_manager").setLevel(logging.WARNING)
+logging.getLogger("websocket_handler").setLevel(logging.WARNING)
+logging.getLogger("services").setLevel(logging.WARNING)
+
 # RabbitMQ Configuration
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))

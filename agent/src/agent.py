@@ -198,7 +198,10 @@ class Agent:
             message_type = message_dict.get("message_type", "unknown")
             message_id = message_dict.get("message_id", "unknown")
             sender_id = message_dict.get("sender_id", "unknown")
-            logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
+            if message_type == MessageType.SERVER_HEARTBEAT:
+                logger.debug(f"Received heartbeat from server")
+            else:
+                logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
             
             # Introduce a 10-second delay
             logger.info("Waiting 10 seconds before processing...")
@@ -291,7 +294,7 @@ class Agent:
                     # Respond to ping with a pong for status tracking
                     server_ping_time = data.get("timestamp", "unknown")
                     response_time = datetime.now().isoformat()
-                    logger.info(f"Received PING from server, responding with PONG")
+                    logger.debug(f"Received PING from server, responding with PONG")
                     
                     await self.websocket.send(json.dumps({
                         "message_type": MessageType.PONG,
@@ -305,6 +308,8 @@ class Agent:
                     logger.info("Received shutdown request from server")
                     self.running = False
                     break
+                elif message_type == MessageType.SERVER_HEARTBEAT:
+                    logger.debug("Received heartbeat from server, ignoring as it's meant for frontend clients")
                 elif message_type == MessageType.AGENT_STATUS_UPDATE:
                     # Agent status broadcasts can be ignored
                     logger.debug("Received agent status update, ignoring as it's meant for frontend clients")
