@@ -20,19 +20,15 @@ from shared_models import (
     AgentRegistrationMessage,
     AgentRegistrationResponse,
     create_text_message,
-    create_reply_message
+    create_reply_message,
+    setup_logging
 )
 
 # Import agent configuration
 import config as agent_config
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
+logger = setup_logging(__name__)
 
 # Reduce verbosity from pika library
 logging.getLogger("pika").setLevel(logging.WARNING)
@@ -193,7 +189,7 @@ class Agent:
         try:
             # Parse the message
             message_dict = json.loads(body)
-            
+            logger.info(f"Received message: {message_dict}")
             # Log the received message
             message_type = message_dict.get("message_type", "unknown")
             message_id = message_dict.get("message_id", "unknown")
@@ -202,10 +198,12 @@ class Agent:
                 logger.debug(f"Received heartbeat from server")
             else:
                 logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
+                logger.info(f"Message: {message_dict}")
             
-            # Introduce a 10-second delay
-            logger.info("Waiting 10 seconds before processing...")
-            time.sleep(10)
+            # Introduce a delay
+            delay = 5
+            logger.info(f"Waiting {delay} seconds before processing...")
+            time.sleep(delay)
             logger.info("Finished waiting, proceeding with processing.")
             
             # Process the message and generate response
@@ -250,7 +248,7 @@ class Agent:
                     ]
                 )
 
-                logger.info(f'Mistral response: {chat_response}')
+                logger.info(f'Mistral response: {chat_response.choices[0].message.content}')
                 llm_response_text = chat_response.choices[0].message.content
             except Exception as e:
                 logger.error(f"Error generating with Mistral: {str(e)}")
@@ -271,7 +269,7 @@ class Agent:
             "message_id": f"msg_{uuid.uuid4().hex}" # Add a unique ID for this reply message
         }
 
-        logger.info(f"Generated response: {response}")
+        logger.info(f"Generated response: {response['text_payload']}")
 
         # Add reference to original message if available
         if message_id:

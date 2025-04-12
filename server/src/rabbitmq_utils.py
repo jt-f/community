@@ -1,20 +1,15 @@
-import logging
 import json
 import pika
 from typing import Optional
 from datetime import datetime
 
 # Import config and state
+from shared_models import setup_logging
 import config
 import state
 
-
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("rabbitmq_utils")
+logger = setup_logging(__name__)
 
 def get_rabbitmq_connection() -> Optional[pika.BlockingConnection]:
     """Gets or establishes a RabbitMQ connection."""
@@ -67,7 +62,7 @@ def publish_to_queue(queue_name: str, message_data: dict) -> bool:
                 delivery_mode=2,  # make message persistent
             )
         )
-        logger.info(f"Message successfully published to {queue_name}")
+        logger.info(f"Message {message_data.get('message_id','N/A')} published to {queue_name}")
         return True
     except Exception as e:
         logger.error(f"Error publishing to queue {queue_name}: {e}")

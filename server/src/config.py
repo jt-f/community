@@ -1,19 +1,8 @@
 import os
-import logging
-
+from shared_models import setup_logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-# Configure logging
-logger = logging.getLogger("config")
-
-# Set log level to WARNING for ping/pong related messages
-logging.getLogger("agent_manager").setLevel(logging.WARNING)
-logging.getLogger("websocket_handler").setLevel(logging.WARNING)
-logging.getLogger("services").setLevel(logging.WARNING)
+logger = setup_logging(__name__)
 
 # RabbitMQ Configuration
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')

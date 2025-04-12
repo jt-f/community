@@ -1,20 +1,16 @@
-import logging
 import signal
 import sys
 import asyncio
 
 # Import state management and service functions
+from shared_models import setup_logging
 import state
 import services
 import rabbitmq_utils
 
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("utils")
+logger = setup_logging(__name__)
 
 async def shutdown_server():
     """Initiates the server shutdown sequence."""

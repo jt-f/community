@@ -4,6 +4,8 @@ from typing import Optional
 from enum import Enum
 import random
 import string
+import logging
+import sys
 
 class MessageType(str, Enum):
     AGENT_STATUS_UPDATE = "AGENT_STATUS_UPDATE"
@@ -176,3 +178,37 @@ class AgentStatusUpdate(BaseModel):
             message_type=data.get("message_type", MessageType.AGENT_STATUS_UPDATE),
             agents=[AgentStatus(**agent) for agent in data.get("agents", [])]
         ) 
+    
+def setup_logging(
+    name: str,
+    level: int = logging.INFO,
+    stream: Optional[logging.StreamHandler] = None
+) -> logging.Logger:
+    """
+    Set up logging with a consistent format across all modules.
+    
+    Args:
+        name: The name of the logger (typically __name__)
+        level: The logging level (default: INFO)
+        stream: Optional stream handler (default: sys.stdout)
+    
+    Returns:
+        logging.Logger: Configured logger instance
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Create and configure handler
+    if stream is None:
+        stream = logging.StreamHandler(sys.stdout)
+    stream.setFormatter(formatter)
+    
+    # Add handler to logger
+    logger.addHandler(stream)
+    
+    return logger 

@@ -1,4 +1,3 @@
-import logging
 import json
 from datetime import datetime
 import asyncio
@@ -7,19 +6,13 @@ from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 
 # Import shared models, config, state, and utils
-from shared_models import AgentStatus, AgentStatusUpdate, MessageType
+from shared_models import AgentStatus, AgentStatusUpdate, MessageType,setup_logging
 import config
 import state
 import rabbitmq_utils
 
 # Configure logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("agent_manager")
+logger = setup_logging(__name__)
 
 def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
     """Check if an agent's status has changed from its previous state."""
@@ -298,7 +291,7 @@ def handle_pong(agent_id: str):
         return
     
     # For agents, update its status
-    logger.info(f"Handling PONG from agent: {agent_id}")
+    logger.debug(f"Handling PONG from agent: {agent_id}")
     current_time = datetime.now().isoformat()
     
     # Simple case: already registered agent 

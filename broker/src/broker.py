@@ -10,21 +10,10 @@ from typing import Dict
 import asyncio
 import websockets
 import signal
+from shared_models import setup_logging, MessageType, ResponseStatus
 
-# Import shared models directly
-from shared_models import (
-    MessageType,
-    ResponseStatus
-)
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# Get a logger for this module
-log = logging.getLogger("broker")
+logger = setup_logging(__name__)
 
 # Define the broker name/ID
 BROKER_ID = f"broker_{random.randint(1000, 9999)}"
@@ -32,7 +21,7 @@ BROKER_ID = f"broker_{random.randint(1000, 9999)}"
 # Reduce verbosity from pika library
 logging.getLogger("pika").setLevel(logging.WARNING)
 logging.getLogger("websockets").setLevel(logging.INFO) # Adjust websocket lib logging
-log.info("Pika library logging level set to WARNING.")
+logger.info("Pika library logging level set to WARNING.")
 
 # Connection details
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
@@ -48,6 +37,10 @@ registered_agents = {}  # agent_id -> agent info (capabilities, name, etc.)
 
 # Global flag for shutdown coordination
 shutdown_event = asyncio.Event()
+
+# Global flag to track when we need to request agent status
+_need_agent_status_update = False
+
 
 def setup_rabbitmq_channel(queue_name, callback_function):
     """Set up a RabbitMQ channel and consumer."""
@@ -65,10 +58,10 @@ def setup_rabbitmq_channel(queue_name, callback_function):
             auto_ack=False
         )
         
-        log.info(f"Connected to RabbitMQ and consuming from {queue_name}")
+        logger.info(f"Connected to RabbitMQ and consuming from {queue_name}")
         return channel
     except Exception as e:
-        log.error(f"Failed to set up RabbitMQ channel for {queue_name}: {e}")
+        logger.error(f"Failed to set up RabbitMQ channel for {queue_name}: {e}")
         return None
 
 def publish_to_server_input_queue(message_data: dict) -> bool:
@@ -92,13 +85,13 @@ def publish_to_server_input_queue(message_data: dict) -> bool:
             )
         )
 
-        log.info(f"Published message {message_data.get('message_id', 'N/A')} type {message_data.get('message_type', '?')} to {SERVER_INPUT_QUEUE}")
+        logger.debug(f"Published message {message_data.get('message_id', 'N/A')} to {SERVER_INPUT_QUEUE}")
 
         # Clean up
         connection.close()
         return True
     except Exception as e:
-        log.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
+        logger.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
         return False
 
 def handle_incoming_message(channel, method, properties, body):
@@ -107,56 +100,65 @@ def handle_incoming_message(channel, method, properties, body):
         message_data = json.loads(body)
         message_type = message_data.get("message_type")
         sender_id = message_data.get("sender_id", "unknown") # Added sender_id for logging
+        receiver_id = message_data.get("receiver_id") # Get receiver_id
         
         if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
-            log.info(f"Received message type {message_type} from {sender_id} for routing")
+            logger.info(f"Incoming {message_type} message {message_data.get('message_id','N/A')} from {sender_id} : '{message_data.get('text_payload','N/A')}'")
+            
+            # Check if the message has a receiver_id that looks like an agent but is unknown
+            if (receiver_id and receiver_id.startswith("agent_") and 
+                receiver_id not in registered_agents):
+                logger.warning(f"Message {message_data.get('message_id', 'N/A')} references unknown agent: {receiver_id}")
+                # Request agent status update from server asynchronously
+                asyncio.create_task(request_agent_status())
+            
             # Route message
             route_message(message_data)
             # Acknowledge the message was processed
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.AGENT_STATUS_UPDATE:
             # This shouldn't typically arrive here, but handle defensively
-            log.debug(f"Received AGENT_STATUS_UPDATE from {sender_id} in input queue (unexpected)")
+            logger.debug(f"Received AGENT_STATUS_UPDATE from {sender_id} in input queue (unexpected)")
             handle_agent_status_update(message_data)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.ERROR:
-            log.warning(f"Received ERROR message from {sender_id}. Forwarding to server.")
+            logger.warning(f"Received ERROR message from {sender_id}. Forwarding to server.")
             # Forward error messages directly to the server via the server input queue
             publish_to_server_input_queue(message_data)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
-            log.warning(f"Received unsupported message type in broker input queue: {message_type} from {sender_id}")
+            logger.warning(f"Received unsupported message type in broker input queue: {message_type} from {sender_id}")
             # Acknowledge but skip processing
             channel.basic_ack(delivery_tag=method.delivery_tag)
     except json.JSONDecodeError:
-        log.error(f"Invalid JSON in message: {body}")
+        logger.error(f"Invalid JSON in message: {body}")
         # Acknowledge but don't process invalid messages
         channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:
-        log.error(f"Error processing incoming message: {e}")
+        logger.error(f"Error processing incoming message: {e}")
         # Negative acknowledgment for failed processing
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 def handle_agent_status_update(message_data):
     """Process agent status updates received via WebSocket."""
-    log.debug(f"[DEBUG] Received agent status update: {message_data}")
+    logger.debug(f"[DEBUG] Received agent status update: {message_data}")
     
     if message_data.get("message_type") != MessageType.AGENT_STATUS_UPDATE:
-        log.warning(f"Received non-status update message in status handler: {message_data.get('message_type')}")
+        logger.warning(f"Received non-status update message in status handler: {message_data.get('message_type')}")
         return
     
     agents_data = message_data.get("agents", [])
     is_full_update = message_data.get("is_full_update", False)
     
     if not agents_data:
-        log.debug("[DEBUG] Received empty agent status update.")
+        logger.debug("[DEBUG] Received empty agent status update.")
         return
         
-    log.debug(f"[DEBUG] Processing status update for {len(agents_data)} agents via WebSocket (is_full_update={is_full_update})")
+    logger.debug(f"[DEBUG] Processing status update for {len(agents_data)} agents via WebSocket (is_full_update={is_full_update})")
     
     # If this is a full update, we could optionally clear our previous state
     if is_full_update:
-        log.debug("[DEBUG] This is a full update - current registered agents before update: " + 
+        logger.debug("[DEBUG] This is a full update - current registered agents before update: " + 
                 json.dumps({id: {"name": info["name"], "is_online": info["is_online"]} 
                           for id, info in registered_agents.items()}))
     
@@ -165,7 +167,7 @@ def handle_agent_status_update(message_data):
     for agent in agents_data:
         agent_id = agent.get("agent_id")
         if not agent_id:
-            log.warning("[DEBUG] Received agent status entry with no ID")
+            logger.warning("[DEBUG] Received agent status entry with no ID")
             continue
         
         updated_ids.add(agent_id)
@@ -179,39 +181,39 @@ def handle_agent_status_update(message_data):
                 "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "is_online": is_online
             }
-            log.debug(f"[DEBUG] Added new agent from status update: {agent_name} ({agent_id}), Online: {is_online}")
+            logger.debug(f"[DEBUG] Added new agent from status update: {agent_name} ({agent_id}), Online: {is_online}")
         else:
             # Update existing agent's online status if it changed
             if registered_agents[agent_id].get("is_online") != is_online:
                 old_status = registered_agents[agent_id].get("is_online")
                 registered_agents[agent_id]["is_online"] = is_online
-                log.debug(f"[DEBUG] Updated agent status: {agent_name} ({agent_id}), Online status changed: {old_status} -> {is_online}")
+                logger.debug(f"[DEBUG] Updated agent status: {agent_name} ({agent_id}), Online status changed: {old_status} -> {is_online}")
             # Optionally update name if it changed
             if registered_agents[agent_id].get("name") != agent_name:
                 old_name = registered_agents[agent_id].get("name")
                 registered_agents[agent_id]["name"] = agent_name
-                log.debug(f"[DEBUG] Updated agent name: {agent_id} from '{old_name}' to '{agent_name}'")
+                logger.debug(f"[DEBUG] Updated agent name: {agent_id} from '{old_name}' to '{agent_name}'")
     
     # If it was a full update, mark any agents not in the update as offline
     if is_full_update:
-        log.debug("[DEBUG] Processing full status update - marking missing agents as offline")
+        logger.debug("[DEBUG] Processing full status update - marking missing agents as offline")
         agents_to_mark_offline = set(registered_agents.keys()) - updated_ids
         for agent_id in agents_to_mark_offline:
             if registered_agents[agent_id].get("is_online", False):
                 registered_agents[agent_id]["is_online"] = False
-                log.debug(f"[DEBUG] Marked agent {registered_agents[agent_id].get('name', agent_id)} ({agent_id}) as offline (not in full update)")
+                logger.debug(f"[DEBUG] Marked agent {registered_agents[agent_id].get('name', agent_id)} ({agent_id}) as offline (not in full update)")
     
     # Log the final state after processing
     online_agents = [agent_id for agent_id, info in registered_agents.items() if info.get("is_online", False)]
-    log.debug(f"[DEBUG] After status update: Total agents: {len(registered_agents)}, Online agents: {len(online_agents)}")
-    log.debug(f"[DEBUG] Online agents: {online_agents}")
+    logger.debug(f"[DEBUG] After status update: Total agents: {len(registered_agents)}, Online agents: {len(online_agents)}")
+    logger.debug(f"[DEBUG] Online agents: {online_agents}")
     
     # Removed update to undefined agent_statuses
     # agent_statuses.update({id: info["is_online"] for id, info in registered_agents.items()})
     
     # Commented out block using undefined wait_for_online_callbacks
     # if online_agents and any(id in online_agents for id in wait_for_online_callbacks):
-    #     log.debug(f"[DEBUG] Notifying wait_for_online callbacks for newly online agents")
+    #     logger.debug(f"[DEBUG] Notifying wait_for_online callbacks for newly online agents")
     #     for agent_id in list(wait_for_online_callbacks.keys()):
     #         if agent_id in online_agents:
     #             callbacks = wait_for_online_callbacks.pop(agent_id, [])
@@ -230,15 +232,15 @@ def handle_control_message(channel, method, properties, body):
         elif message_type == MessageType.CLIENT_DISCONNECTED:
             handle_client_disconnected(message_data)
         else:
-            log.warning(f"Received unsupported control message type: {message_type}")
+            logger.warning(f"Received unsupported control message type: {message_type}")
         
         # Acknowledge the message was processed
         channel.basic_ack(delivery_tag=method.delivery_tag)
     except json.JSONDecodeError:
-        log.error(f"Invalid JSON in control message: {body}")
+        logger.error(f"Invalid JSON in control message: {body}")
         channel.basic_ack(delivery_tag=method.delivery_tag)
     except Exception as e:
-        log.error(f"Error processing control message: {e}")
+        logger.error(f"Error processing control message: {e}")
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 def handle_agent_registration(message_data):
@@ -248,7 +250,7 @@ def handle_agent_registration(message_data):
     client_id = message_data.get("_client_id")
     
     if not agent_id:
-        log.error("Agent registration failed: Missing agent_id")
+        logger.error("Agent registration failed: Missing agent_id")
         return
     
     # Store agent information - this is the only state we need to maintain
@@ -259,7 +261,7 @@ def handle_agent_registration(message_data):
         "is_online": True
     }
     
-    log.info(f"Agent registered: {agent_name} (ID: {agent_id})")
+    logger.info(f"Agent registered: {agent_name} (ID: {agent_id})")
     
     # Prepare registration response
     response = {
@@ -282,22 +284,72 @@ def handle_client_disconnected(message_data):
     
     # If this is an agent disconnection and we know about this agent
     if agent_id and agent_id in registered_agents:
-        log.info(f"Unregistering agent {agent_id} due to client disconnection")
+        logger.info(f"Unregistering agent {agent_id} due to client disconnection")
         
         # Mark agent as offline but keep its registration
         registered_agents[agent_id]["is_online"] = False
-        log.info(f"Agent {agent_id} marked as offline")
+        logger.info(f"Agent {agent_id} marked as offline")
 
 def handle_server_advertisement(channel, method, properties, body):
     """Handle server availability advertisement."""
     try:
         message_data = json.loads(body)
         if message_data.get("message_type") == MessageType.SERVER_AVAILABLE:
-            log.info(f"Server available at {message_data.get('websocket_url')}")
+            logger.info(f"Server available at {message_data.get('websocket_url')}")
     except Exception as e:
-        log.error(f"Error handling server advertisement: {e}")
+        logger.error(f"Error handling server advertisement: {e}")
     finally:
         channel.basic_ack(delivery_tag=method.delivery_tag)
+
+async def request_agent_status():
+    """Request agent status update from the server via WebSocket.
+    This is called when the broker encounters an unknown agent ID.
+    """
+    # Global variable to track the last time we requested agent status
+    # to prevent flooding the server with requests
+    global _last_agent_status_request
+    current_time = time.time()
+    
+    # Don't request more than once every 5 seconds
+    if hasattr(request_agent_status, '_last_request_time') and \
+       current_time - request_agent_status._last_request_time < 5:
+        logger.debug("Skipping agent status request due to rate limiting")
+        return
+    
+    # Store the current time as the last request time
+    request_agent_status._last_request_time = current_time
+    
+    # Create a websocket connection if we're not already in a websocket context
+    try:
+        # Send the request message to the server
+        logger.info("Requesting agent status update from server")
+        request_message = {
+            "message_type": MessageType.REQUEST_AGENT_STATUS,
+            "sender_id": BROKER_ID,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Try to find an active websocket in the current active connections
+        # This is a simplified approach assuming websocket_listener has a valid connection
+        # A more robust solution would involve a dedicated websocket manager
+        
+        for task in asyncio.all_tasks():
+            task_name = task.get_name() 
+            if task_name == "websocket_listener" and not task.done():
+                # The websocket_listener task is running
+                logger.debug("Found active websocket_listener task")
+                # We can't access its websocket directly,
+                # so we'll set a flag to request status on next message
+                global _need_agent_status_update
+                _need_agent_status_update = True
+                return
+        
+        logger.warning("No active websocket connection found to request agent status")
+        # Schedule an attempt to reconnect the websocket if needed
+        # This assumes the websocket_listener will reconnect itself
+        
+    except Exception as e:
+        logger.error(f"Error requesting agent status: {e}")
 
 def route_message(message_data):
     """Route messages to the appropriate recipients.
@@ -309,8 +361,13 @@ def route_message(message_data):
     """
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
-
-    log.debug(f"[DEBUG] Routing message from {sender_id} type={message_type}")
+    message_id = message_data.get("message_id", "N/A")
+    logger.debug(f"[DEBUG] Routing message from {sender_id} type={message_type}")
+    
+    # If the sender looks like an agent but we don't know about it, request agent status
+    if sender_id.startswith("agent_") and sender_id not in registered_agents:
+        logger.warning(f"Message from unknown agent {sender_id}. Requesting agent status update.")
+        asyncio.create_task(request_agent_status())
     
     # Create a clean copy of the message for routing
     outgoing_message = dict(message_data)
@@ -325,11 +382,11 @@ def route_message(message_data):
     truncated_text = (original_text[:20] + '...') if len(original_text) > 20 else original_text
 
     # Thoroughly log the state of all agents
-    log.debug(f"[DEBUG] All registered agents: {json.dumps(registered_agents)}")
+    logger.debug(f"[DEBUG] All registered agents: {json.dumps(registered_agents)}")
     
     # Log all agent statuses
     for agent_id, info in registered_agents.items():
-        log.debug(f"[DEBUG] Agent {agent_id}: name={info.get('name', 'unknown')}, is_online={info.get('is_online', False)}")
+        logger.debug(f"[DEBUG] Agent {agent_id}: name={info.get('name', 'unknown')}, is_online={info.get('is_online', False)}")
     
     # Get list of online agents, EXCLUDING the sender if it's an agent
     online_agents = [
@@ -337,7 +394,7 @@ def route_message(message_data):
         if info.get("is_online", False) and agent_id != sender_id  # Exclude the sender
     ]
 
-    log.debug(f"[DEBUG] Online agents (excluding sender): {online_agents}")
+    logger.debug(f"[DEBUG] Online agents (excluding sender): {online_agents}")
     
     if online_agents:
         # Randomly select an agent (that is not the sender)
@@ -347,7 +404,7 @@ def route_message(message_data):
         outgoing_message["receiver_id"] = chosen_agent_id
         
         # Send the message
-        log.info(f"Randomly routing message '{truncated_text}' from {sender_id} to agent {chosen_agent_id}")
+        logger.info(f"Routing message {message_id} to agent {chosen_agent_id}")
         publish_to_server_input_queue(outgoing_message) # Send routed message to server queue
         return
     else:
@@ -357,13 +414,13 @@ def route_message(message_data):
             if info.get("is_online", False)
         ]
         
-        log.debug(f"[DEBUG] All online agents (including sender): {all_online_agents}")
+        logger.debug(f"[DEBUG] All online agents (including sender): {all_online_agents}")
         
         # If sender is the only online agent
         if sender_id in all_online_agents and len(all_online_agents) == 1:
             # Get the agent's name for the error message
             agent_name = registered_agents.get(sender_id, {}).get("name", sender_id) # Fallback to ID if name not found
-            log.warning(f"Only the sending agent {agent_name} ({sender_id}) is online. Cannot route message '{truncated_text}' to another agent.")
+            logger.warning(f"Only the sending agent {agent_name} ({sender_id}) is online. Cannot route message '{truncated_text}' to another agent.")
             error_response = {
                 "message_type": MessageType.ERROR,
                 "sender_id": "BrokerService", # Keep sender as Broker
@@ -381,15 +438,17 @@ def route_message(message_data):
                 "text_payload": f"No online agents available to handle the message."
             }
             publish_to_server_input_queue(error_response)
-            log.warning(f"Could not route message '{truncated_text}' from {sender_id}: No online agents found")
+            logger.warning(f"Could not route message '{truncated_text}' from {sender_id}: No online agents found")
             return
 
 async def websocket_listener():
     """Connects to the server via WebSocket and listens for messages."""
+    global BROKER_ID, _need_agent_status_update  # Move both global declarations to the beginning of the function
+    
     while not shutdown_event.is_set():
         try:
             async with websockets.connect(WEBSOCKET_URL) as websocket:
-                log.info(f"Connected to WebSocket server at {WEBSOCKET_URL}")
+                logger.info(f"Connected to WebSocket server at {WEBSOCKET_URL}")
                 
                 # Register as broker with just the name
                 register_message = {
@@ -397,7 +456,7 @@ async def websocket_listener():
                     "broker_name": "BrokerService"  # Just provide the name
                 }
                 await websocket.send(json.dumps(register_message))
-                log.info("Sent REGISTER_BROKER message")
+                logger.info("Sent REGISTER_BROKER message")
                 
                 # Wait for registration response
                 response = await websocket.recv()
@@ -405,16 +464,43 @@ async def websocket_listener():
                 
                 if response_data.get("message_type") == MessageType.REGISTER_BROKER_RESPONSE:
                     # Store the assigned broker ID
-                    global BROKER_ID
                     BROKER_ID = response_data["broker_id"]
-                    log.info(f"Registered as broker with ID: {BROKER_ID}")
+                    logger.info(f"Registered as broker with ID: {BROKER_ID}")
+                elif response_data.get("message_type") == MessageType.AGENT_STATUS_UPDATE:
+                    # Server might send agent status update immediately after registration
+                    # Process it and continue waiting for the actual registration response
+                    handle_agent_status_update(response_data)
+                    
+                    # Now wait for the actual registration response
+                    response = await websocket.recv()
+                    response_data = json.loads(response)
+                    
+                    if response_data.get("message_type") == MessageType.REGISTER_BROKER_RESPONSE:
+                        # Store the assigned broker ID
+                        BROKER_ID = response_data["broker_id"]
+                        logger.info(f"Registered as broker with ID: {BROKER_ID}")
+                    else:
+                        logger.error(f"Failed to register broker: {response_data}")
+                        continue
                 else:
-                    log.error(f"Failed to register broker: {response_data}")
+                    logger.error(f"Failed to register broker: {response_data}")
                     continue
                 
                 # Listen for messages
                 while not shutdown_event.is_set():
                     try:
+                        # Check if we need to request agent status
+                        if _need_agent_status_update:
+                            logger.info("Sending queued REQUEST_AGENT_STATUS message to server")
+                            status_request = {
+                                "message_type": MessageType.REQUEST_AGENT_STATUS,
+                                "sender_id": BROKER_ID,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            await websocket.send(json.dumps(status_request))
+                            _need_agent_status_update = False
+                            logger.info("REQUEST_AGENT_STATUS message sent")
+
                         message_str = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                         message_data = json.loads(message_str)
                         message_type = message_data.get("message_type")
@@ -425,38 +511,38 @@ async def websocket_listener():
                             # Respond to PING/HEARTBEAT from server
                             pong_message = {"message_type": MessageType.PONG}
                             await websocket.send(json.dumps(pong_message))
-                            log.debug(f"Received {message_type}, sent PONG to server")
+                            logger.debug(f"Received {message_type}, sent PONG to server")
                         elif message_type == MessageType.ERROR:
                             # Server might send ERROR if it doesn't handle our PING; ignore it.
-                            log.debug(f"Received ERROR message via WebSocket, likely due to PING: {message_data.get('text_payload')}")
+                            logger.debug(f"Received ERROR message via WebSocket, likely due to PING: {message_data.get('text_payload')}")
                             pass # Ignore these errors
                         else:
-                            log.warning(f"Received unhandled WebSocket message type: {message_type}")
+                            logger.warning(f"Received unhandled WebSocket message type: {message_type}")
                             
                     except asyncio.TimeoutError:
                         # No message received, just continue listening
                         continue
                     except websockets.exceptions.ConnectionClosedOK:
-                        log.info("WebSocket connection closed normally.")
+                        logger.info("WebSocket connection closed normally.")
                         break # Exit inner loop to reconnect
                     except websockets.exceptions.ConnectionClosedError as e:
-                        log.error(f"WebSocket connection closed with error: {e}")
+                        logger.error(f"WebSocket connection closed with error: {e}")
                         break # Exit inner loop to reconnect
                     except json.JSONDecodeError:
-                        log.error(f"Invalid JSON received via WebSocket: {message_str}")
+                        logger.error(f"Invalid JSON received via WebSocket: {message_str}")
                     except Exception as e:
-                        log.exception(f"Error processing WebSocket message: {e}")
+                        logger.exception(f"Error processing WebSocket message: {e}")
         
         except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.InvalidURI, ConnectionRefusedError, OSError) as e:
-            log.error(f"WebSocket connection failed: {e}")
+            logger.error(f"WebSocket connection failed: {e}")
         except Exception as e:
-            log.exception(f"Unexpected error in websocket_listener: {e}")
+            logger.exception(f"Unexpected error in websocket_listener: {e}")
             
         if not shutdown_event.is_set():
-            log.info("Attempting to reconnect WebSocket in 5 seconds...")
+            logger.info("Attempting to reconnect WebSocket in 5 seconds...")
             await asyncio.sleep(5)
             
-    log.info("WebSocket listener shutting down.")
+    logger.info("WebSocket listener shutting down.")
 
 # REMOVED request_agent_status function
 # ...
@@ -465,22 +551,22 @@ async def websocket_listener():
 def run_rabbitmq_consumer(channel):
     """Target function to run pika's blocking consumer in a separate thread."""
     try:
-        log.info(f"Starting RabbitMQ consumer thread for queue: {channel.consumer_tags[0] if channel.consumer_tags else 'unknown'}")
+        logger.info(f"Starting RabbitMQ consumer thread for queue: {channel.consumer_tags[0] if channel.consumer_tags else 'unknown'}")
         channel.start_consuming()
     except Exception as e:
-        log.error(f"Exception in RabbitMQ consumer thread: {e}")
+        logger.error(f"Exception in RabbitMQ consumer thread: {e}")
     finally:
         if channel and channel.is_open:
             try:
                 channel.stop_consuming()
                 channel.close()
             except Exception as close_exc:
-                log.error(f"Error closing RabbitMQ channel in thread: {close_exc}")
-        log.info("RabbitMQ consumer thread finished.")
+                logger.error(f"Error closing RabbitMQ channel in thread: {close_exc}")
+        logger.info("RabbitMQ consumer thread finished.")
 
 async def main_async():
     """Main async function to run WebSocket listener and RabbitMQ consumers."""
-    log.info(f"Starting async message broker service (ID: {BROKER_ID})")
+    logger.info(f"Starting async message broker service (ID: {BROKER_ID})")
     
     # --- Setup RabbitMQ Channels (Synchronous part) ---
     # Note: We setup channels here, but run consumers in threads
@@ -501,7 +587,7 @@ async def main_async():
              raise RuntimeError("Failed to set up any RabbitMQ channels.")
              
     except Exception as setup_exc:
-        log.error(f"Fatal error setting up RabbitMQ: {setup_exc}")
+        logger.error(f"Fatal error setting up RabbitMQ: {setup_exc}")
         return # Exit if RabbitMQ setup fails
     
     # --- Start RabbitMQ Consumers in Threads --- 
@@ -510,45 +596,45 @@ async def main_async():
         thread = threading.Thread(target=run_rabbitmq_consumer, args=(channel,), daemon=True, name=f"RabbitMQ-{name}")
         thread.start()
         consumer_threads.append(thread)
-        log.info(f"Started RabbitMQ consumer thread for {name}")
+        logger.info(f"Started RabbitMQ consumer thread for {name}")
     
     # --- Start WebSocket Listener Task --- 
     websocket_task = asyncio.create_task(websocket_listener())
-    log.info("Started WebSocket listener task.")
+    logger.info("Started WebSocket listener task.")
     
-    log.info("Broker service components running. Waiting for shutdown signal...")
+    logger.info("Broker service components running. Waiting for shutdown signal...")
     
     # --- Wait for Shutdown --- 
     await shutdown_event.wait() # Wait until the shutdown event is set
     
     # --- Initiate Graceful Shutdown --- 
-    log.info("Shutdown signal received. Stopping components...")
+    logger.info("Shutdown signal received. Stopping components...")
     
     # Stop WebSocket listener task
     websocket_task.cancel()
     try:
         await websocket_task
     except asyncio.CancelledError:
-        log.info("WebSocket listener task cancelled.")
+        logger.info("WebSocket listener task cancelled.")
         
     # Stop RabbitMQ consumers (by closing channels from main thread)
-    log.info("Stopping RabbitMQ consumer threads...")
+    logger.info("Stopping RabbitMQ consumer threads...")
     for channel, name in channels_to_run.items():
         if channel and channel.is_open:
             try:
                 # Closing the channel from here should interrupt the blocking start_consuming() in the thread
                 channel.close()
-                log.info(f"Closed RabbitMQ channel for {name}")
+                logger.info(f"Closed RabbitMQ channel for {name}")
             except Exception as e:
-                log.error(f"Error closing RabbitMQ channel {name} during shutdown: {e}")
+                logger.error(f"Error closing RabbitMQ channel {name} during shutdown: {e}")
                 
     # Wait for consumer threads to finish (optional, with timeout)
     for thread in consumer_threads:
         thread.join(timeout=5.0)
         if thread.is_alive():
-            log.warning(f"RabbitMQ consumer thread {thread.name} did not exit cleanly.")
+            logger.warning(f"RabbitMQ consumer thread {thread.name} did not exit cleanly.")
 
-    log.info("Broker service shut down successfully.")
+    logger.info("Broker service shut down successfully.")
 
 def main():
     """Sets up signal handling and runs the main async function."""
@@ -562,7 +648,7 @@ def main():
         loop.run_until_complete(main_async())
     finally:
         loop.close()
-        log.info("Asyncio event loop closed.")
+        logger.info("Asyncio event loop closed.")
 
 if __name__ == "__main__":
     import signal # Import signal here for the main block

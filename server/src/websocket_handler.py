@@ -8,8 +8,8 @@ import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 
 # Import shared models, config, state, and utils
-from shared_models import MessageType, ResponseStatus, AgentRegistrationResponse, ChatMessage
-import config
+from shared_models import MessageType, ResponseStatus, ChatMessage, setup_logging
+
 import state
 import rabbitmq_utils
 import agent_manager
@@ -17,12 +17,7 @@ import agent_manager
 import services
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("websocket_handler")
+logger = setup_logging(__name__)
 
 # Store client names
 client_names: Dict[str, str] = {}
@@ -32,18 +27,14 @@ def generate_unique_id(client_type: str) -> str:
     unique_id = str(uuid.uuid4())[:8]  # Take first 8 characters of UUID
     return f"{client_type}_{unique_id}"
 
-# --- WebSocket Send Helper (_safe_send_websocket is now in services.py) ---
 
-# --- Error Response Helper (Removed as previous request was rejected) ---
-
-# --- Helper Functions for Message Handling ---
 
 async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
     """Handle broker registration."""
-    logger.info(f"[DEBUG] Handling broker registration request: {message}")
+    logger.info(f"Handling broker registration request: {message}")
     broker_name = message.get("broker_name")
     if not broker_name:
-        logger.warning(f"[DEBUG] Broker registration failed: missing broker_name in request: {message}")
+        logger.warning(f"Broker registration failed: missing broker_name in request: {message}")
         return {
             "message_type": MessageType.ERROR,
             "text_payload": "Broker name is required for registration"
@@ -51,7 +42,7 @@ async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
     
     # Generate unique ID for broker
     broker_id = generate_unique_id("broker")
-    logger.info(f"[DEBUG] Generated new broker ID: {broker_id} for broker: {broker_name}")
+    logger.info(f"Generated new broker ID: {broker_id} for broker: {broker_name}")
     
     # Store the connection and name
     state.broker_connections[broker_id] = websocket
@@ -61,7 +52,7 @@ async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
     websocket.client_id = broker_id
     websocket.connection_type = "broker"
     
-    logger.info(f"[DEBUG] Stored broker connection and name. Current broker connections: {list(state.broker_connections.keys())}")
+    logger.info(f"Stored broker connection and name. Current broker connections: {list(state.broker_connections.keys())}")
     
     # Add to broker status dictionary
     async with state.broker_status_lock:
@@ -81,20 +72,20 @@ async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
         "message": "Broker registered successfully"
     }
     
-    logger.debug(f"[DEBUG] Sending registration response to broker: {response}")
+    logger.debug(f"Sending registration response to broker: {response}")
     
-    # Send a full agent status update immediately
-    logger.debug(f"[DEBUG] Scheduling full agent status update to be sent to new broker {broker_id}")
-    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+    # Send a full agent status update immediately to this specific broker
+    logger.info(f"Sending immediate full agent status update to new broker {broker_id}")
+    await agent_manager.send_agent_status_to_broker()
     
     return response
 
 async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
     """Handle agent registration."""
-    logger.debug(f"[DEBUG] Handling agent registration request: {message}")
+    logger.debug(f"Handling agent registration request: {message}")
     agent_name = message.get("agent_name")
     if not agent_name:
-        logger.warning(f"[DEBUG] Registration failed: missing agent_name in request: {message}")
+        logger.warning(f"Registration failed: missing agent_name in request: {message}")
         return {
             "message_type": MessageType.ERROR,
             "text_payload": "Agent name is required for registration"
@@ -102,7 +93,7 @@ async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
     
     # Generate unique ID for agent
     agent_id = generate_unique_id("agent")
-    logger.debug(f"[DEBUG] Generated new agent ID: {agent_id} for agent: {agent_name}")
+    logger.debug(f"Generated new agent ID: {agent_id} for agent: {agent_name}")
     
     # Store the connection and name
     state.agent_connections[agent_id] = websocket
@@ -112,13 +103,13 @@ async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
     websocket.client_id = agent_id
     websocket.connection_type = "agent"
     
-    logger.debug(f"[DEBUG] Stored agent connection and name: agent_id={agent_id}, name={agent_name}")
+    logger.debug(f"Stored agent connection and name: agent_id={agent_id}, name={agent_name}")
     
     # Update agent status and trigger broadcast
     status_updated = agent_manager.update_agent_status(agent_id, agent_name, True)
-    logger.debug(f"[DEBUG] Agent status updated in agent manager: {status_updated}")
+    logger.debug(f"Agent status updated in agent manager: {status_updated}")
     
-    logger.debug(f"[DEBUG] Broadcasting agent status after registration (full update)")
+    logger.debug(f"Broadcasting agent status after registration (full update)")
     await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True)
     
     logger.info(f"Agent registered successfully: {agent_name} (ID: {agent_id})")
@@ -130,7 +121,7 @@ async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
         "agent_name": agent_name,
         "message": "Agent registered successfully"
     }
-    logger.debug(f"[DEBUG] Sending registration response: {response}")
+    logger.debug(f"Sending registration response: {response}")
     return response
 
 async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict:
@@ -156,7 +147,7 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
     
     # Send an immediate agent status update to the newly connected frontend
-    logger.debug(f"[DEBUG] Sending immediate agent status update to new frontend {frontend_id}")
+    logger.debug(f"Sending immediate agent status update to new frontend {frontend_id}")
     asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
     
     return {
@@ -204,16 +195,16 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
     message_data["_connection_type"] = getattr(websocket, "connection_type", "unknown")
     # Add client_id to the message
     message_data["_client_id"] = client_id
-    logger.debug(f"Processing {message_type} from {client_id} ({message_data['_connection_type']}).")
+    logger.info(f"Incoming {message_type} message {message_data.get('message_id','N/A')} from {client_id} : '{message_data.get('text_payload','N/A')}'")
 
     # --- Broadcast to all connected Frontends FIRST --- 
     payload_str = json.dumps(message_data)
     disconnected_frontend = set()
     frontend_count = len(state.frontend_connections)
     if frontend_count > 0:
-        logger.info(f"Broadcasting incoming {message_type} from {client_id} to {frontend_count} frontend clients.")
         for fe_ws in list(state.frontend_connections):
             fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
+            logger.info(f"Broadcasting message {message_data.get('message_id','N/A')} to {fe_client_desc}")
             if not await services._safe_send_websocket(fe_ws, payload_str, fe_client_desc):
                 disconnected_frontend.add(fe_ws)
         # Clean up disconnected frontends immediately
@@ -359,16 +350,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not client_id:
                     # Handle registration messages
                     if message_type == MessageType.REGISTER_AGENT:
-                        logger.info(f"[DEBUG] Received REGISTER_AGENT message from unregistered client: {message}")
+                        logger.info(f"Received REGISTER_AGENT message from unregistered client: {message}")
                         response = await _handle_register_agent(websocket, message)
-                        logger.info(f"[DEBUG] Sending registration response to agent: {response}")
+                        logger.info(f"Sending registration response to agent: {response}")
                         await websocket.send_text(json.dumps(response))
                     elif message_type == MessageType.REGISTER_BROKER:
-                        logger.info(f"[DEBUG] Received REGISTER_BROKER message from unregistered client")
+                        logger.info(f"Received REGISTER_BROKER message from unregistered client")
                         response = await _handle_register_broker(websocket, message)
                         await websocket.send_text(json.dumps(response))
                     elif message_type == MessageType.REGISTER_FRONTEND:
-                        logger.info(f"[DEBUG] Received REGISTER_FRONTEND message from unregistered client")
+                        logger.info(f"Received REGISTER_FRONTEND message from unregistered client")
                         response = await _handle_register_frontend(websocket, message)
                         await websocket.send_text(json.dumps(response))
                     else:
@@ -388,10 +379,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             "sender_id": "server"
                         }))
                         logger.debug(f"Received PING from {client_id}, sent PONG response")
-                    elif message_type == MessageType.TEXT:
-                        await _handle_chat_message(websocket, client_id, message)
                     elif message_type == MessageType.REQUEST_AGENT_STATUS:
                         await _handle_request_agent_status(websocket, client_id, message)
+                    # Handle chat-related messages
+                    elif message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+                        await _handle_chat_message(websocket, client_id, message)
                     else:
                         logger.warning(f"Unknown message type from {client_id}: {message_type}")
                         

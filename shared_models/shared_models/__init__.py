@@ -1,4 +1,4 @@
-from shared_models.shared_models import (
+from .shared_models import (
     MessageType,
     ResponseStatus,
     AgentStatus,
@@ -22,4 +22,4 @@ __all__ = [
     'create_text_message',
     'create_reply_message',
     'setup_logging'
-]
+] 

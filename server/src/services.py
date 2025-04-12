@@ -6,11 +6,12 @@ from datetime import datetime, timedelta
 from fastapi import WebSocket # Added for _safe_send_websocket type hint
 
 # Import shared models, config, state, and utils
-from shared_models import MessageType, ChatMessage
+from shared_models import MessageType, setup_logging
 import config
 import state
 import rabbitmq_utils
 import agent_manager
+import utils
 
 # Import the necessary publish functions explicitly
 from rabbitmq_utils import publish_to_agent_queue, publish_to_broker_input_queue
@@ -24,13 +25,7 @@ agent_connections_lock = asyncio.Lock()
 # Use the same ping interval as configured for agents
 PING_INTERVAL = config.AGENT_PING_INTERVAL
 
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("services")
+logger = setup_logging(__name__)
 
 # --- Helper Functions ---
 
@@ -55,12 +50,12 @@ async def _safe_send_websocket(ws: WebSocket, payload_str: str, client_desc: str
         logger.error(f"Error sending message to {client_desc}: {e}. Connection assumed lost.")
         return False
 
-async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_desc: str = "server_input_consumer"):
+async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_desc: str = "server_input_consumer", message_id: str = "N/A"):
     """Helper to broadcast a message payload (as JSON string) to all connected frontends."""
     disconnected_frontend = set()
     frontend_count = len(state.frontend_connections)
     if frontend_count > 0:
-        logger.info(f"Broadcasting {message_type} from {origin_desc} to {frontend_count} frontend clients.")
+        logger.info(f"Broadcasting message {message_id} from {origin_desc} to {frontend_count} frontend clients.")
         # Iterate over a copy of the set to avoid modification during iteration
         for fe_ws in list(state.frontend_connections):
             # Get the client_id for better logging
@@ -85,8 +80,6 @@ async def _process_server_input_message(message_data: dict):
     receiver_id = message_data.get("receiver_id")
     message_id = message_data.get("message_id", "N/A")
 
-    logger.info(f"Processing message ID {message_id} from {sender_id} (type: {message_type}, receiver: {receiver_id}) via server_input_queue")
-
     try:
         # --- Priority Case: Direct message from Broker (e.g., routing error) ---
         if sender_id == "BrokerService":
@@ -100,7 +93,7 @@ async def _process_server_input_message(message_data: dict):
 
             message_for_frontend = _prepare_message_for_client(message_data, routing_status=routing_status)
             payload_str = json.dumps(message_for_frontend)
-            await _broadcast_to_frontends(payload_str, message_type, "Broker (status/error)")
+            await _broadcast_to_frontends(payload_str, message_type, "Broker (status/error)",message_id)
             # Stop processing here for direct broker messages
 
         # --- Case 2: Message needs routing (From Agent, no specific receiver yet) ---
@@ -110,7 +103,7 @@ async def _process_server_input_message(message_data: dict):
             # Broadcast as pending
             message_for_frontend = _prepare_message_for_client(message_data, routing_status="pending")
             payload_str = json.dumps(message_for_frontend)
-            await _broadcast_to_frontends(payload_str, message_type, f"agent {sender_id} (pending)")
+            await _broadcast_to_frontends(payload_str, message_type, f"agent {sender_id} (pending)",message_id)
 
             # Publish to Broker
             if publish_to_broker_input_queue(message_data):
@@ -121,36 +114,36 @@ async def _process_server_input_message(message_data: dict):
         # --- Case 3: Message has been routed (has a specific receiver_id) ---
         # This now correctly covers messages originally from agents OR frontends after broker routing.
         elif receiver_id is not None:
-            logger.info(f"Received routed message ID {message_id} from original sender {sender_id} for final receiver {receiver_id}.")
+            logger.info(f"received routed message {message_id} on server_input_queue for final receiver {receiver_id}.")
 
             # Broadcast as routed
             message_for_frontend = _prepare_message_for_client(message_data, routing_status="routed")
             payload_str = json.dumps(message_for_frontend)
             # Use original sender in the broadcast origin description for clarity
-            await _broadcast_to_frontends(payload_str, message_type, f"Server (routed from {sender_id})")
+            await _broadcast_to_frontends(payload_str, message_type, f"Server (routed to {receiver_id})", message_id)
 
             # Forward to the final agent recipient
             if receiver_id in state.agent_statuses:
                 if state.agent_statuses[receiver_id].is_online:
                     if publish_to_agent_queue(receiver_id, message_data):
-                        logger.info(f"Published routed message ID {message_id} to agent {receiver_id}'s queue.")
+                        logger.info(f"Published routed message {message_id} to {receiver_id}'s queue.")
                     else:
-                        logger.error(f"Failed to publish routed message ID {message_id} to agent {receiver_id}'s queue.")
+                        logger.error(f"Failed to publish routed message {message_id} to agent {receiver_id}'s queue.")
                 else:
-                    logger.warning(f"Routed message ID {message_id} intended for agent {receiver_id}, but agent is offline.")
+                    logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is offline.")
                     # TODO: Maybe notify original sender? For now, just log.
             elif receiver_id == "Server":
                  # A message explicitly routed *back* to the server? Handle if necessary.
-                 logger.info(f"Message ID {message_id} from {sender_id} was routed back to the Server. Processing not implemented.")
+                 logger.info(f"Message {message_id} from {sender_id} was routed back to the Server. Processing not implemented.")
                  # Could process server-specific commands here.
             else:
                 # Broker routed to an unknown agent ID? Should not happen ideally.
-                logger.warning(f"Routed message ID {message_id} has unknown receiver_id: {receiver_id}. Cannot deliver.")
-
+                logger.warning(f"Routed message {message_id} has unknown receiver_id: {receiver_id}. Cannot deliver.")
+                logger.warning(f"Known agents: {state.agent_statuses}")
         # --- Case 4: Unhandled message (e.g., from Frontend directly? Unknown sender?) ---
         else:
             # This covers non-agent senders where receiver_id is None.
-            logger.warning(f"Received unhandled message ID {message_id} on server_input_queue. Sender: {sender_id}, Receiver: {receiver_id}. Discarding.")
+            logger.warning(f"Received unhandled message {message_id} on server_input_queue. Sender: {sender_id}, Receiver: {receiver_id}. Discarding.")
 
     except Exception as e:
         logger.exception(f"Error processing server_input_queue message (ID: {message_id}): {e}")
@@ -243,7 +236,7 @@ async def agent_ping_service():
             if not current_agents:
                 logger.debug("Agent ping service: No agents connected, skipping ping cycle.")
             else:
-                logger.info(f"Agent ping service: Pinging {len(current_agents)} agents...")
+                logger.debug(f"Agent ping service: Sending PING to {len(current_agents)} agents...")
                 ping_message = json.dumps({"message_type": MessageType.PING, "timestamp": datetime.now().isoformat()})
                 for agent_id, ws in current_agents:
                     client_desc = f"agent {agent_id}"
@@ -289,7 +282,7 @@ async def periodic_status_broadcast():
     logger.info("Starting periodic status broadcast service...")
     while not shutdown_event.is_set(): # Check shutdown flag
         try:
-            logger.debug(f"Broadcasting full agent status periodically.")
+            logger.info(f"Scheduled broadcast of full agent status...")
             # Broadcast full agent status (includes online/offline)
             await agent_manager.broadcast_agent_status(force_full_update=True)
             

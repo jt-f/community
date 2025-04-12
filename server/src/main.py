@@ -1,5 +1,4 @@
 import logging
-import asyncio
 import uvicorn
 import os
 from contextlib import asynccontextmanager
@@ -13,17 +12,10 @@ import websocket_handler
 import services
 import utils
 import rabbitmq_utils # Needed for initial connection check/advertisement
+from shared_models import setup_logging
+import agent_manager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Reduce verbosity from pika library
-logging.getLogger("pika").setLevel(logging.WARNING)
-logger.info("Pika library logging level set to WARNING.")
+logger = setup_logging(__name__)
 
 # --- Lifespan Management --- 
 @asynccontextmanager
@@ -36,6 +28,9 @@ async def lifespan(app: FastAPI):
     await services.start_services()
     # Advertise server availability via RabbitMQ
     rabbitmq_utils.publish_server_advertisement()
+    # Force a broadcast of agent statuses (empty at startup) to synchronize with brokers
+    logger.info("Broadcasting initial agent status to any connecting brokers...")
+    await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True)
     # Setup signal handlers for graceful shutdown
     utils.setup_signal_handlers()
     logger.info("Server startup complete (lifespan).")
