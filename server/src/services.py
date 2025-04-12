@@ -32,12 +32,19 @@ logger = setup_logging(__name__)
 def _prepare_message_for_client(response_data: dict, routing_status: str | None = None) -> dict:
     """Creates a copy of the response data, removes internal keys, and adds routing status."""
     message_copy = response_data.copy()
+    
     # Remove internal RabbitMQ routing keys first
     for key in ["_broadcast", "_target_agent_id", "_client_id"]:
         message_copy.pop(key, None)
-    # Add the routing status for the frontend
+    
+    # Add or preserve the routing status for the frontend
     if routing_status:
-        message_copy["_routing_status"] = routing_status
+        # Use provided routing_status
+        message_copy["routing_status"] = routing_status
+    elif "routing_status" not in message_copy:
+        # Only set default if no status exists
+        message_copy["routing_status"] = "unknown"
+    
     return message_copy
 
 async def _safe_send_websocket(ws: WebSocket, payload_str: str, client_desc: str) -> bool:
@@ -55,7 +62,7 @@ async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_de
     disconnected_frontend = set()
     frontend_count = len(state.frontend_connections)
     if frontend_count > 0:
-        logger.info(f"Broadcasting message {message_id} from {origin_desc} to {frontend_count} frontend clients.")
+        logger.info(f"Broadcasting message {message_id} from {origin_desc} to {frontend_count} frontend clients: {payload_str}")
         # Iterate over a copy of the set to avoid modification during iteration
         for fe_ws in list(state.frontend_connections):
             # Get the client_id for better logging
@@ -74,52 +81,45 @@ async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_de
 # --- Server Input Consumer Service ---
 
 async def _process_server_input_message(message_data: dict):
-    """Processes a single message received from the server_input_queue."""
+    """Processes a single message received from the server_input_queue.
+    
+    Messages will have routing_status field to indicate the state:
+    - 'pending': Not yet routed by broker
+    - 'routed': Successfully routed by broker with receiver_id set
+    - 'error': Failed routing with error information
+    """
     message_type = message_data.get("message_type")
     sender_id = message_data.get("sender_id", "unknown")
     receiver_id = message_data.get("receiver_id")
     message_id = message_data.get("message_id", "N/A")
+    routing_status = message_data.get("routing_status", "unknown")
 
     try:
-        # --- Priority Case: Direct message from Broker (e.g., routing error) ---
-        if sender_id == "BrokerService":
-            logger.info(f"Received direct message ID {message_id} from BrokerService for receiver {receiver_id}.")
-            routing_status = "error" # Default for broker messages
-            if message_type == MessageType.ERROR and receiver_id == "Server":
-                 routing_status = "routing_failed"
-                 logger.warning(f"Broker reported routing failure: {message_data.get('text_payload')}")
-            else:
-                 logger.warning(f"Received unhandled direct message type {message_type} from BrokerService.")
-
+        # --- Priority Case: Direct message from Broker with routing error ---
+        if message_type == MessageType.ERROR and receiver_id == "Server":
+            logger.warning(f"Routing failure - {routing_status} - for message {message_id} from {sender_id}: {message_data.get('text_payload')}")
             message_for_frontend = _prepare_message_for_client(message_data, routing_status=routing_status)
             payload_str = json.dumps(message_for_frontend)
-            await _broadcast_to_frontends(payload_str, message_type, "Broker (status/error)",message_id)
-            # Stop processing here for direct broker messages
+            await _broadcast_to_frontends(payload_str, message_type, "Broker (routing error)", message_id)
+        
+        # --- Case 2: Message with pending routing status ---  
+        elif routing_status == "pending":
+            logger.info(f"Message ID {message_id} from {sender_id} requires routing (status=pending).")
 
-        # --- Case 2: Message needs routing (From Agent, no specific receiver yet) ---
-        elif sender_id in state.agent_statuses and receiver_id is None: # Assume None receiver means needs routing
-            logger.info(f"Message ID {message_id} from agent {sender_id} requires routing (receiver_id is None).")
-
-            # Broadcast as pending
-            message_for_frontend = _prepare_message_for_client(message_data, routing_status="pending")
-            payload_str = json.dumps(message_for_frontend)
-            await _broadcast_to_frontends(payload_str, message_type, f"agent {sender_id} (pending)",message_id)
-
-            # Publish to Broker
+            # Message is already broadcast to frontends with pending status before being queued
+            # Just forward to broker for routing
             if publish_to_broker_input_queue(message_data):
-                logger.info(f"Published message ID {message_id} from agent {sender_id} to broker_input_queue.")
+                logger.info(f"Published message ID {message_id} from {sender_id} to broker_input_queue.")
             else:
-                logger.error(f"Failed to publish message ID {message_id} from agent {sender_id} to broker_input_queue.")
+                logger.error(f"Failed to publish message ID {message_id} from {sender_id} to broker_input_queue.")
 
-        # --- Case 3: Message has been routed (has a specific receiver_id) ---
-        # This now correctly covers messages originally from agents OR frontends after broker routing.
-        elif receiver_id is not None:
-            logger.info(f"received routed message {message_id} on server_input_queue for final receiver {receiver_id}.")
+        # --- Case 3: Message has been routed by broker ---
+        elif routing_status == "routed" and receiver_id is not None:
+            logger.info(f"Received routed message {message_id} on server_input_queue for final receiver {receiver_id}.")
 
-            # Broadcast as routed
+            # Broadcast as routed to frontends so they can update message status
             message_for_frontend = _prepare_message_for_client(message_data, routing_status="routed")
             payload_str = json.dumps(message_for_frontend)
-            # Use original sender in the broadcast origin description for clarity
             await _broadcast_to_frontends(payload_str, message_type, f"Server (routed to {receiver_id})", message_id)
 
             # Forward to the final agent recipient
@@ -131,22 +131,47 @@ async def _process_server_input_message(message_data: dict):
                         logger.error(f"Failed to publish routed message {message_id} to agent {receiver_id}'s queue.")
                 else:
                     logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is offline.")
-                    # TODO: Maybe notify original sender? For now, just log.
+                    # Notify broker and original sender that agent is offline
+                    error_resp = {
+                        "message_type": MessageType.ERROR,
+                        "sender_id": "server",
+                        "receiver_id": message_data.get("sender_id", "unknown"),
+                        "routing_status": "error",
+                        "text_payload": f"Agent {receiver_id} is offline. Message could not be delivered."
+                    }
+                    if publish_to_broker_input_queue(error_resp):
+                        logger.info(f"Sent agent offline error for message {message_id} to broker.")
             elif receiver_id == "Server":
-                 # A message explicitly routed *back* to the server? Handle if necessary.
-                 logger.info(f"Message {message_id} from {sender_id} was routed back to the Server. Processing not implemented.")
-                 # Could process server-specific commands here.
+                 # A message explicitly routed to the server? Handle server-specific functionality.
+                 logger.info(f"Message {message_id} from {sender_id} routed to the Server. Server-side processing.")
             else:
-                # Broker routed to an unknown agent ID? Should not happen ideally.
+                # Broker routed to an unknown agent ID
                 logger.warning(f"Routed message {message_id} has unknown receiver_id: {receiver_id}. Cannot deliver.")
-                logger.warning(f"Known agents: {state.agent_statuses}")
-        # --- Case 4: Unhandled message (e.g., from Frontend directly? Unknown sender?) ---
-        else:
-            # This covers non-agent senders where receiver_id is None.
-            logger.warning(f"Received unhandled message {message_id} on server_input_queue. Sender: {sender_id}, Receiver: {receiver_id}. Discarding.")
+                logger.warning(f"Known agents: {list(state.agent_statuses.keys())}")
 
+        # --- Case 4: Unrecognized message or routing status ---
+        else:
+            logger.warning(f"Unrecognized message: sender={sender_id}, routing_status={routing_status}, receiver={receiver_id}")
+            # Try to handle as a legacy message for backward compatibility
+            if receiver_id is not None:
+                # Treat as a routed message
+                logger.info(f"Treating message {message_id} as a legacy routed message.")
+                
+                # Update as routed for frontend display
+                message_data["routing_status"] = "routed"
+                message_for_frontend = _prepare_message_for_client(message_data, routing_status="routed")
+                payload_str = json.dumps(message_for_frontend)
+                await _broadcast_to_frontends(payload_str, message_type, f"Server (legacy routed)", message_id)
+                
+                # Forward to agent if valid
+                if receiver_id in state.agent_statuses and state.agent_statuses[receiver_id].is_online:
+                    if publish_to_agent_queue(receiver_id, message_data):
+                        logger.info(f"Published legacy routed message {message_id} to {receiver_id}'s queue.")
+                    else:
+                        logger.error(f"Failed to publish legacy routed message {message_id} to agent {receiver_id}'s queue.")
+                
     except Exception as e:
-        logger.exception(f"Error processing server_input_queue message (ID: {message_id}): {e}")
+        logger.error(f"Error processing message from server input queue: {e}", exc_info=True)
 
 
 async def server_input_consumer():

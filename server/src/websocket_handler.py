@@ -188,13 +188,17 @@ async def _handle_pong(websocket: WebSocket, client_id: str, message_data: Dict[
 async def _handle_chat_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handles standard chat, reply, and system messages.
 
-    Also broadcasts these messages to all connected frontends before sending to RabbitMQ.
+    Broadcasts these messages to all connected frontends before sending to RabbitMQ.
+    All messages are marked with routing_status="pending" until processed by the broker.
     """
     message_type = message_data.get("message_type", "UNKNOWN")
     # Add connection type metadata before forwarding
     message_data["_connection_type"] = getattr(websocket, "connection_type", "unknown")
     # Add client_id to the message
     message_data["_client_id"] = client_id
+    # Add routing status to indicate message is pending broker routing
+    message_data["routing_status"] = "pending"
+    
     logger.info(f"Incoming {message_type} message {message_data.get('message_id','N/A')} from {client_id} : '{message_data.get('text_payload','N/A')}'")
 
     # --- Broadcast to all connected Frontends FIRST --- 
@@ -221,6 +225,7 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
             "message_type": MessageType.ERROR,
             "sender_id": "server",
             "receiver_id": client_id,  # Send back to the original sender
+            "routing_status": "error",  # Mark as routing error
             "text_payload": "Error: Could not forward message to broker."
         }
         try: 

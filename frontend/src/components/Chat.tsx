@@ -17,6 +17,7 @@ interface MessageWithAnimation extends ChatMessage {
   status?: 'pending' | 'routed' | 'error' | 'routing_failed';
   routedTo?: string;
   _routing_status?: 'pending' | 'routed' | 'routing_failed';
+  routing_status_message?: string;
 }
 
 const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
@@ -74,6 +75,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
               message_id: msg.message_id,
               status: finalStatus,
               routedTo: finalStatus === 'routed' ? lastMessage.receiver_id : msg.routedTo,
+              routing_status_message: lastMessage.routing_status,
               animationPhase: msg.status !== finalStatus ? 'vibrate' : null,
               isNew: false
             };
@@ -120,6 +122,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
         isNew: true,
         animationPhase: 'fadeIn',
         status: initialStatus,
+        routing_status_message: lastMessage.routing_status,
         routedTo: initialStatus === 'routed' ? lastMessage.receiver_id : undefined
       };
 
@@ -203,7 +206,13 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   };
 
   // Function to get display text for status
-  const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string): string => {
+  const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string, routingStatusMessage?: string): string => {
+    // If custom routing status message exists, use it
+    if (routingStatusMessage && routingStatusMessage !== 'routed' && routingStatusMessage !== 'pending' && routingStatusMessage !== 'error') {
+      return routingStatusMessage.toUpperCase();
+    }
+    
+    // Otherwise use default status text
     switch (status) {
       case 'pending': return 'AWAITING ROUTING';
       case 'routed': return `ROUTED TO: ${routedTo || '?'}`;
@@ -268,7 +277,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
                 <span className="message-id">ID: {message.message_id ? message.message_id.substring(0, 8) : 'unknown'}</span>
                 {(message.status === 'pending' || message.status === 'routed' || message.status === 'error' || message.status === 'routing_failed') && (
                   <span className={`routing-status ${message.status}`}>
-                    {getStatusText(message.status, getDisplayName(message.routedTo))}
+                    {getStatusText(message.status, getDisplayName(message.routedTo), message.routing_status_message)}
                   </span>
                 )}
                 {message.message_type === MessageType.REPLY && message.in_reply_to_message_id && (

@@ -158,30 +158,33 @@ class Agent:
             logger.error(f"Failed to set up RabbitMQ queue: {e}")
             return False
     
-    def publish_to_server_input_queue(self, message_data: dict) -> bool:
-        """Publish a response message to the server input queue."""
+    def publish_to_broker_input_queue(self, message_data: dict) -> bool:
+        """Publish a response message to the broker input queue."""
         if not self.rabbitmq_channel:
             logger.error("Cannot publish: RabbitMQ connection not established")
             return False
 
         try:
+            # Add a routing status to indicate this message is pending broker routing
+            message_data["routing_status"] = "pending"
+            
             # Ensure the queue exists (optional, server should declare it)
-            self.rabbitmq_channel.queue_declare(queue=SERVER_INPUT_QUEUE, durable=True)
+            self.rabbitmq_channel.queue_declare(queue="broker_input_queue", durable=True)
 
             # Publish the message
             self.rabbitmq_channel.basic_publish(
                 exchange='',
-                routing_key=SERVER_INPUT_QUEUE,
+                routing_key="broker_input_queue",
                 body=json.dumps(message_data),
                 properties=pika.BasicProperties(
                     delivery_mode=2,  # make message persistent
                 )
             )
 
-            logger.info(f"Published response message {message_data.get('message_id', 'N/A')} to {SERVER_INPUT_QUEUE}")
+            logger.info(f"Published response message {message_data.get('message_id', 'N/A')} to broker_input_queue")
             return True
         except Exception as e:
-            logger.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
+            logger.error(f"Failed to publish to broker_input_queue: {e}")
             return False
     
     def process_rabbitmq_message(self, ch, method, properties, body):
@@ -208,10 +211,10 @@ class Agent:
             
             # Process the message and generate response
             response = self.generate_response(message_dict)
-            
-            # Send response back through server_input_queue
-            if self.publish_to_server_input_queue(response):
-                logger.info(f"Sent response to message {message_id} via {SERVER_INPUT_QUEUE}")
+            logger.info(f"Generated response: {response.get('text_payload','ERROR: NO TEXT PAYLOAD')}")
+            # Send response back through broker_input_queue
+            if self.publish_to_broker_input_queue(response):
+                logger.info(f"Sent response {response.get('message_id','ERROR: NO MESSAGE ID')} to message {message_id} to broker_input_queue")
             else:
                 logger.error(f"Failed to send response to message {message_id}")
             

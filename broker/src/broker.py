@@ -101,9 +101,10 @@ def handle_incoming_message(channel, method, properties, body):
         message_type = message_data.get("message_type")
         sender_id = message_data.get("sender_id", "unknown") # Added sender_id for logging
         receiver_id = message_data.get("receiver_id") # Get receiver_id
+        routing_status = message_data.get("routing_status", "unknown")
         
         if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
-            logger.info(f"Incoming {message_type} message {message_data.get('message_id','N/A')} from {sender_id} : '{message_data.get('text_payload','N/A')}'")
+            logger.info(f"Incoming {message_type} message {message_data.get('message_id','N/A')} from {sender_id} : '{message_data.get('text_payload','N/A')}' (routing_status={routing_status})")
             
             # Check if the message has a receiver_id that looks like an agent but is unknown
             if (receiver_id and receiver_id.startswith("agent_") and 
@@ -112,8 +113,17 @@ def handle_incoming_message(channel, method, properties, body):
                 # Request agent status update from server asynchronously
                 asyncio.create_task(request_agent_status())
             
-            # Route message
-            route_message(message_data)
+            # If a message already has a specific receiver_id and isn't an error,
+            # we can forward it directly without routing
+            if receiver_id and routing_status != "error" and receiver_id in registered_agents:
+                logger.info(f"Message already has valid receiver_id ({receiver_id}), forwarding directly.")
+                # Make sure to set the routing status to routed
+                message_data["routing_status"] = "routed"
+                publish_to_server_input_queue(message_data)
+            else:
+                # Otherwise route the message
+                route_message(message_data)
+                
             # Acknowledge the message was processed
             channel.basic_ack(delivery_tag=method.delivery_tag)
         elif message_type == MessageType.AGENT_STATUS_UPDATE:
@@ -124,6 +134,8 @@ def handle_incoming_message(channel, method, properties, body):
         elif message_type == MessageType.ERROR:
             logger.warning(f"Received ERROR message from {sender_id}. Forwarding to server.")
             # Forward error messages directly to the server via the server input queue
+            if "routing_status" not in message_data:
+                message_data["routing_status"] = "error"
             publish_to_server_input_queue(message_data)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
@@ -376,6 +388,9 @@ def route_message(message_data):
     for field in ["_broadcast", "_target_agent_id", "_client_id"]:
         if field in outgoing_message:
             outgoing_message.pop(field)
+    
+    # Update routing status to indicate this message has been routed by the broker
+    outgoing_message["routing_status"] = "routed"
 
     # Extract original text payload for error messages
     original_text = message_data.get("text_payload", "")
@@ -420,22 +435,27 @@ def route_message(message_data):
         if sender_id in all_online_agents and len(all_online_agents) == 1:
             # Get the agent's name for the error message
             agent_name = registered_agents.get(sender_id, {}).get("name", sender_id) # Fallback to ID if name not found
-            logger.warning(f"Only the sending agent {agent_name} ({sender_id}) is online. Cannot route message '{truncated_text}' to another agent.")
             error_response = {
+                "message_id": message_id,
                 "message_type": MessageType.ERROR,
-                "sender_id": "BrokerService", # Keep sender as Broker
+                "sender_id": sender_id,
                 "receiver_id": "Server",     # Send error back to the server
-                "text_payload": f"The sender is the only online agent. No other agents are available to receive the message."
+                "routing_status": "Only the sending agent is online. Routing failed.",   # Mark as routing error
+                "text_payload": f"{original_text}"
             }
             publish_to_server_input_queue(error_response)
+            logger.warning(f"Only the sending agent {agent_name} ({sender_id}) is online. Cannot route message '{truncated_text}' to another agent.")
+
             return
         else:
             # No online agents available
             error_response = {
+                "message_id": message_id,
                 "message_type": MessageType.ERROR,
-                "sender_id": "BrokerService", # Keep sender as Broker
+                "sender_id": sender_id,
                 "receiver_id": "Server", # Send error back to the server
-                "text_payload": f"No online agents available to handle the message."
+                "routing_status": "No online agents available. Routing failed.", # Mark as routing error
+                "text_payload": f"{original_text}"
             }
             publish_to_server_input_queue(error_response)
             logger.warning(f"Could not route message '{truncated_text}' from {sender_id}: No online agents found")
