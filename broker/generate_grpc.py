@@ -7,6 +7,7 @@ import subprocess
 import sys
 import shutil
 import re
+import glob
 
 def main():
     # Directory containing this script
@@ -17,27 +18,23 @@ def main():
     generated_dir = os.path.join(script_dir, "generated")
     output_dir = generated_dir
     
-    # First, check if proto file exists in the server directory
-    server_proto_dir = os.path.join(script_dir, "..", "server", "src", "protos")
-    server_proto_file = os.path.join(server_proto_dir, "agent_status_service.proto")
-    local_proto_file = os.path.join(proto_dir, "agent_status_service.proto")
-    
-    # Create proto directory if it doesn't exist
+    # Create directories if they don't exist
     os.makedirs(proto_dir, exist_ok=True)
-    
-    # Create generated directory if it doesn't exist
     os.makedirs(generated_dir, exist_ok=True)
     
-    # Copy proto file from server to broker if it exists
-    if os.path.exists(server_proto_file):
-        print(f"Copying proto file from server: {server_proto_file}")
-        shutil.copy2(server_proto_file, local_proto_file)
-    else:
-        print(f"Warning: Proto file not found in server directory: {server_proto_file}")
-        # Check if we need to create the proto definition locally
-        if not os.path.exists(local_proto_file):
-            print(f"Creating proto file locally: {local_proto_file}")
-            with open(local_proto_file, "w") as f:
+    # Copy proto files from server to broker
+    server_proto_dir = os.path.join(script_dir, "..", "server", "src", "protos")
+    
+    # Get all proto files from server
+    server_proto_files = glob.glob(os.path.join(server_proto_dir, "*.proto"))
+    
+    if not server_proto_files:
+        print(f"Warning: No proto files found in server directory: {server_proto_dir}")
+        # Generate default agent status proto if no files found
+        default_proto_file = os.path.join(proto_dir, "agent_status_service.proto")
+        if not os.path.exists(default_proto_file):
+            print(f"Creating default proto file: {default_proto_file}")
+            with open(default_proto_file, "w") as f:
                 f.write("""syntax = "proto3";
 
 package agent_status;
@@ -70,6 +67,19 @@ message AgentInfo {
   string last_seen = 4;  // ISO format timestamp
 }
 """)
+    else:
+        # Copy all proto files from server to broker
+        for server_proto_file in server_proto_files:
+            local_proto_file = os.path.join(proto_dir, os.path.basename(server_proto_file))
+            print(f"Copying proto file from server: {server_proto_file}")
+            shutil.copy2(server_proto_file, local_proto_file)
+    
+    # Get all proto files in the broker's proto directory
+    proto_files = glob.glob(os.path.join(proto_dir, "*.proto"))
+    
+    if not proto_files:
+        print(f"No proto files found in: {proto_dir}")
+        return 1
     
     # Install required packages if not already installed
     try:
@@ -79,51 +89,57 @@ message AgentInfo {
         print("Failed to install required packages.")
         return 1
     
-    # Generate Python code from proto file
+    # Generate Python code from proto files
     try:
-        # Ensure the proto file exists
-        if not os.path.exists(local_proto_file):
-            print(f"Error: Proto file not found: {local_proto_file}")
-            return 1
+        for proto_file in proto_files:
+            print(f"Processing proto file: {proto_file}")
             
-        print(f"Generating Python code from {local_proto_file}...")
-        cmd = [
-            sys.executable, "-m", "grpc_tools.protoc", 
-            f"-I{proto_dir}",
-            f"--python_out={output_dir}",
-            f"--grpc_python_out={output_dir}",
-            local_proto_file
-        ]
-        subprocess.check_call(cmd)
-        print(f"Successfully generated gRPC code from {local_proto_file}")
-        
-        # Check if the generated files exist
-        pb2_file = os.path.join(output_dir, "agent_status_service_pb2.py")
-        pb2_grpc_file = os.path.join(output_dir, "agent_status_service_pb2_grpc.py")
-        
-        if not os.path.exists(pb2_file) or not os.path.exists(pb2_grpc_file):
-            print(f"Error: Generated files not found. Expected at {pb2_file} and {pb2_grpc_file}")
-            return 1
+            # Check if the proto file exists
+            if not os.path.exists(proto_file):
+                print(f"Error: Proto file not found: {proto_file}")
+                continue
+                
+            print(f"Generating Python code from {proto_file}...")
+            cmd = [
+                sys.executable, "-m", "grpc_tools.protoc", 
+                f"-I{proto_dir}",
+                f"--python_out={output_dir}",
+                f"--grpc_python_out={output_dir}",
+                proto_file
+            ]
+            subprocess.check_call(cmd)
+            print(f"Successfully generated gRPC code from {proto_file}")
             
-        print(f"Generated files created successfully: {pb2_file}, {pb2_grpc_file}")
-        
-        # Fix the import statement in the generated _pb2_grpc.py file
-        if os.path.exists(pb2_grpc_file):
-            print(f"Fixing import statement in {pb2_grpc_file}")
-            with open(pb2_grpc_file, 'r') as file:
-                content = file.read()
+            # Get the base filename without extension
+            base_filename = os.path.basename(proto_file).replace(".proto", "")
             
-            # Replace the import statement with a relative import that doesn't depend on Python package paths
-            fixed_content = re.sub(
-                r'import agent_status_service_pb2 as agent__status__service__pb2',
-                r'from . import agent_status_service_pb2 as agent__status__service__pb2',
-                content
-            )
+            # Check if the generated files exist
+            pb2_file = os.path.join(output_dir, f"{base_filename}_pb2.py")
+            pb2_grpc_file = os.path.join(output_dir, f"{base_filename}_pb2_grpc.py")
             
-            with open(pb2_grpc_file, 'w') as file:
-                file.write(fixed_content)
+            if not os.path.exists(pb2_file) or not os.path.exists(pb2_grpc_file):
+                print(f"Error: Generated files not found. Expected at {pb2_file} and {pb2_grpc_file}")
+                continue
+                
+            print(f"Generated files created successfully: {pb2_file}, {pb2_grpc_file}")
             
-            print(f"Fixed import statement in {pb2_grpc_file}")
+            # Fix the import statement in the generated _pb2_grpc.py file
+            if os.path.exists(pb2_grpc_file):
+                print(f"Fixing import statement in {pb2_grpc_file}")
+                with open(pb2_grpc_file, 'r') as file:
+                    content = file.read()
+                
+                # Replace the import statement with a relative import that doesn't depend on Python package paths
+                fixed_content = re.sub(
+                    rf'import {base_filename}_pb2 as {base_filename.replace("_", "__")}__pb2',
+                    rf'from . import {base_filename}_pb2 as {base_filename.replace("_", "__")}__pb2',
+                    content
+                )
+                
+                with open(pb2_grpc_file, 'w') as file:
+                    file.write(fixed_content)
+                
+                print(f"Fixed import statement in {pb2_grpc_file}")
         
         # Create __init__.py file in the generated directory to make it a package
         init_file = os.path.join(generated_dir, "__init__.py")

@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package agent_registration;
+
+// Define the service for agent registration
+service AgentRegistrationService {
+  // Register an agent with the server
+  rpc RegisterAgent (AgentRegistrationRequest) returns (AgentRegistrationResponse) {}
+  
+  // Unregister an agent from the server
+  rpc UnregisterAgent (AgentUnregistrationRequest) returns (AgentUnregistrationResponse) {}
+  
+  // Send heartbeats to maintain agent connection
+  rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse) {}
+  
+  // Create a stream for agent to receive commands from server
+  rpc ReceiveCommands (CommandStreamRequest) returns (stream Command) {}
+  
+  // Send command results back to server
+  rpc SendCommandResult (CommandResult) returns (CommandResultResponse) {}
+}
+
+// Request message for agent registration
+message AgentRegistrationRequest {
+  string agent_id = 1;      // Unique ID for this agent
+  string agent_name = 2;    // Display name for this agent
+  string version = 3;       // Agent software version
+  map<string, string> capabilities = 4;  // Agent capabilities
+  string hostname = 5;      // Host the agent is running on
+  string platform = 6;      // OS platform details
+}
+
+// Response message for agent registration
+message AgentRegistrationResponse {
+  bool success = 1;
+  string message = 2;
+  string server_assigned_id = 3;  // If agent_id was empty, server assigns one
+}
+
+// Request message for agent unregistration
+message AgentUnregistrationRequest {
+  string agent_id = 1;
+}
+
+// Response message for agent unregistration
+message AgentUnregistrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request message for agent heartbeat
+message HeartbeatRequest {
+  string agent_id = 1;
+  string status = 2;       // IDLE, BUSY, etc.
+  map<string, string> metrics = 3;  // Optional metrics like CPU, memory, etc.
+}
+
+// Response message for agent heartbeat
+message HeartbeatResponse {
+  bool success = 1;
+  int32 interval = 2;      // Suggested heartbeat interval in seconds
+}
+
+// Request to start receiving commands
+message CommandStreamRequest {
+  string agent_id = 1;
+}
+
+// Command to be executed by agent
+message Command {
+  string command_id = 1;
+  string type = 2;         // Command type (e.g., "shell", "python", etc.)
+  string content = 3;      // The actual command content to execute
+  map<string, string> parameters = 4;  // Additional parameters for the command
+  bool is_cancellation = 5;  // If true, this is a command cancellation request
+}
+
+// Result of executed command
+message CommandResult {
+  string command_id = 1;
+  string agent_id = 2;
+  bool success = 3;
+  string output = 4;
+  string error_message = 5;
+  int32 exit_code = 6;
+  int64 execution_time_ms = 7;  // Execution time in milliseconds
+}
+
+// Response to command result submission
+message CommandResultResponse {
+  bool received = 1;
+  string message = 2;
+} 

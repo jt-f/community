@@ -16,6 +16,7 @@ import rabbitmq_utils # Needed for initial connection check/advertisement
 from shared_models import setup_logging
 import agent_manager
 import grpc_services  # Import gRPC services
+import agent_registration_service  # Import agent registration service
 
 logger = setup_logging(__name__)
 
@@ -30,6 +31,11 @@ async def lifespan(app: FastAPI):
     # Start gRPC server
     grpc_port = int(os.getenv('GRPC_PORT', '50051'))
     grpc_server = grpc_services.start_grpc_server(grpc_port)
+    
+    # Add agent registration service to the gRPC server
+    agent_registration_service.start_registration_service(grpc_server)
+    logger.info("Agent registration service added to gRPC server")
+    
     await grpc_server.start()
     logger.info(f"gRPC server started on port {grpc_port}")
     
