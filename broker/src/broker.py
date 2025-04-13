@@ -8,11 +8,9 @@ import random
 from datetime import datetime
 from typing import Dict
 import asyncio
-import websockets
 import signal
 from shared_models import setup_logging, MessageType, ResponseStatus
-import grpc_client  # Import the gRPC client module
-
+import grpc_client
 
 logger = setup_logging(__name__)
 
@@ -21,16 +19,14 @@ BROKER_ID = f"broker_{random.randint(1000, 9999)}"
 
 # Reduce verbosity from pika library
 logging.getLogger("pika").setLevel(logging.WARNING)
-logging.getLogger("websockets").setLevel(logging.INFO) # Adjust websocket lib logging
 logger.info("Pika library logging level set to WARNING.")
 
 # Connection details
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
 RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
-WEBSOCKET_URL = os.getenv('WEBSOCKET_URL', 'ws://localhost:8765/ws')
 BROKER_INPUT_QUEUE = "broker_input_queue"         
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
-SERVER_INPUT_QUEUE = "server_input_queue" # Broker now sends responses/routed messages here
+SERVER_INPUT_QUEUE = "server_input_queue"
 SERVER_ADVERTISEMENT_QUEUE = "server_advertisement_queue"
 
 # Dictionary to store registered agents - the only state the broker needs
@@ -39,10 +35,7 @@ registered_agents = {}  # agent_id -> agent info (capabilities, name, etc.)
 # Global flag for shutdown coordination
 shutdown_event = asyncio.Event()
 
-# Remove the global flag for websocket agent status
-# _need_agent_status_update = False
-
-
+# --- RabbitMQ Setup and Management ---
 def setup_rabbitmq_channel(queue_name, callback_function):
     """Set up a RabbitMQ channel and consumer."""
     try:
@@ -96,6 +89,7 @@ def publish_to_server_input_queue(message_data: dict) -> bool:
         logger.error(f"Failed to publish to {SERVER_INPUT_QUEUE}: {e}")
         return False
 
+# --- Message Handling ---
 def handle_incoming_message(channel, method, properties, body):
     """Handle incoming chat messages from the BROKER_INPUT_QUEUE."""
     try:
@@ -157,6 +151,7 @@ def handle_incoming_message(channel, method, properties, body):
         # Negative acknowledgment for failed processing
         channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
+# --- Agent Status Management ---
 def handle_agent_status_update(message_data):
     """Process agent status updates received via gRPC."""
     logger.info(f"Processing agent status update: {message_data}")
@@ -237,163 +232,7 @@ async def handle_agent_status_update_async(message_data):
     """Async wrapper for handle_agent_status_update to be used with gRPC."""
     handle_agent_status_update(message_data)
 
-def handle_control_message(channel, method, properties, body):
-    """Handle control messages for the broker."""
-    try:
-        message_data = json.loads(body)
-        message_type = message_data.get("message_type")
-        
-        # Process based on message type
-        if message_type == MessageType.REGISTER_AGENT:
-            handle_agent_registration(message_data)
-        elif message_type == MessageType.CLIENT_DISCONNECTED:
-            handle_client_disconnected(message_data)
-        else:
-            logger.warning(f"Received unsupported control message type: {message_type}")
-        
-        # Acknowledge the message was processed
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-    except json.JSONDecodeError:
-        logger.error(f"Invalid JSON in control message: {body}")
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-    except Exception as e:
-        logger.error(f"Error processing control message: {e}")
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
-def handle_agent_registration(message_data):
-    """Handles agent registration requests."""
-    agent_id = message_data.get("agent_id")
-    agent_name = message_data.get("agent_name", "Unknown Agent")
-    client_id = message_data.get("_client_id")
-    
-    if not agent_id:
-        logger.error("Agent registration failed: Missing agent_id")
-        return
-    
-    # Store agent information - this is the only state we need to maintain
-    registered_agents[agent_id] = {
-        "name": agent_name,
-        "capabilities": message_data.get("capabilities", []),
-        "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "is_online": True
-    }
-    
-    logger.info(f"Agent registered: {agent_name} (ID: {agent_id})")
-    
-    # Prepare registration response
-    response = {
-        "message_type": MessageType.REGISTER_AGENT_RESPONSE,
-        "status": ResponseStatus.SUCCESS,
-        "agent_id": agent_id,
-        "message": "Agent registered successfully",
-    }
-    
-    # Add client_id for routing back to the correct client (if provided)
-    if client_id:
-        response["_client_id"] = client_id
-    
-    # Send response back to the server via the server input queue
-    publish_to_server_input_queue(response)
-
-def handle_client_disconnected(message_data):
-    """Handles client disconnection notification."""
-    agent_id = message_data.get("agent_id")
-    
-    # If this is an agent disconnection and we know about this agent
-    if agent_id and agent_id in registered_agents:
-        logger.info(f"Unregistering agent {agent_id} due to client disconnection")
-        
-        # Mark agent as offline but keep its registration
-        registered_agents[agent_id]["is_online"] = False
-        logger.info(f"Agent {agent_id} marked as offline")
-
-def handle_server_advertisement(channel, method, properties, body):
-    """Handle server availability advertisement."""
-    try:
-        message_data = json.loads(body)
-        if message_data.get("message_type") == MessageType.SERVER_AVAILABLE:
-            logger.info(f"Server available at {message_data.get('websocket_url')}")
-    except Exception as e:
-        logger.error(f"Error handling server advertisement: {e}")
-    finally:
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-
-# Remove legacy websocket-based agent status request and replace with gRPC version
-async def request_agent_status_via_grpc():
-    """Request agent status update via gRPC.
-    This is called when the broker encounters an unknown agent ID.
-    """
-    # Rate limiting to prevent flooding the server with requests
-    if hasattr(request_agent_status_via_grpc, '_last_request_time'):
-        current_time = time.time()
-        if current_time - request_agent_status_via_grpc._last_request_time < 5:
-            logger.debug("Skipping agent status request due to rate limiting")
-            return
-        request_agent_status_via_grpc._last_request_time = current_time
-    else:
-        request_agent_status_via_grpc._last_request_time = time.time()
-    
-    try:
-        # Get gRPC configuration
-        grpc_host = os.getenv("GRPC_HOST", "localhost")
-        grpc_port = int(os.getenv("GRPC_PORT", "50051"))
-        
-        logger.info(f"Requesting agent status update via gRPC from {grpc_host}:{grpc_port}")
-        
-        # Request agent status directly via gRPC
-        response = await grpc_client.request_agent_status(
-            host=grpc_host,
-            port=grpc_port,
-            broker_id=BROKER_ID
-        )
-        
-        logger.info(f"Received gRPC response: {response}")
-        
-        if not response:
-            logger.error("Received None response from gRPC server")
-            return
-            
-        # Handle both dictionary and gRPC response types
-        if isinstance(response, dict):
-            logger.info("Received dictionary response, converting to message format")
-            message_data = {
-                "message_type": MessageType.AGENT_STATUS_UPDATE,
-                "agents": response.get("agents", []),
-                "is_full_update": True
-            }
-        else:
-            # Handle gRPC response object
-            if not hasattr(response, 'agents'):
-                logger.error(f"Invalid response format from gRPC server. Response type: {type(response)}")
-                return
-                
-            if not response.agents:
-                logger.warning("Received empty agents list from gRPC server")
-                return
-                
-            logger.info(f"Processing {len(response.agents)} agents from gRPC response")
-            
-            # Convert gRPC response to message format
-            message_data = {
-                "message_type": MessageType.AGENT_STATUS_UPDATE,
-                "agents": [
-                    {
-                        "agent_id": agent.agent_id,
-                        "agent_name": agent.agent_name,
-                        "is_online": agent.is_online
-                    }
-                    for agent in response.agents
-                ],
-                "is_full_update": True
-            }
-        
-        # Process the update
-        handle_agent_status_update(message_data)
-            
-    except Exception as e:
-        logger.error(f"Error requesting agent status via gRPC: {e}")
-        logger.exception("Full traceback for gRPC error:")
-
+# --- Message Routing ---
 def route_message(message_data):
     """Route messages to the appropriate recipients.
     If receiver_id is 'broadcast' or not specified, randomly selects an online agent.
@@ -488,6 +327,82 @@ def route_message(message_data):
         publish_to_server_input_queue(error_response)
         return
 
+# --- gRPC Integration ---
+async def request_agent_status_via_grpc():
+    """Request agent status update via gRPC.
+    This is called when the broker encounters an unknown agent ID.
+    """
+    # Rate limiting to prevent flooding the server with requests
+    if hasattr(request_agent_status_via_grpc, '_last_request_time'):
+        current_time = time.time()
+        if current_time - request_agent_status_via_grpc._last_request_time < 5:
+            logger.debug("Skipping agent status request due to rate limiting")
+            return
+        request_agent_status_via_grpc._last_request_time = current_time
+    else:
+        request_agent_status_via_grpc._last_request_time = time.time()
+    
+    try:
+        # Get gRPC configuration
+        grpc_host = os.getenv("GRPC_HOST", "localhost")
+        grpc_port = int(os.getenv("GRPC_PORT", "50051"))
+        
+        logger.info(f"Requesting agent status update via gRPC from {grpc_host}:{grpc_port}")
+        
+        # Request agent status directly via gRPC
+        response = await grpc_client.request_agent_status(
+            host=grpc_host,
+            port=grpc_port,
+            broker_id=BROKER_ID
+        )
+        
+        logger.info(f"Received gRPC response: {response}")
+        
+        if not response:
+            logger.error("Received None response from gRPC server")
+            return
+            
+        # Handle both dictionary and gRPC response types
+        if isinstance(response, dict):
+            logger.info("Received dictionary response, converting to message format")
+            message_data = {
+                "message_type": MessageType.AGENT_STATUS_UPDATE,
+                "agents": response.get("agents", []),
+                "is_full_update": True
+            }
+        else:
+            # Handle gRPC response object
+            if not hasattr(response, 'agents'):
+                logger.error(f"Invalid response format from gRPC server. Response type: {type(response)}")
+                return
+                
+            if not response.agents:
+                logger.warning("Received empty agents list from gRPC server")
+                return
+                
+            logger.info(f"Processing {len(response.agents)} agents from gRPC response")
+            
+            # Convert gRPC response to message format
+            message_data = {
+                "message_type": MessageType.AGENT_STATUS_UPDATE,
+                "agents": [
+                    {
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.agent_name,
+                        "is_online": agent.is_online
+                    }
+                    for agent in response.agents
+                ],
+                "is_full_update": True
+            }
+        
+        # Process the update
+        handle_agent_status_update(message_data)
+            
+    except Exception as e:
+        logger.error(f"Error requesting agent status via gRPC: {e}")
+        logger.exception("Full traceback for gRPC error:")
+
 async def register_broker_via_grpc():
     """Register the broker with the server using gRPC."""
     try:
@@ -516,76 +431,6 @@ async def register_broker_via_grpc():
         logger.error(f"Error during broker registration via gRPC: {e}")
         return False
 
-async def websocket_listener():
-    """Connects to the server via WebSocket and listens for messages."""
-    # Register the broker via gRPC first
-    if await register_broker_via_grpc():
-        logger.info("Broker registered with server via gRPC")
-    else:
-        logger.error("Failed to register broker via gRPC")
-    
-    # Variables to track gRPC configuration
-    grpc_host = os.getenv("GRPC_HOST", "localhost")
-    grpc_port = int(os.getenv("GRPC_PORT", "50051"))
-    
-    while not shutdown_event.is_set():
-        try:
-            async with websockets.connect(WEBSOCKET_URL) as websocket:
-                logger.info(f"Connected to WebSocket server at {WEBSOCKET_URL}")
-                
-                # We no longer need to register via WebSocket, but we still need the connection
-                # for other messages like pings
-                
-                # Listen for messages via WebSocket
-                while not shutdown_event.is_set():
-                    try:
-                        message_str = await asyncio.wait_for(websocket.recv(), timeout=1.0)
-                        message_data = json.loads(message_str)
-                        message_type = message_data.get("message_type")
-                        
-                        # Handle only basic messages via WebSocket
-                        if message_type in [MessageType.PING, MessageType.SERVER_HEARTBEAT]:
-                            # Respond to PING/HEARTBEAT from server
-                            pong_message = {"message_type": MessageType.PONG}
-                            await websocket.send(json.dumps(pong_message))
-                            logger.debug(f"Received {message_type}, sent PONG to server")
-                        elif message_type == MessageType.ERROR:
-                            # Server might send ERROR if it doesn't handle our PING; ignore it.
-                            logger.debug(f"Received ERROR message via WebSocket, likely due to PING: {message_data.get('text_payload')}")
-                        elif message_type == MessageType.AGENT_STATUS_UPDATE:
-                            # Ignore agent status updates via WebSocket - we use gRPC exclusively now
-                            logger.debug("Received agent status update via WebSocket - ignoring as we use gRPC exclusively")
-                        else:
-                            logger.warning(f"Received unhandled WebSocket message type: {message_type}")
-                            
-                    except asyncio.TimeoutError:
-                        # No message received, just continue listening
-                        continue
-                    except websockets.exceptions.ConnectionClosedOK:
-                        logger.info("WebSocket connection closed normally.")
-                        break # Exit inner loop to reconnect
-                    except websockets.exceptions.ConnectionClosedError as e:
-                        logger.error(f"WebSocket connection closed with error: {e}")
-                        break # Exit inner loop to reconnect
-                    except json.JSONDecodeError:
-                        logger.error(f"Invalid JSON received via WebSocket: {message_str}")
-                    except Exception as e:
-                        logger.exception(f"Error processing WebSocket message: {e}")
-        
-        except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.InvalidURI, ConnectionRefusedError, OSError) as e:
-            logger.error(f"WebSocket connection failed: {e}")
-        except Exception as e:
-            logger.exception(f"Unexpected error in websocket_listener: {e}")
-            
-        if not shutdown_event.is_set():
-            logger.info("Attempting to reconnect WebSocket in 5 seconds...")
-            await asyncio.sleep(5)
-            
-    logger.info("WebSocket listener shutting down.")
-
-# REMOVED request_agent_status function
-# ...
-
 # --- RabbitMQ Consumer Running in Thread --- 
 def run_rabbitmq_consumer(channel):
     """Target function to run pika's blocking consumer in a separate thread."""
@@ -598,97 +443,52 @@ def run_rabbitmq_consumer(channel):
         if channel and channel.is_open:
             try:
                 channel.stop_consuming()
-                channel.close()
-            except Exception as close_exc:
-                logger.error(f"Error closing RabbitMQ channel in thread: {close_exc}")
-        logger.info("RabbitMQ consumer thread finished.")
-
-async def main_async():
-    """Main async function to run WebSocket listener and RabbitMQ consumers."""
-    logger.info(f"Starting async message broker service (ID: {BROKER_ID})")
-    
-    # --- Setup RabbitMQ Channels (Synchronous part) ---
-    # Note: We setup channels here, but run consumers in threads
-    channels_to_run = {}
-    try:
-        incoming_channel = setup_rabbitmq_channel(BROKER_INPUT_QUEUE, handle_incoming_message)
-        control_channel = setup_rabbitmq_channel(AGENT_METADATA_QUEUE, handle_control_message)
-        advertisement_channel = setup_rabbitmq_channel(SERVER_ADVERTISEMENT_QUEUE, handle_server_advertisement)
-        
-        if incoming_channel:
-            channels_to_run[incoming_channel] = "incoming_channel"
-        if control_channel:
-            channels_to_run[control_channel] = "control_channel"
-        if advertisement_channel:
-            channels_to_run[advertisement_channel] = "advertisement_channel"
-            
-        if not channels_to_run:
-             raise RuntimeError("Failed to set up any RabbitMQ channels.")
-             
-    except Exception as setup_exc:
-        logger.error(f"Fatal error setting up RabbitMQ: {setup_exc}")
-        return # Exit if RabbitMQ setup fails
-    
-    # --- Start RabbitMQ Consumers in Threads --- 
-    consumer_threads = []
-    for channel, name in channels_to_run.items():
-        thread = threading.Thread(target=run_rabbitmq_consumer, args=(channel,), daemon=True, name=f"RabbitMQ-{name}")
-        thread.start()
-        consumer_threads.append(thread)
-        logger.info(f"Started RabbitMQ consumer thread for {name}")
-    
-    # --- Start WebSocket Listener Task --- 
-    websocket_task = asyncio.create_task(websocket_listener())
-    logger.info("Started WebSocket listener task.")
-    
-    logger.info("Broker service components running. Waiting for shutdown signal...")
-    
-    # --- Wait for Shutdown --- 
-    await shutdown_event.wait() # Wait until the shutdown event is set
-    
-    # --- Initiate Graceful Shutdown --- 
-    logger.info("Shutdown signal received. Stopping components...")
-    
-    # Stop WebSocket listener task
-    websocket_task.cancel()
-    try:
-        await websocket_task
-    except asyncio.CancelledError:
-        logger.info("WebSocket listener task cancelled.")
-        
-    # Stop RabbitMQ consumers (by closing channels from main thread)
-    logger.info("Stopping RabbitMQ consumer threads...")
-    for channel, name in channels_to_run.items():
-        if channel and channel.is_open:
-            try:
-                # Closing the channel from here should interrupt the blocking start_consuming() in the thread
-                channel.close()
-                logger.info(f"Closed RabbitMQ channel for {name}")
             except Exception as e:
-                logger.error(f"Error closing RabbitMQ channel {name} during shutdown: {e}")
-                
-    # Wait for consumer threads to finish (optional, with timeout)
-    for thread in consumer_threads:
-        thread.join(timeout=5.0)
-        if thread.is_alive():
-            logger.warning(f"RabbitMQ consumer thread {thread.name} did not exit cleanly.")
+                logger.error(f"Error stopping RabbitMQ consumer: {e}")
 
-    logger.info("Broker service shut down successfully.")
-
-def main():
-    """Sets up signal handling and runs the main async function."""
-    loop = asyncio.get_event_loop()
+# --- Main Execution ---
+async def main():
+    """Main entry point for the broker."""
+    # Set up signal handlers
+    def signal_handler():
+        logger.info("Received termination signal, shutting down...")
+        shutdown_event.set()
     
-    # Add signal handlers to set the shutdown_event
+    # Register signal handlers
+    loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_event.set)
-        
+        loop.add_signal_handler(sig, signal_handler)
+    
     try:
-        loop.run_until_complete(main_async())
+        # Register broker with server via gRPC
+        if not await register_broker_via_grpc():
+            logger.error("Failed to register broker with server. Exiting.")
+            return
+        
+        # Set up RabbitMQ channels for different queues
+        broker_input_channel = setup_rabbitmq_channel(BROKER_INPUT_QUEUE, handle_incoming_message)
+        if not broker_input_channel:
+            logger.error("Failed to set up broker input channel. Exiting.")
+            return
+            
+        # Start RabbitMQ consumer threads
+        broker_input_thread = threading.Thread(
+            target=run_rabbitmq_consumer,
+            args=(broker_input_channel,)
+        )
+        broker_input_thread.daemon = True
+        broker_input_thread.start()
+        
+        logger.info("Broker started and running...")
+        
+        # Keep the main thread alive while handling signals
+        while not shutdown_event.is_set():
+            await asyncio.sleep(1)
+            
+    except Exception as e:
+        logger.error(f"Unhandled exception in main: {e}")
     finally:
-        loop.close()
-        logger.info("Asyncio event loop closed.")
+        logger.info("Broker shutdown complete")
 
 if __name__ == "__main__":
-    import signal # Import signal here for the main block
-    main() 
+    asyncio.run(main()) 
