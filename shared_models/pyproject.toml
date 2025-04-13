@@ -1,6 +1,6 @@
 [project]
 name = "shared-models"
-version = "0.1.1"
+version = "0.1.2"
 description = "Shared models for the community project"
 authors = [
     {name = "joe.fox", email = "j.oefox@gmail.com"}

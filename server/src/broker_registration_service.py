@@ -1,10 +1,6 @@
 """
 gRPC server implementation for broker registration service
 """
-import asyncio
-import logging
-import grpc
-from concurrent import futures
 import time
 import sys
 import os
@@ -19,7 +15,7 @@ from generated.broker_registration_service_pb2 import BrokerRegistrationResponse
 from generated.broker_registration_service_pb2_grpc import BrokerRegistrationServiceServicer, add_BrokerRegistrationServiceServicer_to_server
 
 # Import shared modules
-from shared_models import setup_logging, ResponseStatus
+from shared_models import setup_logging
 import state
 
 logger = setup_logging(__name__)

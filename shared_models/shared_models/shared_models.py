@@ -8,6 +8,7 @@ import logging
 import sys
 
 class MessageType(str, Enum):
+    """Enumeration of all possible message types in the system."""
     AGENT_STATUS_UPDATE = "AGENT_STATUS_UPDATE"
     CLIENT_DISCONNECTED = "CLIENT_DISCONNECTED"
     ERROR = "ERROR"
@@ -28,10 +29,12 @@ class MessageType(str, Enum):
     TEXT = "TEXT"
 
 class ResponseStatus(str, Enum):
+    """Enumeration of possible response statuses."""
     SUCCESS = "success"
     ERROR = "error"
 
 class ChatMessage(BaseModel):
+    """Model for chat messages in the system."""
     message_id: str
     sender_id: str
     text_payload: str
@@ -47,6 +50,7 @@ class ChatMessage(BaseModel):
         message_type: MessageType = MessageType.TEXT,
         in_reply_to_message_id: Optional[str] = None
     ) -> "ChatMessage":
+        """Create a new chat message with a random ID."""
         return cls(
             message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=6)),
             sender_id=sender_id,
@@ -131,7 +135,7 @@ class AgentRegistrationResponse(BaseModel):
 def create_text_message(sender_id: str, text_payload: str, 
                         in_reply_to_message_id: Optional[str] = None,
                         message_type: MessageType = MessageType.TEXT) -> ChatMessage:
-    """Helper function to create a new text message."""
+    """Create a new text message with a random ID."""
     return ChatMessage(
         message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
         sender_id=sender_id,
@@ -142,7 +146,7 @@ def create_text_message(sender_id: str, text_payload: str,
     )
 
 def create_reply_message(original_message: ChatMessage, sender_id: str, text_payload: str) -> ChatMessage:
-    """Helper function to create a reply to an existing message."""
+    """Create a reply to an existing message."""
     return ChatMessage(
         message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
         sender_id=sender_id,
@@ -177,24 +181,14 @@ class AgentStatusUpdate(BaseModel):
         return cls(
             message_type=data.get("message_type", MessageType.AGENT_STATUS_UPDATE),
             agents=[AgentStatus(**agent) for agent in data.get("agents", [])]
-        ) 
+        )
     
 def setup_logging(
     name: str,
     level: int = logging.INFO,
     stream: Optional[logging.StreamHandler] = None
 ) -> logging.Logger:
-    """
-    Set up logging with a consistent format across all modules.
-    
-    Args:
-        name: The name of the logger (typically __name__)
-        level: The logging level (default: INFO)
-        stream: Optional stream handler (default: sys.stdout)
-    
-    Returns:
-        logging.Logger: Configured logger instance
-    """
+    """Set up logging with a consistent format across all modules."""
     logger = logging.getLogger(name)
     logger.setLevel(level)
     

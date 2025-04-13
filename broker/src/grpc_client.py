@@ -3,8 +3,6 @@ gRPC client implementation for the broker to receive agent status updates from t
 """
 import grpc
 import asyncio
-import logging
-import time
 import inspect
 from typing import Callable, Optional
 import random

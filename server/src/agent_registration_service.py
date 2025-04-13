@@ -2,14 +2,11 @@
 gRPC server implementation for agent registration service
 """
 import asyncio
-import logging
-import grpc
-from concurrent import futures
-from typing import Dict, Set, List, Optional
 import time
 import uuid
 import sys
 import os
+from typing import Dict, Optional
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,9 +67,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         logger.info(f"Registering agent: {agent_id} ({agent_name})")
         state.update_agent_status(agent_id, status)
         
-        # Broadcast agent status update to all subscribers
-        asyncio.create_task(state.broadcast_agent_status_update())
-        
         # Store capabilities and metadata
         capabilities = dict(request.capabilities)
         hostname = request.hostname
@@ -124,9 +118,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         
         # Remove heartbeat record
         agent_heartbeats.pop(agent_id, None)
-        
-        # Broadcast agent status update to all subscribers
-        asyncio.create_task(state.broadcast_agent_status_update())
         
         return AgentUnregistrationResponse(
             success=True,
@@ -258,9 +249,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         command_results[command_id] = result
         pending_commands.pop(command_id, None)
         
-        # Process the result (e.g., update UI, database, notify clients)
-        # This would depend on your application's requirements
-        
         return CommandResultResponse(
             received=True,
             message="Command result received successfully"
@@ -384,10 +372,6 @@ async def process_heartbeats():
                     state.update_agent_status(agent_id, status)
                     status_updated = True
             
-            # Broadcast status updates if any agents were marked as offline
-            if status_updated:
-                await state.broadcast_agent_status_update()
-                
             # Sleep for a while before checking again
             await asyncio.sleep(30)
             

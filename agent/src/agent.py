@@ -6,15 +6,12 @@ import logging
 import os
 import signal
 import uuid
-from typing import Dict, Any
 from datetime import datetime
 import time
 from mistralai import Mistral
-import grpc
 
 from shared_models import (
     MessageType,
-    ResponseStatus,
     setup_logging
 )
 

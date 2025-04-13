@@ -1,7 +1,5 @@
-import logging
 import uvicorn
 import os
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,11 +10,11 @@ import config
 import websocket_handler
 import services
 import utils
-import rabbitmq_utils # Needed for initial connection check/advertisement
+import rabbitmq_utils
 from shared_models import setup_logging
 import agent_manager
-import grpc_services  # Import gRPC services
-import agent_registration_service  # Import agent registration service
+import grpc_services
+import agent_registration_service
 
 logger = setup_logging(__name__)
 
@@ -59,15 +57,7 @@ async def lifespan(app: FastAPI):
     await grpc_server.stop(grace=None)
     logger.info("gRPC server stopped")
     
-    # Graceful shutdown logic is handled by the signal handler calling utils.shutdown_server()
-    # However, we can initiate it here as a fallback or if signals aren't caught.
-    # Consider if utils.shutdown_server() needs to be called here if signals fail.
-    # For now, logging that shutdown is initiated by lifespan context end.
-    # If signals are reliable, utils.shutdown_server() might be redundant here.
     logger.info("Server shutdown initiated via lifespan context.")
-    # Perform any explicit cleanup needed *after* the app stops serving requests,
-    # if not covered by the signal handler's call to shutdown_server.
-    # await utils.shutdown_server() # Maybe call this if signals are not the primary mechanism
 
 # Create FastAPI app instance with lifespan manager
 app = FastAPI(
@@ -86,10 +76,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 logger.info(f"CORS configured with allowed origins: {config.ALLOWED_ORIGINS}")
-
-# --- Event Handlers (REMOVED - Now handled by lifespan) --- 
-# @app.on_event("startup") ...
-# @app.on_event("shutdown") ...
 
 # --- API Routes --- 
 # Add the WebSocket endpoint
@@ -118,19 +104,16 @@ if __name__ == "__main__":
     server_port = int(os.getenv('PORT', 8765))
 
     # Configure uvicorn
-    # Note: reload=True is problematic with signal handlers and async tasks.
-    # It's better to restart manually during development if needed.
     uvicorn_config = uvicorn.Config(
-        "main:app", # Point uvicorn to the app instance in this file
+        "main:app",
         host=server_host,
         port=server_port,
         log_level="info",
-        reload=False # Important: Disable reload for stable async/signal handling
+        reload=False
     )
     server = uvicorn.Server(uvicorn_config)
     
-    # Run the server (uvicorn handles the async event loop)
-    # Uvicorn will also capture SIGINT/SIGTERM and trigger the shutdown event.
+    # Run the server
     server.run()
 
     logger.info("Server process finished.") 

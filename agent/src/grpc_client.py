@@ -3,15 +3,13 @@ gRPC client implementation for the agent to register with the server
 """
 import grpc
 import asyncio
-import logging
 import time
 import inspect
-import uuid
 import socket
 import platform
 import os
 import sys
-from typing import Callable, Dict, Optional, List, Any
+from typing import Callable, Dict, Optional
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -290,13 +288,20 @@ async def command_stream_loop(server_host: str, server_port: int):
     
     attempt = 0
     max_backoff = 60  # Maximum backoff in seconds
+    initial_attempts = 5  # Number of attempts before switching to max backoff
     
-    while True:
+    while True:  # Infinite retry loop
         try:
             # Implement exponential backoff for reconnection
             if attempt > 0:
-                backoff = min(5 * (2 ** (attempt - 1)), max_backoff)
-                logger.info(f"Attempting to reconnect to command stream in {backoff} seconds (attempt {attempt})")
+                if attempt <= initial_attempts:
+                    # Use exponential backoff for initial attempts
+                    backoff = min(5 * (2 ** (attempt - 1)), max_backoff)
+                    logger.info(f"Attempting to reconnect to command stream in {backoff} seconds (attempt {attempt})")
+                else:
+                    # After initial attempts, use maximum backoff
+                    backoff = max_backoff
+                    logger.info(f"Attempting to reconnect to command stream in {backoff} seconds (attempt {attempt}, using max backoff)")
                 await asyncio.sleep(backoff)
             
             attempt += 1
@@ -329,7 +334,6 @@ async def command_stream_loop(server_host: str, server_port: int):
                     
                     if is_cancellation:
                         logger.info(f"Command {command_id} was cancelled")
-                        # Handle cancellation (you would implement this based on your agent's capabilities)
                         continue
                     
                     # Process the command using the callback if set
@@ -375,7 +379,6 @@ async def command_stream_loop(server_host: str, server_port: int):
                         
                 except Exception as process_err:
                     logger.error(f"Error processing command: {process_err}")
-                    # Continue processing other commands even if one fails
                     continue
             
             # If we get here, the stream has ended normally

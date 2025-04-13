@@ -2,12 +2,8 @@
 gRPC server implementation for agent status service
 """
 import asyncio
-import logging
 import grpc
 from concurrent import futures
-from typing import Dict, Set
-import time
-import weakref
 import sys
 import os
 
@@ -22,7 +18,7 @@ from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, 
 import broker_registration_service
 
 # Import shared modules
-from shared_models import setup_logging, AgentStatus
+from shared_models import setup_logging
 import state
 
 logger = setup_logging(__name__)
@@ -51,7 +47,6 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         
         async with subscription_lock:
             subscriber_contexts[subscriber_id] = {
-                # Store the broker_id instead of the context object
                 "broker_id": broker_id,
                 "queue": queue,
                 "active": True
@@ -119,8 +114,6 @@ class AgentStatusServicer(AgentStatusServiceServicer):
 
     def _handle_context_done(self, subscriber_id):
         """Handle context completion by marking the subscriber as inactive"""
-        # This runs in a different thread, so we need to be careful
-        # Just mark the subscriber as inactive, cleanup will happen in the main loop
         subscriber_info = subscriber_contexts.get(subscriber_id)
         if subscriber_info:
             subscriber_info["active"] = False

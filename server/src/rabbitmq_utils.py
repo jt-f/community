@@ -66,8 +66,6 @@ def publish_to_queue(queue_name: str, message_data: dict) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error publishing to queue {queue_name}: {e}")
-        # Invalidate connection on publish error?
-        # close_rabbitmq_connection()
         return False
     finally:
         if channel and channel.is_open:
@@ -87,7 +85,7 @@ def publish_to_agent_metadata_queue(message_data: dict) -> bool:
 def publish_server_advertisement():
     """Publish server availability to the advertisement queue."""
     advertisement = {
-        "message_type": "SERVER_AVAILABLE", # Consider using MessageType enum if easily accessible
+        "message_type": "SERVER_AVAILABLE",
         "server_id": config.SERVER_ID,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "websocket_url": config.WEBSOCKET_URL
@@ -97,8 +95,8 @@ def publish_server_advertisement():
     else:
         logger.error("Failed to publish server availability advertisement")
 
-# Helper function to process RabbitMQ events without blocking asyncio loop
 def process_rabbitmq_events():
+    """Process RabbitMQ events without blocking asyncio loop."""
     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
         try:
             state.rabbitmq_connection.process_data_events(time_limit=0.1)
@@ -110,14 +108,7 @@ def process_rabbitmq_events():
     return False
 
 def setup_agent_queue(queue_name: str) -> bool:
-    """Create or verify an agent's message queue exists.
-    
-    Args:
-        queue_name: The name of the queue to create/verify (usually agent_queue_{agent_id})
-        
-    Returns:
-        bool: True if queue is successfully created or already exists
-    """
+    """Create or verify an agent's message queue exists."""
     connection = get_rabbitmq_connection()
     if not connection:
         logger.error(f"Cannot setup queue {queue_name}: No RabbitMQ connection")
@@ -135,15 +126,7 @@ def setup_agent_queue(queue_name: str) -> bool:
         return False
 
 def publish_to_agent_queue(agent_id: str, message_data: dict) -> bool:
-    """Publish a message directly to an agent's queue.
-    
-    Args:
-        agent_id: The ID of the agent to send the message to
-        message_data: The message to send
-        
-    Returns:
-        bool: True if message is successfully published
-    """
+    """Publish a message directly to an agent's queue."""
     queue_name = f"agent_queue_{agent_id}"
     result = publish_to_queue(queue_name, message_data)
     if result:

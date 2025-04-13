@@ -353,7 +353,7 @@ cli = ["click (>=5.0)"]
 
 [[package]]
 name = "shared-models"
-version = "0.1.1"
+version = "0.1.2"
 description = "Shared models for the community project"
 optional = false
 python-versions = ">=3.13"

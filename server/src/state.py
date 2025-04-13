@@ -2,7 +2,6 @@ from typing import Dict, Set, Optional
 from fastapi import WebSocket
 import pika
 import asyncio
-import time
 
 # Import shared models
 from shared_models import AgentStatus, setup_logging
@@ -24,27 +23,14 @@ agent_status_history: Dict[str, AgentStatus] = {} # Previous status for change d
 agent_metadata: Dict[str, Dict] = {}  # Additional agent information beyond status
 
 # RabbitMQ Connection
-# Note: This will be managed (created/updated) by functions in rabbitmq_utils.py
 rabbitmq_connection: Optional[pika.BlockingConnection] = None
 
 # Broker status tracking
 broker_statuses: Dict[str, Dict] = {}  # broker_id -> status dict
 broker_status_lock = asyncio.Lock()
 
-# Broker status tracking
-broker_status = {
-    "is_online": False,
-    "last_seen": None
-}
-
 def update_agent_status(agent_id: str, status: AgentStatus) -> None:
-    """
-    Update an agent's status and record history
-    
-    Args:
-        agent_id: The ID of the agent to update
-        status: The new status for the agent
-    """
+    """Update an agent's status and record history."""
     # Save previous status for change detection
     if agent_id in agent_statuses:
         agent_status_history[agent_id] = agent_statuses[agent_id]
@@ -54,15 +40,7 @@ def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     logger.debug(f"Updated status for agent {agent_id}: online={status.is_online}")
 
 async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
-    """
-    Broadcast agent status updates to all subscribers via gRPC.
-    
-    This function will be called by the agent registration service when
-    agent status changes. It triggers the broadcast in the agent_status_service.
-    
-    Args:
-        is_full_update: Whether this is a full update of all agents or just changes
-    """
+    """Broadcast agent status updates to all subscribers via gRPC."""
     # Import here to avoid circular imports
     from grpc_services import broadcast_agent_status_updates
     

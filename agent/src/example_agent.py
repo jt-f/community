@@ -6,8 +6,6 @@ import asyncio
 import os
 import sys
 import signal
-import logging
-import subprocess
 from typing import Dict, Any
 
 # Add the parent directory to sys.path so we can import modules
