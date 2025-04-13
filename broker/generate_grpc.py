@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import shutil
+import re
 
 def main():
     # Directory containing this script
@@ -13,7 +14,8 @@ def main():
     
     # Define paths
     proto_dir = os.path.join(script_dir, "src", "protos")
-    output_dir = os.path.join(script_dir, "src")
+    generated_dir = os.path.join(script_dir, "generated")
+    output_dir = generated_dir
     
     # First, check if proto file exists in the server directory
     server_proto_dir = os.path.join(script_dir, "..", "server", "src", "protos")
@@ -22,6 +24,9 @@ def main():
     
     # Create proto directory if it doesn't exist
     os.makedirs(proto_dir, exist_ok=True)
+    
+    # Create generated directory if it doesn't exist
+    os.makedirs(generated_dir, exist_ok=True)
     
     # Copy proto file from server to broker if it exists
     if os.path.exists(server_proto_file):
@@ -102,8 +107,30 @@ message AgentInfo {
             
         print(f"Generated files created successfully: {pb2_file}, {pb2_grpc_file}")
         
-        # Create __init__.py files to make the generated code importable
-        # (though in this case, we're importing directly from the src directory)
+        # Fix the import statement in the generated _pb2_grpc.py file
+        if os.path.exists(pb2_grpc_file):
+            print(f"Fixing import statement in {pb2_grpc_file}")
+            with open(pb2_grpc_file, 'r') as file:
+                content = file.read()
+            
+            # Replace the import statement with a relative import that doesn't depend on Python package paths
+            fixed_content = re.sub(
+                r'import agent_status_service_pb2 as agent__status__service__pb2',
+                r'from . import agent_status_service_pb2 as agent__status__service__pb2',
+                content
+            )
+            
+            with open(pb2_grpc_file, 'w') as file:
+                file.write(fixed_content)
+            
+            print(f"Fixed import statement in {pb2_grpc_file}")
+        
+        # Create __init__.py file in the generated directory to make it a package
+        init_file = os.path.join(generated_dir, "__init__.py")
+        with open(init_file, "w") as f:
+            pass
+        print(f"Created __init__.py in the generated directory: {init_file}")
+        
         print("Setup complete. gRPC code generated successfully!")
         return 0
     except subprocess.CalledProcessError as e:

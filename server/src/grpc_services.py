@@ -8,10 +8,17 @@ from concurrent import futures
 from typing import Dict, Set
 import time
 import weakref
+import sys
+import os
+
+# Add the parent directory to sys.path so we can import the generated modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
 # Import generated gRPC code
-from agent_status_service_pb2 import AgentStatusResponse, AgentInfo
-from agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
+from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
+from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
 
 # Import shared modules
 from shared_models import setup_logging, AgentStatus

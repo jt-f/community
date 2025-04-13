@@ -8,6 +8,13 @@ import time
 import inspect
 from typing import Callable, Optional
 import random
+import sys
+import os
+
+# Add the parent directory to sys.path so we can import the generated modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
 # Import shared modules
 from shared_models import setup_logging, MessageType
@@ -16,11 +23,11 @@ logger = setup_logging(__name__)
 # Import generated gRPC code
 # Note: These imports will only work after running generate_grpc.py
 try:
-    from agent_status_service_pb2 import AgentStatusRequest
-    from agent_status_service_pb2_grpc import AgentStatusServiceStub
+    from generated.agent_status_service_pb2 import AgentStatusRequest
+    from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
     GRPC_IMPORTS_SUCCESSFUL = True
-except ImportError:
-    logger.warning("gRPC generated code not found. Please run generate_grpc.py first.")
+except ImportError as e:
+    logger.warning(f"gRPC generated code not found. Please run generate_grpc.py first. Error: {e}")
     GRPC_IMPORTS_SUCCESSFUL = False
     
     # Placeholder implementations when imports fail
