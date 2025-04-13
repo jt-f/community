@@ -13,6 +13,9 @@ dependencies = [
     "mistralai (>=1.6.0,<2.0.0)",
     "dotenv (>=0.9.9,<0.10.0)",
     "shared-models @ file:///mnt/c/Users/joefo/community/shared_models",
+    "protobuf (>=5.26.1,<6.0.0)",
+    "grpcio (>=1.71.0,<2.0.0)",
+    "grpcio-tools (>=1.71.0,<2.0.0)",
 ]
 
 [tool.poetry] 
