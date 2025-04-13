@@ -5,10 +5,8 @@ import json
 import logging
 import os
 import signal
-import sys
 import uuid
-import websockets
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any
 from datetime import datetime
 import time
 from mistralai import Mistral
@@ -17,17 +15,12 @@ import grpc
 from shared_models import (
     MessageType,
     ResponseStatus,
-    ChatMessage,
-    AgentRegistrationMessage,
-    AgentRegistrationResponse,
-    create_text_message,
-    create_reply_message,
     setup_logging
 )
 
 # Import agent configuration and gRPC client
 import config as agent_config
-import grpc_client  # Add the gRPC client import
+import grpc_client
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -37,15 +30,13 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 logger.info("Pika library logging level set to WARNING.")
 
 # Define the server input queue name (should match server config)
-SERVER_INPUT_QUEUE = "server_input_queue"
+# SERVER_INPUT_QUEUE = "server_input_queue" # Not directly used by agent, defined in publish func
 
 class Agent:
-    def __init__(self, agent_id: str, agent_name: str, websocket_url: str, rabbitmq_host: str):
+    def __init__(self, agent_id: str, agent_name: str, rabbitmq_host: str):
         self.agent_id = agent_id
         self.agent_name = agent_name
-        self.websocket_url = websocket_url
         self.rabbitmq_host = rabbitmq_host
-        self.websocket = None
         self.rabbitmq_connection = None
         self.rabbitmq_channel = None
         self.queue_name = f"agent_queue_{self.agent_id}"
@@ -66,17 +57,6 @@ class Agent:
         else:
             logger.warning("Mistral API key not found, LLM features disabled.")
         
-    async def connect_websocket(self) -> bool:
-        """Connect to WebSocket server for status updates and ping/pong."""
-        try:
-            logger.info(f"Agent {self.agent_name} connecting to WebSocket for status updates at {self.websocket_url}...")
-            self.websocket = await websockets.connect(self.websocket_url)
-            logger.info(f"Connected to WebSocket server for status updates")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to WebSocket: {e}")
-            return False
-            
     def connect_rabbitmq(self) -> bool:
         """Connect to RabbitMQ server for message processing."""
         try:
@@ -217,7 +197,7 @@ class Agent:
             # Requeue the message for later processing
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
     
-    def generate_response(self, message) -> dict:
+    def generate_response(self, message: dict) -> dict:
         """Generate a response for a received message using Mistral LLM."""
         sender_id = message.get("sender_id", "unknown")
         text_payload = message.get("text_payload", "")
@@ -267,54 +247,6 @@ class Agent:
             
         return response
 
-    async def listen_websocket(self) -> None:
-        """Listen for status updates and control messages from the WebSocket server.
-        
-        Note: In the future, agent status updates could be entirely handled through gRPC
-        similar to how brokers receive updates. This WebSocket-based approach is maintained
-        for backward compatibility.
-        """
-        if not self.websocket:
-            logger.error("Cannot listen: WebSocket connection not established")
-            return
-            
-        try:
-            async for message in self.websocket:
-                data = json.loads(message)
-                message_type = data.get("message_type")
-                
-                if message_type == MessageType.PING:
-                    # Respond to ping with a pong for status tracking
-                    server_ping_time = data.get("timestamp", "unknown")
-                    response_time = datetime.now().isoformat()
-                    logger.debug(f"Received PING from server, responding with PONG")
-                    
-                    await self.websocket.send(json.dumps({
-                        "message_type": MessageType.PONG,
-                        "agent_id": self.agent_id,
-                        "agent_name": self.agent_name,
-                        "response_time": response_time,
-                        "server_ping_time": server_ping_time
-                    }))
-                elif message_type == MessageType.SHUTDOWN:
-                    # Handle shutdown request
-                    logger.info("Received shutdown request from server")
-                    self.running = False
-                    break
-                elif message_type == MessageType.SERVER_HEARTBEAT:
-                    logger.debug("Received heartbeat from server, ignoring as it's meant for frontend clients")
-                elif message_type == MessageType.AGENT_STATUS_UPDATE:
-                    # Agent status broadcasts can be ignored
-                    logger.debug("Received agent status update, ignoring as it's meant for frontend clients")
-                else:
-                    # Log other messages received on WebSocket
-                    logger.info(f"Received message type {message_type} on WebSocket (should be using queue)")
-                    
-        except websockets.exceptions.ConnectionClosed as e:
-            logger.warning(f"WebSocket connection closed: {e}")
-        except Exception as e:
-            logger.error(f"Error in WebSocket listener: {e}")
-    
     def start_rabbitmq_consumer(self) -> None:
         """Start consuming messages from the RabbitMQ queue."""
         if not self.rabbitmq_connection or not self.rabbitmq_connection.is_open:
@@ -344,11 +276,8 @@ class Agent:
         finally:
             self.cleanup()
     
-    async def run(self) -> None:
-        """Run the agent's main loop with the hybrid approach:
-        - WebSockets for status updates and ping/pong (used only for status updates)
-        - RabbitMQ queues for message processing and registration
-        """
+    async def run(self) -> None: # Keep async for gRPC registration
+        """Run the agent's main loop (gRPC for registration, RabbitMQ for messages)."""
         self.running = True
         
         # Register with server first (uses gRPC)
@@ -366,10 +295,6 @@ class Agent:
             logger.error("Failed to set up RabbitMQ queue. Exiting.")
             return
         
-        # Connect to WebSocket for status updates only
-        if not await self.connect_websocket():
-            logger.warning("Failed to connect to WebSocket server. Continuing without status updates.")
-        
         # Start RabbitMQ consumer in a separate thread for message processing
         import threading
         consumer_thread = threading.Thread(target=self.start_rabbitmq_consumer)
@@ -377,60 +302,39 @@ class Agent:
         consumer_thread.start()
         logger.info("Started RabbitMQ consumer thread for message processing")
         
-        # Listen for status updates and control messages on WebSocket
+        # Keep the main async loop running while the consumer thread operates
+        # This allows signal handling and potential future async tasks
         try:
-            logger.info("Listening for status updates and control messages on WebSocket")
-            await self.listen_websocket()
+            while self.running:
+                # Yield control to allow other async tasks (like signal handlers)
+                await asyncio.sleep(1) 
+        except asyncio.CancelledError:
+             logger.info("Main agent loop cancelled.")
         finally:
+            logger.info("Main agent loop finished. Initiating cleanup.")
             self.cleanup()
     
     def cleanup(self) -> None:
         """Clean up connections before exit."""
         logger.info("Cleaning up before exit...")
         
-        # Close WebSocket connection
-        if self.websocket:
-            try:
-                # Create a new event loop for the close task
-                close_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(close_loop)
-                
-                # Create and run a task to close the websocket
-                close_loop.run_until_complete(self.close_websocket())
-                close_loop.close()
-                
-                logger.info("WebSocket connection closed")
-            except Exception as e:
-                logger.error(f"Error closing WebSocket connection: {e}")
-        
         # Close RabbitMQ connection
         if self.rabbitmq_connection and self.rabbitmq_connection.is_open:
             try:
                 if self.rabbitmq_channel and self.rabbitmq_channel.is_open:
-                    self.rabbitmq_channel.stop_consuming()
+                    if hasattr(self.rabbitmq_channel, 'consumer_tags') and self.rabbitmq_channel.consumer_tags:
+                         self.rabbitmq_channel.stop_consuming()
                 self.rabbitmq_connection.close()
                 logger.info("RabbitMQ connection closed")
             except Exception as e:
                 logger.error(f"Error closing RabbitMQ connection: {e}")
     
-    async def close_websocket(self) -> None:
-        """Close the websocket connection gracefully."""
-        if self.websocket:
-            try:
-                await self.websocket.close()
-                self.websocket = None
-                logger.info("Closed WebSocket connection")
-            except Exception as e:
-                logger.error(f"Error closing WebSocket: {e}")
-                self.websocket = None
-
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Run an agent with hybrid communication approach")
+    parser = argparse.ArgumentParser(description="Run an agent using gRPC and RabbitMQ")
     
     parser.add_argument("--id", type=str, help="Unique identifier for this agent")
     parser.add_argument("--name", type=str, required=True, help="Human-readable name for this agent")
-    parser.add_argument("--ws-url", type=str, default="ws://localhost:8765/ws", help="WebSocket server URL for status updates")
     parser.add_argument("--rabbitmq-host", type=str, default="localhost", help="RabbitMQ server host for message processing")
     
     return parser.parse_args()
@@ -447,7 +351,6 @@ async def main():
     agent = Agent(
         agent_id=agent_id,
         agent_name=args.name,
-        websocket_url=args.ws_url,
         rabbitmq_host=args.rabbitmq_host
     )
     
@@ -470,10 +373,11 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
     
     try:
-        logger.info(f"Starting agent {agent.agent_name} (ID: {agent.agent_id}) with hybrid communication")
-        logger.info(f"- WebSockets for status updates and pings")
+        logger.info(f"Starting agent {agent.agent_name} (ID: {agent.agent_id}) with gRPC and RabbitMQ communication")
         logger.info(f"- RabbitMQ queues for message processing")
         await agent.run()
+    except asyncio.CancelledError:
+        logger.info("Agent run cancelled.")
     except Exception as e:
         logger.error(f"Unhandled exception: {e}")
     finally:
