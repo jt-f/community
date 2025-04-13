@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package agent_status;
+
+// Define the service for agent status updates
+service AgentStatusService {
+  // Request initial agent status and subscribe to future updates
+  rpc SubscribeToAgentStatus (AgentStatusRequest) returns (stream AgentStatusResponse) {}
+  
+  // Request a one-time full agent status update
+  rpc GetAgentStatus (AgentStatusRequest) returns (AgentStatusResponse) {}
+}
+
+// Request message for agent status
+message AgentStatusRequest {
+  string broker_id = 1;  // ID of the requesting broker
+}
+
+// Response message containing agent status information
+message AgentStatusResponse {
+  repeated AgentInfo agents = 1;
+  bool is_full_update = 2;  // Whether this is a complete agent list or just updates
+}
+
+// Information about an individual agent
+message AgentInfo {
+  string agent_id = 1;
+  string agent_name = 2;
+  bool is_online = 3;
+  string last_seen = 4;  // ISO format timestamp
+} 

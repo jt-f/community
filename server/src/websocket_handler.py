@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Set, Optional
 import asyncio
+import os
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -15,6 +16,7 @@ import rabbitmq_utils
 import agent_manager
 # Revert to direct import as main.py is run directly
 import services
+import grpc_services  # Import the gRPC services module
 
 
 logger = setup_logging(__name__)
@@ -30,7 +32,11 @@ def generate_unique_id(client_type: str) -> str:
 
 
 async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
-    """Handle broker registration."""
+    """Handle broker registration.
+    
+    WebSocket connection is maintained for general message passing,
+    but agent status updates are sent exclusively via gRPC.
+    """
     logger.info(f"Handling broker registration request: {message}")
     broker_name = message.get("broker_name")
     if not broker_name:
@@ -63,20 +69,26 @@ async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
     
     logger.info(f"Broker registered successfully: {broker_name} (ID: {broker_id})")
     
-    # Create registration response
+    # Get gRPC config
+    grpc_host = os.getenv("GRPC_HOST", "localhost")
+    grpc_port = os.getenv("GRPC_PORT", "50051")
+    
+    # Create registration response with gRPC info
     response = {
         "message_type": MessageType.REGISTER_BROKER_RESPONSE,
         "status": ResponseStatus.SUCCESS,
         "broker_id": broker_id,
         "broker_name": broker_name,
-        "message": "Broker registered successfully"
+        "message": "Broker registered successfully",
+        "grpc_host": grpc_host,
+        "grpc_port": grpc_port,
+        "use_grpc_for_agent_status": True
     }
     
     logger.debug(f"Sending registration response to broker: {response}")
     
-    # Send a full agent status update immediately to this specific broker
-    logger.info(f"Sending immediate full agent status update to new broker {broker_id}")
-    await agent_manager.send_agent_status_to_broker()
+    # No longer sending agent status via WebSocket
+    # Agent status updates will be sent via gRPC
     
     return response
 
@@ -109,8 +121,9 @@ async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
     status_updated = agent_manager.update_agent_status(agent_id, agent_name, True)
     logger.debug(f"Agent status updated in agent manager: {status_updated}")
     
-    logger.debug(f"Broadcasting agent status after registration (full update)")
-    await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True)
+    # Explicitly trigger broadcasting via gRPC
+    logger.info(f"Broadcasting agent status via gRPC after agent registration: {agent_id}")
+    asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
     
     logger.info(f"Agent registered successfully: {agent_name} (ID: {agent_id})")
     
@@ -258,23 +271,45 @@ async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_
          logger.error(f"Failed to send unknown message type error back to client {client_id}: {e}")
 
 async def _handle_request_agent_status(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handles agent status requests specifically from the broker."""
-    if getattr(websocket, 'connection_type', None) == "broker":
-        logger.info(f"Broker ({client_id}) requested agent status via WebSocket.")
-        # Call the function that now sends the response via WebSocket
-        await agent_manager.send_agent_status_to_broker()
-    else:
-        logger.warning(f"Received REQUEST_AGENT_STATUS from non-broker client: {client_id} ({getattr(websocket, 'connection_type', 'unknown')}). Ignoring.")
-        # Optionally send an error back to the sender
-        error_resp = {
+    """Handles REQUEST_AGENT_STATUS message from clients.
+    
+    For brokers, recommend using gRPC instead.
+    For frontends, send status via WebSocket.
+    """
+    # Check if this is a broker (should use gRPC instead)
+    connection_type = getattr(websocket, "connection_type", "unknown")
+    if connection_type == "broker":
+        logger.warning(f"Broker {client_id} requested agent status via WebSocket, should use gRPC instead")
+        response = {
             "message_type": MessageType.ERROR,
-            "text_payload": "Only the broker can request agent status.",
-            "sender_id": "server"
+            "text_payload": "Brokers should use gRPC for agent status updates",
+            "sender_id": "Server",
+            "receiver_id": client_id
         }
-        try:
-            await websocket.send_text(json.dumps(error_resp))
-        except Exception as e:
-             logger.error(f"Failed to send 'broker only' error to client {client_id}: {e}")
+        await websocket.send_text(json.dumps(response))
+        return
+    
+    # For frontends, send status update via WebSocket
+    if connection_type == "frontend":
+        logger.info(f"Frontend {client_id} requested agent status update")
+        # Create and send a full agent status update for this specific frontend
+        status_update = {
+            "message_type": MessageType.AGENT_STATUS_UPDATE,
+            "agents": [
+                {
+                    "agent_id": agent_id,
+                    "agent_name": status.agent_name,
+                    "is_online": status.is_online,
+                    "last_seen": status.last_seen
+                }
+                for agent_id, status in state.agent_statuses.items()
+            ],
+            "is_full_update": True
+        }
+        await websocket.send_text(json.dumps(status_update))
+        logger.info(f"Sent agent status update to frontend {client_id}")
+    else:
+        logger.warning(f"Unexpected client type {connection_type} requested agent status")
 
 # --- Helper Function for Disconnect Cleanup ---
 
@@ -330,97 +365,83 @@ async def _handle_disconnect(websocket: WebSocket, client_id: str):
 # --- Main WebSocket Endpoint ---
 
 async def websocket_endpoint(websocket: WebSocket):
-    """Main WebSocket endpoint handler."""
+    """Main WebSocket handling endpoint"""
+    await websocket.accept()
     client_id = None
+    
     try:
-        await websocket.accept()
-        logger.info("New WebSocket connection accepted")
+        logger.debug("New WebSocket connection")
         
-        # Add to active connections
-        state.active_connections.add(websocket)
+        # First message should be a registration message
+        registration_msg_str = await websocket.receive_text()
+        registration_msg = json.loads(registration_msg_str)
         
-        # Initialize connection type
-        websocket.connection_type = "unknown"
+        # Process based on message type
+        message_type = registration_msg.get("message_type")
         
-        # Main message loop
+        if message_type == MessageType.REGISTER_BROKER:
+            # Broker registration
+            response = await _handle_register_broker(websocket, registration_msg)
+            await websocket.send_text(json.dumps(response))
+            client_id = websocket.client_id  # Store client_id from the registration
+            
+        elif message_type == MessageType.REGISTER_AGENT:
+            # Agent registration
+            response = await _handle_register_agent(websocket, registration_msg)
+            await websocket.send_text(json.dumps(response))
+            client_id = websocket.client_id  # Store client_id from the registration
+            
+        elif message_type == MessageType.REGISTER_FRONTEND:
+            # Frontend registration
+            response = await _handle_register_frontend(websocket, registration_msg)
+            await websocket.send_text(json.dumps(response))
+            client_id = websocket.client_id  # Store client_id from the registration
+            
+        else:
+            # Invalid first message
+            logger.warning(f"Invalid first message type: {message_type}")
+            await websocket.send_text(json.dumps({
+                "message_type": MessageType.ERROR,
+                "text_payload": "First message must be a registration message"
+            }))
+            return
+        
+        # Continue handling WebSocket messages
         while True:
-            try:
-                data = await websocket.receive_text()
-                message = json.loads(data)
-                message_type = message.get("message_type")
-                
-                # Get client_id from websocket attribute or message
-                client_id = getattr(websocket, "client_id", None) or message.get("client_id")
-                
-                if not client_id:
-                    # Handle registration messages
-                    if message_type == MessageType.REGISTER_AGENT:
-                        logger.info(f"Received REGISTER_AGENT message from unregistered client: {message}")
-                        response = await _handle_register_agent(websocket, message)
-                        logger.info(f"Sending registration response to agent: {response}")
-                        await websocket.send_text(json.dumps(response))
-                    elif message_type == MessageType.REGISTER_BROKER:
-                        logger.info(f"Received REGISTER_BROKER message from unregistered client")
-                        response = await _handle_register_broker(websocket, message)
-                        await websocket.send_text(json.dumps(response))
-                    elif message_type == MessageType.REGISTER_FRONTEND:
-                        logger.info(f"Received REGISTER_FRONTEND message from unregistered client")
-                        response = await _handle_register_frontend(websocket, message)
-                        await websocket.send_text(json.dumps(response))
-                    else:
-                        logger.warning(f"Received unregistered message type: {message_type}")
-                        await websocket.send_text(json.dumps({
-                            "message_type": MessageType.ERROR,
-                            "text_payload": "Client must register first"
-                        }))
-                else:
-                    # Handle registered client messages
-                    if message_type == MessageType.PONG:
-                        await _handle_pong(websocket, client_id, message)
-                    elif message_type == MessageType.PING:
-                        # Just respond with a PONG message
-                        await websocket.send_text(json.dumps({
-                            "message_type": MessageType.PONG,
-                            "sender_id": "server"
-                        }))
-                        logger.debug(f"Received PING from {client_id}, sent PONG response")
-                    elif message_type == MessageType.REQUEST_AGENT_STATUS:
-                        await _handle_request_agent_status(websocket, client_id, message)
-                    # Handle chat-related messages
-                    elif message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
-                        await _handle_chat_message(websocket, client_id, message)
-                    else:
-                        logger.warning(f"Unknown message type from {client_id}: {message_type}")
-                        
-            except json.JSONDecodeError:
-                logger.error(f"Invalid JSON received from {client_id or 'unknown client'}")
-                await websocket.send_text(json.dumps({
-                    "message_type": MessageType.ERROR,
-                    "text_payload": "Invalid JSON format"
-                }))
-            except WebSocketDisconnect:
-                logger.info(f"WebSocket disconnected during message handling: {client_id or 'unknown client'}")
-                break
-            except Exception as e:
-                logger.error(f"Error processing message from {client_id or 'unknown client'}: {e}")
-                break
-                
+            message_str = await websocket.receive_text()
+            message_data = json.loads(message_str)
+            
+            # Check message type and route accordingly
+            message_type = message_data.get("message_type")
+            
+            if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+                # Chat messages
+                await _handle_chat_message(websocket, client_id, message_data)
+            elif message_type == MessageType.PONG:
+                # PONG response (from ping)
+                logger.debug(f"Received PONG from {client_id}")
+                # No need to do anything else with PONG
+            elif message_type == MessageType.PING:
+                # PING request (client wants to check server health)
+                logger.debug(f"Received PING from {client_id}, sending PONG")
+                await websocket.send_text(json.dumps({"message_type": MessageType.PONG}))
+            elif message_type == MessageType.CLIENT_DISCONNECTED:
+                # Client disconnection notice
+                await _handle_client_disconnected_message(websocket, client_id, message_data)
+            elif message_type == MessageType.REQUEST_AGENT_STATUS:
+                # Agent status request
+                await _handle_request_agent_status(websocket, client_id, message_data)
+            else:
+                # Unhandled message type
+                await _handle_unknown_message(websocket, client_id, message_data)
+    
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected during connection setup: {client_id or 'unknown client'}")
+        logger.info(f"WebSocket client disconnected: {client_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.exception(f"Error in WebSocket handler: {e}")
     finally:
-        # Ensure proper cleanup is always performed
-        logger.info(f"Performing cleanup for client: {client_id or 'unknown'}")
+        # Handle cleanup on disconnect
         if client_id:
-            try:
-                await _handle_disconnect(websocket, client_id)
-            except Exception as e:
-                logger.error(f"Error during disconnect handling for {client_id}: {e}")
-        
-        # Always make sure to remove from active connections
-        state.active_connections.discard(websocket)
-        state.frontend_connections.discard(websocket)
-        
-        # Log final confirmation of cleanup
-        logger.info(f"WebSocket connection cleanup completed for: {client_id or 'unknown'}")
+            await _handle_disconnect(websocket, client_id)
+        else:
+            logger.info("WebSocket disconnected before registration completed")

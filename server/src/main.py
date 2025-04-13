@@ -1,6 +1,7 @@
 import logging
 import uvicorn
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ import utils
 import rabbitmq_utils # Needed for initial connection check/advertisement
 from shared_models import setup_logging
 import agent_manager
+import grpc_services  # Import gRPC services
 
 logger = setup_logging(__name__)
 
@@ -24,6 +26,13 @@ async def lifespan(app: FastAPI):
     logger.info("Server starting up (lifespan)...")
     # Ensure RabbitMQ connection is attempted before starting services
     rabbitmq_utils.get_rabbitmq_connection()
+    
+    # Start gRPC server
+    grpc_port = int(os.getenv('GRPC_PORT', '50051'))
+    grpc_server = grpc_services.start_grpc_server(grpc_port)
+    await grpc_server.start()
+    logger.info(f"gRPC server started on port {grpc_port}")
+    
     # Start background services (response consumer, pinger, etc.)
     await services.start_services()
     # Advertise server availability via RabbitMQ
@@ -39,6 +48,11 @@ async def lifespan(app: FastAPI):
     
     # --- Shutdown Logic --- 
     logger.info("Server shutting down (lifespan)...")
+    # Shutdown gRPC server
+    logger.info("Shutting down gRPC server...")
+    await grpc_server.stop(grace=None)
+    logger.info("gRPC server stopped")
+    
     # Graceful shutdown logic is handled by the signal handler calling utils.shutdown_server()
     # However, we can initiate it here as a fallback or if signals aren't caught.
     # Consider if utils.shutdown_server() needs to be called here if signals fail.
@@ -79,11 +93,18 @@ logger.info(f"WebSocket endpoint registered at /ws")
 # Basic HTTP route for health check / info
 @app.get("/")
 async def read_root():
-    return {"message": "Agent Communication Server is running."}
+    return {
+        "message": "Agent Communication Server is running.",
+        "services": {
+            "websocket": f"ws://{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '8765')}/ws",
+            "grpc": f"{os.getenv('GRPC_HOST', '0.0.0.0')}:{os.getenv('GRPC_PORT', '50051')}"
+        }
+    }
 
 # --- Main Execution --- 
 if __name__ == "__main__":
-    logger.info(f"Starting Agent Communication Server on port {os.getenv('WEBSOCKET_PORT', '8765')}...")
+    logger.info(f"Starting Agent Communication Server on port {os.getenv('PORT', '8765')}...")
+    logger.info(f"gRPC server will run on port {os.getenv('GRPC_PORT', '50051')}")
     logger.info("Press Ctrl+C to stop the server.")
     
     # Get host and port from environment or use defaults

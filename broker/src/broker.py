@@ -11,6 +11,7 @@ import asyncio
 import websockets
 import signal
 from shared_models import setup_logging, MessageType, ResponseStatus
+import grpc_client  # Import the gRPC client module
 
 
 logger = setup_logging(__name__)
@@ -231,6 +232,11 @@ def handle_agent_status_update(message_data):
     #             callbacks = wait_for_online_callbacks.pop(agent_id, [])
     #             for callback in callbacks:
     #                 callback()
+
+# Create a new async version of handle_agent_status_update for gRPC
+async def handle_agent_status_update_async(message_data):
+    """Async wrapper for handle_agent_status_update to be used with gRPC."""
+    handle_agent_status_update(message_data)
 
 def handle_control_message(channel, method, properties, body):
     """Handle control messages for the broker."""
@@ -465,6 +471,11 @@ async def websocket_listener():
     """Connects to the server via WebSocket and listens for messages."""
     global BROKER_ID, _need_agent_status_update  # Move both global declarations to the beginning of the function
     
+    # Variables to track gRPC configuration
+    grpc_enabled = False
+    grpc_host = None
+    grpc_port = None
+    
     while not shutdown_event.is_set():
         try:
             async with websockets.connect(WEBSOCKET_URL) as websocket:
@@ -486,48 +497,45 @@ async def websocket_listener():
                     # Store the assigned broker ID
                     BROKER_ID = response_data["broker_id"]
                     logger.info(f"Registered as broker with ID: {BROKER_ID}")
-                elif response_data.get("message_type") == MessageType.AGENT_STATUS_UPDATE:
-                    # Server might send agent status update immediately after registration
-                    # Process it and continue waiting for the actual registration response
-                    handle_agent_status_update(response_data)
                     
-                    # Now wait for the actual registration response
-                    response = await websocket.recv()
-                    response_data = json.loads(response)
+                    # Get gRPC configuration for agent status updates
+                    grpc_host = response_data.get("grpc_host", "localhost")
+                    grpc_port = int(response_data.get("grpc_port", "50051"))
+                    logger.info(f"Server provided gRPC endpoint at {grpc_host}:{grpc_port}")
                     
-                    if response_data.get("message_type") == MessageType.REGISTER_BROKER_RESPONSE:
-                        # Store the assigned broker ID
-                        BROKER_ID = response_data["broker_id"]
-                        logger.info(f"Registered as broker with ID: {BROKER_ID}")
-                    else:
-                        logger.error(f"Failed to register broker: {response_data}")
-                        continue
+                    # Set up gRPC callback to handle agent status updates
+                    grpc_client.set_agent_status_callback(handle_agent_status_update_async)
+                    
+                    # Start gRPC client in a separate task
+                    asyncio.create_task(grpc_client.connect_to_grpc_server(
+                        host=grpc_host,
+                        port=grpc_port,
+                        broker_id=BROKER_ID
+                    ))
                 else:
                     logger.error(f"Failed to register broker: {response_data}")
                     continue
                 
-                # Listen for messages
+                # Listen for messages via WebSocket
                 while not shutdown_event.is_set():
                     try:
                         # Check if we need to request agent status
                         if _need_agent_status_update:
-                            logger.info("Sending queued REQUEST_AGENT_STATUS message to server")
-                            status_request = {
-                                "message_type": MessageType.REQUEST_AGENT_STATUS,
-                                "sender_id": BROKER_ID,
-                                "timestamp": datetime.now().isoformat()
-                            }
-                            await websocket.send(json.dumps(status_request))
+                            logger.info("Requesting agent status update via gRPC")
+                            asyncio.create_task(grpc_client.request_agent_status(
+                                host=grpc_host,
+                                port=grpc_port,
+                                broker_id=BROKER_ID
+                            ))
                             _need_agent_status_update = False
-                            logger.info("REQUEST_AGENT_STATUS message sent")
+                            logger.info("Agent status update requested")
 
                         message_str = await asyncio.wait_for(websocket.recv(), timeout=1.0)
                         message_data = json.loads(message_str)
                         message_type = message_data.get("message_type")
                         
-                        if message_type == MessageType.AGENT_STATUS_UPDATE:
-                            handle_agent_status_update(message_data)
-                        elif message_type in [MessageType.PING, MessageType.SERVER_HEARTBEAT]: # Respond to both PING and HEARTBEAT
+                        # Never handle agent status updates via WebSocket - always use gRPC
+                        if message_type in [MessageType.PING, MessageType.SERVER_HEARTBEAT]: # Respond to both PING and HEARTBEAT
                             # Respond to PING/HEARTBEAT from server
                             pong_message = {"message_type": MessageType.PONG}
                             await websocket.send(json.dumps(pong_message))
@@ -536,6 +544,9 @@ async def websocket_listener():
                             # Server might send ERROR if it doesn't handle our PING; ignore it.
                             logger.debug(f"Received ERROR message via WebSocket, likely due to PING: {message_data.get('text_payload')}")
                             pass # Ignore these errors
+                        elif message_type == MessageType.AGENT_STATUS_UPDATE:
+                            # Ignore agent status updates via WebSocket - we use gRPC now
+                            logger.debug("Received agent status update via WebSocket - ignoring as we use gRPC")
                         else:
                             logger.warning(f"Received unhandled WebSocket message type: {message_type}")
                             

@@ -2,7 +2,17 @@ poetry run python src/main.py
 
 # Agent Communication Server
 
-This directory contains the Python FastAPI server, the central component responsible for managing WebSocket connections, tracking client status, and orchestrating communication via RabbitMQ.
+This service provides the backend infrastructure for agent communication, acting as a message router between agents, brokers, and frontend clients.
+
+## Updates: gRPC for Agent Status Updates
+
+The server now supports gRPC for efficient streaming of agent status updates to brokers. This architectural change provides:
+
+- Efficient streaming of updates (vs. polling)
+- Lower latency for status changes
+- Reduced websocket traffic (status updates now go through dedicated gRPC channel)
+
+WebSockets are still used for chat messaging and other communication, but agent status distribution is now handled through gRPC.
 
 ## Core Responsibilities
 
@@ -51,6 +61,11 @@ This directory contains the Python FastAPI server, the central component respons
     poetry install
     ```
 
+2. Generate the gRPC code:
+   ```
+   python generate_grpc.py
+   ```
+
 ## Configuration
 
 The server reads configuration from environment variables. Key variables include:
@@ -64,6 +79,8 @@ The server reads configuration from environment variables. Key variables include
 -   `AGENT_INACTIVITY_TIMEOUT` (default: 15 seconds)
 -   `AGENT_PING_INTERVAL` (default: 10 seconds)
 -   `PERIODIC_STATUS_INTERVAL` (default: 60 seconds)
+-   `GRPC_HOST` (default: `localhost`)
+-   `GRPC_PORT` (default: `50051`)
 
 See `src/config.py` for all options. These can be set directly in the environment or via a `.env` file (requires `python-dotenv` to be installed and loaded, e.g., in `main.py`).
 
@@ -202,3 +219,37 @@ Marks Agent offline in state.agent_statuses
     Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
 
 ```
+
+## Architecture
+
+The system now uses a dual-communication approach:
+
+1. **WebSockets** - For chat messages, registration, and general events
+2. **gRPC Streaming** - For efficient agent status updates
+
+When a broker connects:
+1. It first establishes a WebSocket connection and registers
+2. The server responds with gRPC endpoint details
+3. The broker connects to the gRPC endpoint to receive streaming status updates
+4. WebSocket connection remains active for all other message types
+
+## API Reference
+
+### WebSocket Endpoints
+
+- `/ws` - Main WebSocket endpoint for all client types (agents, brokers, frontends)
+
+### gRPC Services
+
+- `AgentStatusService.SubscribeToAgentStatus` - Stream of agent status updates
+- `AgentStatusService.GetAgentStatus` - One-time request for agent status
+
+## For Developers
+
+To modify the gRPC service:
+
+1. Edit the proto definition in `src/protos/agent_status_service.proto`
+2. Regenerate the gRPC code:
+   ```
+   python generate_grpc.py
+   ```

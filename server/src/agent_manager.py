@@ -10,6 +10,7 @@ from shared_models import AgentStatus, AgentStatusUpdate, MessageType,setup_logg
 import config
 import state
 import rabbitmq_utils
+import grpc_services  # Import the gRPC services module
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -27,15 +28,13 @@ def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
            )
 
 async def broadcast_agent_status(force_full_update: bool = False, is_full_update: bool = False):
-    """Broadcast agent status to all brokers and frontends.
+    """Broadcast agent status to all brokers via gRPC and frontends via WebSockets.
     
     Args:
         force_full_update: Force sending a full status update even if no changes detected
         is_full_update: Flag indicating this is a full agent status update (vs. delta)
     """
     logger.info(f"broadcast_agent_status called - force_full_update={force_full_update}, is_full_update={is_full_update}")
-    
-    # No need to acquire lock, since update_agent_status handles the locking
     
     # Get current agent status
     agent_status_list = []
@@ -74,38 +73,24 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
             logger.debug("No agent status changes detected and not forced, skipping broadcast")
             return
     
-    # At this point, we're either forcing a full update, or changes were detected
-    logger.info(f"Broadcasting agent status update to {len(state.broker_connections)} brokers and {len(state.frontend_connections)} frontends")
-    logger.info(f"Agent status list being sent: {agent_status_list}")
+    # STEP 1: Send update to all brokers via gRPC
+    logger.info(f"Broadcasting agent status via gRPC to all subscribers")
+    await grpc_services.broadcast_agent_status_updates(is_full_update=is_full_update or force_full_update)
     
-    # Prepare status update message
+    # STEP 2: Send update to all frontends via WebSockets
+    logger.info(f"Broadcasting agent status via WebSockets to {len(state.frontend_connections)} frontends")
+    
+    # Prepare status update message for frontends
     status_update = {
         "message_type": MessageType.AGENT_STATUS_UPDATE,
         "agents": agent_status_list,
-        "is_full_update": is_full_update or force_full_update  # Set flag indicating this is a full update
+        "is_full_update": is_full_update or force_full_update
     }
     
     try:
         status_update_json = json.dumps(status_update)
         
-        # Send agent status to all connected brokers
-        broker_send_count = 0
-        for broker_id, websocket in state.broker_connections.items():
-            try:
-                if not websocket.client_state == WebSocketState.CONNECTED:
-                    logger.warning(f"Cannot send agent status to broker {broker_id}: WebSocket not connected")
-                    continue
-                    
-                logger.info(f"Sending agent status ({online_agent_count} online) to broker {broker_id}")
-                await websocket.send_text(status_update_json)
-                broker_send_count += 1
-                logger.info(f"Successfully sent agent status to broker {broker_id}")
-            except Exception as e:
-                logger.error(f"Error sending agent status to broker {broker_id}: {e}")
-        
-        logger.info(f"Sent agent status to {broker_send_count}/{len(state.broker_connections)} brokers")
-        
-        # Also send agent status to all connected frontends
+        # Send agent status to all connected frontends via WebSockets
         frontend_send_count = 0
         for websocket in state.frontend_connections:
             try:
@@ -132,46 +117,6 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
     except Exception as e:
         logger.error(f"Error preparing or sending agent status update: {e}")
 
-async def send_agent_status_to_broker():
-    """Sends the current agent status list to the broker."""
-    try:
-        # Get list of active agents
-        active_agents = [
-            {
-                "agent_id": agent_id,
-                "agent_name": status.agent_name,
-                "is_online": status.is_online,
-                "last_seen": status.last_seen
-            }
-            for agent_id, status in state.agent_statuses.items()
-        ]
-        
-        # Prepare the status update message
-        status_message = {
-            "message_type": MessageType.AGENT_STATUS_UPDATE,
-            "agents": active_agents,
-            "is_full_update": True
-        }
-        
-        # Send to all connected brokers
-        disconnected_brokers = set()
-        for broker_id, websocket in state.broker_connections.items():
-            try:
-                await websocket.send_text(json.dumps(status_message))
-                logger.debug(f"Sent agent status update to broker {broker_id}")
-            except Exception as e:
-                logger.error(f"Error sending status update to broker {broker_id}: {e}")
-                disconnected_brokers.add(broker_id)
-        
-        # Remove disconnected brokers
-        for broker_id in disconnected_brokers:
-            if broker_id in state.broker_connections:
-                del state.broker_connections[broker_id]
-                logger.info(f"Removed disconnected broker {broker_id}")
-                
-    except Exception as e:
-        logger.error(f"Error preparing or sending requested active agent status to broker via WebSocket: {e}")
-
 def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool:
     """Updates an agent's status in the state.
     
@@ -185,6 +130,7 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
         return False
         
     current_time = datetime.now().isoformat()
+    status_changed = False
     
     # Check if this agent already exists
     if agent_id in state.agent_statuses:
@@ -206,7 +152,7 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
         old_status.last_seen = current_time
         
         logger.info(f"Updated existing agent: {agent_id}, name={agent_name}, online={is_online}")
-        return True
+        status_changed = True
     else:
         # Create a new agent status entry
         new_status = AgentStatus(
@@ -217,7 +163,17 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
         )
         state.agent_statuses[agent_id] = new_status
         logger.info(f"Created new agent status entry: {agent_id}, name={agent_name}, online={is_online}")
-        return True
+        status_changed = True
+    
+    # If status changed, broadcast via gRPC immediately
+    if status_changed:
+        # Schedule full update via gRPC first for immediate response
+        asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
+        
+        # Also schedule the full broadcast which handles frontends via WebSockets
+        asyncio.create_task(broadcast_agent_status(is_full_update=True))
+        
+    return status_changed
 
 def mark_agent_offline(agent_id: str) -> bool:
     """Marks an agent as offline. Returns True if the status changed."""
@@ -227,6 +183,13 @@ def mark_agent_offline(agent_id: str) -> bool:
             state.agent_statuses[agent_id].is_online = False
             state.agent_statuses[agent_id].last_seen = datetime.now().isoformat()
             logger.info(f"Agent {agent_id} marked as offline.")
+            
+            # Broadcast via gRPC immediately for quick response
+            asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
+            
+            # Also schedule full broadcast for frontends
+            asyncio.create_task(broadcast_agent_status(is_full_update=True))
+            
             return True
         else:
             logger.debug(f"Agent {agent_id} already marked as offline.")
