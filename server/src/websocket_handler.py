@@ -30,113 +30,6 @@ def generate_unique_id(client_type: str) -> str:
     return f"{client_type}_{unique_id}"
 
 
-
-async def _handle_register_broker(websocket: WebSocket, message: dict) -> dict:
-    """Handle broker registration.
-    
-    WebSocket connection is maintained for general message passing,
-    but agent status updates are sent exclusively via gRPC.
-    """
-    logger.info(f"Handling broker registration request: {message}")
-    broker_name = message.get("broker_name")
-    if not broker_name:
-        logger.warning(f"Broker registration failed: missing broker_name in request: {message}")
-        return {
-            "message_type": MessageType.ERROR,
-            "text_payload": "Broker name is required for registration"
-        }
-    
-    # Generate unique ID for broker
-    broker_id = generate_unique_id("broker")
-    logger.info(f"Generated new broker ID: {broker_id} for broker: {broker_name}")
-    
-    # Store the connection and name
-    state.broker_connections[broker_id] = websocket
-    client_names[broker_id] = broker_name
-    
-    # Set connection type on the websocket object
-    websocket.client_id = broker_id
-    websocket.connection_type = "broker"
-    
-    logger.info(f"Stored broker connection and name. Current broker connections: {list(state.broker_connections.keys())}")
-    
-    # Add to broker status dictionary
-    async with state.broker_status_lock:
-        state.broker_statuses[broker_id] = {
-            "is_online": True,
-            "last_seen": datetime.now().isoformat()
-        }
-    
-    logger.info(f"Broker registered successfully: {broker_name} (ID: {broker_id})")
-    
-    # Get gRPC config
-    grpc_host = os.getenv("GRPC_HOST", "localhost")
-    grpc_port = os.getenv("GRPC_PORT", "50051")
-    
-    # Create registration response with gRPC info
-    response = {
-        "message_type": MessageType.REGISTER_BROKER_RESPONSE,
-        "status": ResponseStatus.SUCCESS,
-        "broker_id": broker_id,
-        "broker_name": broker_name,
-        "message": "Broker registered successfully",
-        "grpc_host": grpc_host,
-        "grpc_port": grpc_port,
-        "use_grpc_for_agent_status": True
-    }
-    
-    logger.debug(f"Sending registration response to broker: {response}")
-    
-    # No longer sending agent status via WebSocket
-    # Agent status updates will be sent via gRPC
-    
-    return response
-
-async def _handle_register_agent(websocket: WebSocket, message: dict) -> dict:
-    """Handle agent registration."""
-    logger.debug(f"Handling agent registration request: {message}")
-    agent_name = message.get("agent_name")
-    if not agent_name:
-        logger.warning(f"Registration failed: missing agent_name in request: {message}")
-        return {
-            "message_type": MessageType.ERROR,
-            "text_payload": "Agent name is required for registration"
-        }
-    
-    # Generate unique ID for agent
-    agent_id = generate_unique_id("agent")
-    logger.debug(f"Generated new agent ID: {agent_id} for agent: {agent_name}")
-    
-    # Store the connection and name
-    state.agent_connections[agent_id] = websocket
-    client_names[agent_id] = agent_name
-    
-    # Set the connection type attributes on the websocket
-    websocket.client_id = agent_id
-    websocket.connection_type = "agent"
-    
-    logger.debug(f"Stored agent connection and name: agent_id={agent_id}, name={agent_name}")
-    
-    # Update agent status and trigger broadcast
-    status_updated = agent_manager.update_agent_status(agent_id, agent_name, True)
-    logger.debug(f"Agent status updated in agent manager: {status_updated}")
-    
-    # Explicitly trigger broadcasting via gRPC
-    logger.info(f"Broadcasting agent status via gRPC after agent registration: {agent_id}")
-    asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
-    
-    logger.info(f"Agent registered successfully: {agent_name} (ID: {agent_id})")
-    
-    response = {
-        "message_type": MessageType.REGISTER_AGENT_RESPONSE,
-        "status": ResponseStatus.SUCCESS,
-        "agent_id": agent_id,
-        "agent_name": agent_name,
-        "message": "Agent registered successfully"
-    }
-    logger.debug(f"Sending registration response: {response}")
-    return response
-
 async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict:
     """Handle frontend registration."""
     frontend_name = message.get("frontend_name")
@@ -170,33 +63,6 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
         "frontend_name": frontend_name,
         "message": "Frontend registered successfully"
     }
-
-async def _handle_pong(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handles pong messages from agents and brokers."""
-    # Use the client_id to identify the sender type
-    if client_id.startswith("broker_"):
-        # PONG is from a broker, handle using its client_id
-        logger.debug(f"Received PONG from broker: {client_id}")
-        agent_manager.handle_pong(client_id) # The manager function can differentiate
-    elif client_id.startswith("agent_"):
-        # PONG is from an agent, expect agent_id in the message body
-        logger.debug(f"Received PONG from agent: {client_id}")
-        agent_id_from_message = message_data.get("agent_id")
-        if agent_id_from_message:
-            # Verify the agent_id in the message matches the client_id if needed
-            if agent_id_from_message != client_id:
-                logger.warning(f"Received PONG from agent {client_id} but message contains different agent_id: {agent_id_from_message}")
-                # Decide how to handle mismatch - maybe trust client_id?
-                agent_manager.handle_pong(client_id)
-            else:
-                agent_manager.handle_pong(agent_id_from_message)
-        else:
-            logger.warning(f"Received PONG from agent {client_id} but it's missing the 'agent_id' field.")
-            # Optionally, still update based on client_id if agent_id is missing
-            agent_manager.handle_pong(client_id)
-    else:
-        # PONG from an unknown client type (e.g., frontend, though they shouldn't send PONGs)
-        logger.warning(f"Received PONG from unexpected client type: {client_id}")
 
 async def _handle_chat_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handles standard chat, reply, and system messages.
@@ -273,23 +139,13 @@ async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_
 async def _handle_request_agent_status(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handles REQUEST_AGENT_STATUS message from clients.
     
-    For brokers, recommend using gRPC instead.
-    For frontends, send status via WebSocket.
+    All agent status requests should now use gRPC.
+    For frontends, still support WebSocket for legacy compatibility.
     """
-    # Check if this is a broker (should use gRPC instead)
+    # Check connection type
     connection_type = getattr(websocket, "connection_type", "unknown")
-    if connection_type == "broker":
-        logger.warning(f"Broker {client_id} requested agent status via WebSocket, should use gRPC instead")
-        response = {
-            "message_type": MessageType.ERROR,
-            "text_payload": "Brokers should use gRPC for agent status updates",
-            "sender_id": "Server",
-            "receiver_id": client_id
-        }
-        await websocket.send_text(json.dumps(response))
-        return
-    
-    # For frontends, send status update via WebSocket
+        
+    # For frontends, continue to support WebSocket updates for backwards compatibility 
     if connection_type == "frontend":
         logger.info(f"Frontend {client_id} requested agent status update")
         # Create and send a full agent status update for this specific frontend
@@ -309,7 +165,15 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
         await websocket.send_text(json.dumps(status_update))
         logger.info(f"Sent agent status update to frontend {client_id}")
     else:
-        logger.warning(f"Unexpected client type {connection_type} requested agent status")
+        # For any other client type, recommend gRPC
+        logger.warning(f"Client type {connection_type} requested agent status via WebSocket, should use gRPC")
+        response = {
+            "message_type": MessageType.ERROR,
+            "text_payload": "Please use gRPC for agent status updates",
+            "sender_id": "Server",
+            "receiver_id": client_id
+        }
+        await websocket.send_text(json.dumps(response))
 
 # --- Helper Function for Disconnect Cleanup ---
 
@@ -325,30 +189,11 @@ async def _handle_disconnect(websocket: WebSocket, client_id: str):
         # Always make sure to remove from active connections first
         state.active_connections.discard(websocket)
         
-        if connection_type == "broker":
-            # Remove from broker_connections dictionary
-            for broker_id, ws in list(state.broker_connections.items()):
-                if ws == websocket:
-                    del state.broker_connections[broker_id]
-                    logger.info(f"Broker connection closed: {broker_id}")
-                    break
             
-        elif connection_type == "frontend":
+        if connection_type == "frontend":
             state.frontend_connections.discard(websocket)
             logger.info(f"Frontend client connection closed: {client_id}")
-            
-        elif connection_type == "agent":
-            for agent_id, ws in list(state.agent_connections.items()):
-                if ws == websocket:
-                    disconnected_agent_id = agent_id
-                    del state.agent_connections[agent_id]
-                    logger.info(f"Agent connection closed: {client_id} (Agent ID: {agent_id})")
-                    break
-            
-            if disconnected_agent_id:
-                agent_manager.mark_agent_offline(disconnected_agent_id)
-                needs_status_broadcast = True
-        
+                    
         # Log remaining connection counts
         logger.info(f"Connection counts after cleanup: {len(state.active_connections)} active, {len(state.frontend_connections)} frontend, {len(state.agent_connections)} agent, {len(state.broker_connections)} broker")
         
@@ -379,20 +224,8 @@ async def websocket_endpoint(websocket: WebSocket):
         # Process based on message type
         message_type = registration_msg.get("message_type")
         
-        if message_type == MessageType.REGISTER_BROKER:
-            # Broker registration
-            response = await _handle_register_broker(websocket, registration_msg)
-            await websocket.send_text(json.dumps(response))
-            client_id = websocket.client_id  # Store client_id from the registration
-            
-        elif message_type == MessageType.REGISTER_AGENT:
-            # Agent registration
-            response = await _handle_register_agent(websocket, registration_msg)
-            await websocket.send_text(json.dumps(response))
-            client_id = websocket.client_id  # Store client_id from the registration
-            
-        elif message_type == MessageType.REGISTER_FRONTEND:
-            # Frontend registration
+        if message_type == MessageType.REGISTER_FRONTEND:
+            # Frontend registration (still supported)
             response = await _handle_register_frontend(websocket, registration_msg)
             await websocket.send_text(json.dumps(response))
             client_id = websocket.client_id  # Store client_id from the registration

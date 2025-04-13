@@ -16,7 +16,7 @@ interface MessageWithAnimation extends ChatMessage {
   animationPhase?: 'fadeIn' | 'vibrate' | null;
   status?: 'pending' | 'routed' | 'error' | 'routing_failed';
   routedTo?: string;
-  _routing_status?: 'pending' | 'routed' | 'routing_failed';
+  routing_status?: 'pending' | 'routed' | 'routing_failed' | 'error' | string;
   routing_status_message?: string;
 }
 
@@ -25,7 +25,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   const [inputMessage, setInputMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sentMessageIds = useRef<Set<string>>(new Set());
-  const [clientId, setClientId] = useState<string | null>(userId);
+  const [clientId] = useState<string | null>(userId);
   const { lastMessage, sendMessage, agentNameMap } = useContext(WebSocketContext);
 
   // Handle incoming messages from WebSocketContext
@@ -33,23 +33,12 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
     if (!lastMessage) return;
 
     const messageId = lastMessage.message_id;
-    const routingStatus = lastMessage._routing_status;
-    const messageType = lastMessage.message_type;
+    const incomingRoutingStatus = lastMessage.routing_status;
+    const incomingMessageType = lastMessage.message_type;
 
     // --- Skip processing for Agent Status Updates --- 
-    if (messageType === MessageType.AGENT_STATUS_UPDATE) {
+    if (incomingMessageType === MessageType.AGENT_STATUS_UPDATE) {
       console.log('Received AGENT_STATUS_UPDATE, ignoring for chat display:', lastMessage);
-      // TODO: Update agent status display if needed elsewhere
-      return; // Don't process this as a chat message
-    }
-    // -----------------------------------------------
-
-    // console.log('Chat component received message from context:', lastMessage, `Routing Status: ${routingStatus}`);
-
-    // Handle registration response separately
-    if (messageType === MessageType.REGISTER_FRONTEND_RESPONSE && lastMessage.status === 'success') {
-      console.log('Registration confirmed in Chat:', lastMessage);
-      setClientId(lastMessage.frontend_id);
       return;
     }
 
@@ -58,33 +47,68 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
 
     if (existingMessageIndex !== -1) {
       // --- Update Existing Message ---
-      // console.log(`Updating existing message ID ${messageId} with status info: ${routingStatus}`);
+      const originalMessage = messages[existingMessageIndex];
+      
+      // Determine the final display status based on incoming message
+      let finalStatus: MessageWithAnimation['status'] = originalMessage.status; // Start with current
+
+      // Prioritize ERROR message type first
+      if (incomingMessageType === MessageType.ERROR) {
+          finalStatus = 'error';
+      } else if (incomingRoutingStatus !== undefined) {
+        // If not an explicit ERROR type, check routing_status
+        if (incomingRoutingStatus === 'routed') {
+          finalStatus = 'routed';
+        } else if (incomingRoutingStatus === 'pending') {
+          finalStatus = 'pending';
+        } else if (incomingRoutingStatus === 'routing_failed' || incomingRoutingStatus === 'error') {
+          // Map routing_failed or explicit 'error' status to 'error' display status
+          finalStatus = 'error';
+        }
+      } else {
+        // Case: Incoming message LACKS explicit status but is NOT MessageType.ERROR
+        // If it's a standard reply or text update, infer routing was successful.
+        if (incomingMessageType === MessageType.REPLY || incomingMessageType === MessageType.TEXT) {
+             if (finalStatus !== 'routed' && finalStatus !== 'error') { // Avoid overriding existing error/routed status
+                console.log(`Implicitly setting status to 'routed' for message ID ${messageId} due to receiving ${incomingMessageType}`);
+                finalStatus = 'routed'; 
+             }
+        } 
+      }
+
+      const shouldAnimate = originalMessage.status !== finalStatus;
+
       setMessages(prev =>
         prev.map((msg, index) => {
           if (index === existingMessageIndex) {
-            // Determine final status based on routing status or message type
-            let finalStatus: MessageWithAnimation['status'] = msg.status;
-            if (routingStatus === 'routed') finalStatus = 'routed';
-            else if (routingStatus === 'pending') finalStatus = 'pending';
-            else if (routingStatus === 'routing_failed') finalStatus = 'error';
-            else if (messageType === MessageType.ERROR && msg.status !== 'error') finalStatus = 'error';
-
-            return {
-              ...msg,
-              ...lastMessage,
+            // Construct the updated message explicitly
+            const updatedMessage: MessageWithAnimation = {
               message_id: msg.message_id,
-              status: finalStatus,
-              routedTo: finalStatus === 'routed' ? lastMessage.receiver_id : msg.routedTo,
-              routing_status_message: lastMessage.routing_status,
-              animationPhase: msg.status !== finalStatus ? 'vibrate' : null,
-              isNew: false
+              text_payload: (incomingMessageType === MessageType.REPLY || incomingMessageType === MessageType.TEXT) 
+                              ? lastMessage.text_payload 
+                              : msg.text_payload, // Keep original text for status-only/ERROR updates
+              sender_id: lastMessage.sender_id ?? msg.sender_id,
+              receiver_id: ('receiver_id' in lastMessage) ? lastMessage.receiver_id : msg.receiver_id,
+              send_timestamp: lastMessage.send_timestamp ?? msg.send_timestamp,
+              message_type: incomingMessageType ?? msg.message_type,
+              in_reply_to_message_id: lastMessage.in_reply_to_message_id ?? msg.in_reply_to_message_id,
+              status: finalStatus, // Use the correctly determined display status
+              routedTo: finalStatus === 'routed' ? (lastMessage.receiver_id ?? originalMessage.sender_id) : 
+                       (finalStatus === 'error' ? undefined : msg.routedTo), // Clear routedTo on error
+              routing_status: incomingRoutingStatus, // Store the actual incoming routing status (no underscore)
+              routing_status_message: finalStatus === 'error' 
+                                          ? lastMessage.routing_status_message || incomingRoutingStatus // Use error message
+                                          : (finalStatus === 'routed' ? 'routed' : incomingRoutingStatus), // Use 'routed' or original pending status
+              animationPhase: shouldAnimate ? 'vibrate' : null,
+              isNew: false,
             };
+            return updatedMessage;
           }
           return msg;
         })
       );
-      // Clear vibrate animation after a short delay if it was triggered
-      if (messages[existingMessageIndex]?.status !== (routingStatus || messages[existingMessageIndex]?.status)) {
+      
+      if (shouldAnimate) {
         setTimeout(() => {
           setMessages(msgs =>
             msgs.map((m, i) =>
@@ -93,49 +117,64 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
           );
         }, 300);
       }
-
     } else {
-      // --- Add New Message (only if not sent by self) ---
-      if (lastMessage.sender_id === clientId) {
-        if (!sentMessageIds.current.has(messageId)) {
-          console.warn(`Received message ID ${messageId} matching self clientId, but not found locally or in sentMessageIds. Adding.`);
-        } else {
-          console.log(`Ignoring new message ID ${messageId} from self - already added by handleSendMessage or will be updated.`);
+      // --- Add New Message ---
+      if (lastMessage.sender_id === clientId && sentMessageIds.current.has(messageId)) {
+          console.log(`Ignoring new message ID ${messageId} from self - already added or will be updated.`);
           return;
-        }
       }
-
-      console.log(`Adding new message ID ${messageId} from sender ${lastMessage.sender_id}`);
-
-      // Determine initial status for a newly received message
-      let initialStatus: MessageWithAnimation['status'] = 'error';
-      if (routingStatus === 'routed') initialStatus = 'routed';
-      else if (routingStatus === 'pending') initialStatus = 'pending';
-      else if (routingStatus === 'routing_failed') initialStatus = 'error';
-      else if (messageType === MessageType.ERROR) initialStatus = 'error';
-      else if (messageType === MessageType.TEXT || messageType === MessageType.REPLY || messageType === MessageType.SYSTEM) {
+      if (messages.some(m => m.message_id === messageId)) {
+          console.log(`Ignoring new message ID ${messageId} - already present in messages state.`);
+          return;
+      }
+      
+      // Use routing_status (no underscore)
+      const incomingRoutingStatus = lastMessage.routing_status;
+      const messageType = lastMessage.message_type;
+      
+      // Determine initial display status
+      let initialStatus: MessageWithAnimation['status'] = 'error'; // Default pessimistic
+      if (incomingMessageType === MessageType.ERROR) { // Prioritize ERROR type
+          initialStatus = 'error';
+      } else if (incomingRoutingStatus === 'routed') {
         initialStatus = 'routed';
+      } else if (incomingRoutingStatus === 'pending') {
+        initialStatus = 'pending';
+      } else if (incomingRoutingStatus === 'routing_failed' || incomingRoutingStatus === 'error') {
+        initialStatus = 'error';
+      } else if (messageType === MessageType.TEXT || messageType === MessageType.REPLY || messageType === MessageType.SYSTEM) {
+         if (initialStatus !== 'error') { 
+           initialStatus = 'pending';
+         }
       }
+      
+      // Always use the text payload from the incoming message, even if it's an error status initially.
+      // The error details should be shown in the footer via routing_status_message.
+      const textPayloadForDisplay = lastMessage.text_payload;
+
+      console.log(`Adding new message ID ${messageId} from sender ${lastMessage.sender_id} with status ${initialStatus}`);
 
       const newMessage: MessageWithAnimation = {
         ...lastMessage,
+        text_payload: textPayloadForDisplay,
         isNew: true,
         animationPhase: 'fadeIn',
-        status: initialStatus,
-        routing_status_message: lastMessage.routing_status,
+        status: initialStatus, // Use the determined display status
+        routing_status: incomingRoutingStatus, // Store the actual routing status (no underscore)
+        routing_status_message: initialStatus === 'error' 
+                                    ? lastMessage.routing_status_message || incomingRoutingStatus // Use error message
+                                    : (initialStatus === 'routed' ? 'routed' : incomingRoutingStatus),
         routedTo: initialStatus === 'routed' ? lastMessage.receiver_id : undefined
       };
 
       setMessages(prev => {
-        // Add new message and trim older ones if over the limit
         const updatedMessages = [...prev, newMessage];
         return updatedMessages.length > MAX_MESSAGES
           ? updatedMessages.slice(updatedMessages.length - MAX_MESSAGES)
           : updatedMessages;
       });
     }
-
-  }, [lastMessage, clientId]);
+  }, [lastMessage, clientId, messages]);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -207,19 +246,28 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
 
   // Function to get display text for status
   const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string, routingStatusMessage?: string): string => {
-    // If custom routing status message exists, use it
-    if (routingStatusMessage && routingStatusMessage !== 'routed' && routingStatusMessage !== 'pending' && routingStatusMessage !== 'error') {
-      return routingStatusMessage.toUpperCase();
-    }
-    
-    // Otherwise use default status text
+    // Use default status text ONLY for non-error states
     switch (status) {
       case 'pending': return 'AWAITING ROUTING';
       case 'routed': return `ROUTED TO: ${routedTo || '?'}`;
-      case 'error': return 'ERROR';
-      case 'routing_failed': return 'ROUTING FAILED';
+      // Error states are handled exclusively by getErrorMessage
+      // case 'error': return 'ERROR';
+      // case 'routing_failed': return 'ROUTING FAILED'; 
       default: return '';
     }
+  };
+
+  // Function to get error message if present
+  const getErrorMessage = (message: MessageWithAnimation): string | null => {
+    if (message.status === 'error' || message.status === 'routing_failed') {
+      // Use routing_status_message if present and informative, otherwise generic
+      const errMsg = message.routing_status_message;
+      if (errMsg && errMsg !== 'error' && errMsg !== 'routing_failed') {
+        return errMsg;
+      }
+      return 'Routing error occurred'; 
+    }
+    return null;
   };
 
   return (
@@ -275,11 +323,18 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
               </div>
               <div className="message-footer">
                 <span className="message-id">ID: {message.message_id ? message.message_id.substring(0, 8) : 'unknown'}</span>
-                {(message.status === 'pending' || message.status === 'routed' || message.status === 'error' || message.status === 'routing_failed') && (
-                  <span className={`routing-status ${message.status}`}>
-                    {getStatusText(message.status, getDisplayName(message.routedTo), message.routing_status_message)}
-                  </span>
-                )}
+                <div className="status-container">
+                  {(message.status === 'pending' || message.status === 'routed' || message.status === 'error' || message.status === 'routing_failed') && (
+                    <span className={`routing-status ${message.status}`}>
+                      {getStatusText(message.status, getDisplayName(message.routedTo), message.routing_status_message)}
+                    </span>
+                  )}
+                  {getErrorMessage(message) && (
+                    <span className="error-message">
+                      {getErrorMessage(message)}
+                    </span>
+                  )}
+                </div>
                 {message.message_type === MessageType.REPLY && message.in_reply_to_message_id && (
                   <span className="reply-to">↩ {message.in_reply_to_message_id.substring(0, 8)}</span>
                 )}
@@ -609,11 +664,13 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             font-size: 0.9em;
             line-height: 1.5;
             text-align: left;
+            padding: 8px 0;
           }
           
           .message-footer {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             margin-top: 6px;
             padding-top: 4px;
             border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -622,9 +679,18 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
             font-family: monospace;
           }
           
+          .status-container {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+            min-width: 150px;
+          }
+          
           .routing-status {
             font-weight: bold;
             letter-spacing: 0.5px;
+            text-align: right;
           }
           
           .routing-status.pending {
@@ -637,6 +703,14 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
           
           .routing-status.error {
             color: #b71c1c; /* Red color */
+          }
+          
+          .error-message {
+            color: #b71c1c;
+            text-transform: uppercase;
+            max-width: 200px;
+            text-align: right;
+            word-wrap: break-word;
           }
           
           .message-id {

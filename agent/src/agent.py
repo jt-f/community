@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import time
 from mistralai import Mistral
+import grpc
 
 from shared_models import (
     MessageType,
@@ -24,8 +25,9 @@ from shared_models import (
     setup_logging
 )
 
-# Import agent configuration
+# Import agent configuration and gRPC client
 import config as agent_config
+import grpc_client  # Add the gRPC client import
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -78,6 +80,10 @@ class Agent:
     def connect_rabbitmq(self) -> bool:
         """Connect to RabbitMQ server for message processing."""
         try:
+            if self.rabbitmq_connection and self.rabbitmq_connection.is_open:
+                logger.info("RabbitMQ connection already established")
+                return True
+                
             logger.info(f"Connecting to RabbitMQ at {self.rabbitmq_host} for message processing...")
             self.rabbitmq_connection = pika.BlockingConnection(
                 pika.ConnectionParameters(host=self.rabbitmq_host)
@@ -90,45 +96,26 @@ class Agent:
             return False
             
     async def register_with_server(self) -> bool:
-        """Register the agent with the server via WebSocket.
-        
-        This registers both the WebSocket connection for status updates
-        and the message queue for processing.
-        """
-        if not self.websocket:
-            logger.error("Cannot register: WebSocket connection not established")
-            return False
-            
+        """Register the agent with the server via gRPC."""
         try:
-            # Create registration message with just the name
-            registration_message = {
-                "message_type": MessageType.REGISTER_AGENT,
-                "agent_name": self.agent_name
-            }
-            logger.info(f"Sending registration message to server: {registration_message}")
-            await self.websocket.send(json.dumps(registration_message))
-            logger.info(f"Sent registration request to server")
-
-            # Wait for confirmation response
-            logger.info("Waiting for registration response from server...")
-            response = await self.websocket.recv()
-            logger.info(f"Received raw response: {response}")
-            response_data = json.loads(response)
-            logger.info(f"Registration response: {response_data}")
+            # Get server host and port from environment or use defaults
+            server_host = os.getenv("GRPC_HOST", "localhost")
+            server_port = int(os.getenv("GRPC_PORT", "50051"))
             
-            # Process response
-            if (response_data.get("message_type") == MessageType.REGISTER_AGENT_RESPONSE and 
-                response_data.get("status") == ResponseStatus.SUCCESS):
-                # Store the assigned agent ID
-                self.agent_id = response_data["agent_id"]
-                logger.info(f"Agent {self.agent_name} successfully registered with ID: {self.agent_id}")
-                self.queue_name = f"agent_queue_{self.agent_id}"
-                logger.info(f"Updated queue name to: {self.queue_name}")
+            # Send registration via gRPC
+            response = await grpc_client.register_agent(
+                server_host=server_host,
+                server_port=server_port,
+                name=self.agent_name,
+                custom_id=self.agent_id
+            )
+            
+            if response:
+                logger.info(f"Agent registered successfully with ID: {self.agent_id}")
                 self.is_registered = True
                 return True
             else:
-                error_msg = response_data.get("text_payload", "Unknown error during registration")
-                logger.error(f"Registration failed: {error_msg}")
+                logger.error("Registration failed")
                 return False
                 
         except Exception as e:
@@ -137,7 +124,7 @@ class Agent:
     
     def setup_rabbitmq_queue(self) -> bool:
         """Set up the RabbitMQ queue for receiving messages."""
-        if not self.rabbitmq_channel:
+        if not self.rabbitmq_connection or not self.rabbitmq_connection.is_open:
             logger.error("Cannot setup queue: RabbitMQ connection not established")
             return False
             
@@ -281,7 +268,12 @@ class Agent:
         return response
 
     async def listen_websocket(self) -> None:
-        """Listen for status updates and control messages from the WebSocket server."""
+        """Listen for status updates and control messages from the WebSocket server.
+        
+        Note: In the future, agent status updates could be entirely handled through gRPC
+        similar to how brokers receive updates. This WebSocket-based approach is maintained
+        for backward compatibility.
+        """
         if not self.websocket:
             logger.error("Cannot listen: WebSocket connection not established")
             return
@@ -325,29 +317,41 @@ class Agent:
     
     def start_rabbitmq_consumer(self) -> None:
         """Start consuming messages from the RabbitMQ queue."""
-        if not self.rabbitmq_channel:
+        if not self.rabbitmq_connection or not self.rabbitmq_connection.is_open:
             logger.error("Cannot start consumer: RabbitMQ connection not established")
             return
             
         try:
             logger.info(f"Starting to consume messages from queue {self.queue_name}")
-            self.rabbitmq_channel.start_consuming()
+            while self.running:
+                try:
+                    self.rabbitmq_connection.process_data_events(time_limit=1)
+                except pika.exceptions.ConnectionClosedByBroker:
+                    logger.warning("RabbitMQ connection closed by broker. Attempting to reconnect...")
+                    if not self.connect_rabbitmq() or not self.setup_rabbitmq_queue():
+                        logger.error("Failed to reconnect to RabbitMQ. Exiting consumer thread.")
+                        break
+                except pika.exceptions.AMQPConnectionError:
+                    logger.warning("RabbitMQ connection error. Attempting to reconnect...")
+                    if not self.connect_rabbitmq() or not self.setup_rabbitmq_queue():
+                        logger.error("Failed to reconnect to RabbitMQ. Exiting consumer thread.")
+                        break
+                except Exception as e:
+                    logger.error(f"Error in RabbitMQ consumer: {e}")
+                    time.sleep(1)  # Wait before retrying
         except Exception as e:
             logger.error(f"Error in RabbitMQ consumer: {e}")
+        finally:
+            self.cleanup()
     
     async def run(self) -> None:
         """Run the agent's main loop with the hybrid approach:
-        - WebSockets for status updates and ping/pong
-        - RabbitMQ queues for message processing
+        - WebSockets for status updates and ping/pong (used only for status updates)
+        - RabbitMQ queues for message processing and registration
         """
         self.running = True
         
-        # Connect to WebSocket for status updates
-        if not await self.connect_websocket():
-            logger.error("Failed to connect to WebSocket server. Exiting.")
-            return
-        
-        # Register with server (sets up both WebSocket and queue)
+        # Register with server first (uses gRPC)
         if not await self.register_with_server():
             logger.error("Failed to register with server. Exiting.")
             return
@@ -356,11 +360,15 @@ class Agent:
         if not self.connect_rabbitmq():
             logger.error("Failed to connect to RabbitMQ. Exiting.")
             return
-        
+            
         # Set up RabbitMQ queue for receiving messages
         if not self.setup_rabbitmq_queue():
             logger.error("Failed to set up RabbitMQ queue. Exiting.")
             return
+        
+        # Connect to WebSocket for status updates only
+        if not await self.connect_websocket():
+            logger.warning("Failed to connect to WebSocket server. Continuing without status updates.")
         
         # Start RabbitMQ consumer in a separate thread for message processing
         import threading

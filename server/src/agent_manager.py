@@ -28,7 +28,10 @@ def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
            )
 
 async def broadcast_agent_status(force_full_update: bool = False, is_full_update: bool = False):
-    """Broadcast agent status to all brokers via gRPC and frontends via WebSockets.
+    """Broadcast agent status to all clients.
+    
+    For brokers: Uses gRPC exclusively.
+    For frontends: Uses WebSockets for backward compatibility.
     
     Args:
         force_full_update: Force sending a full status update even if no changes detected
@@ -51,7 +54,6 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
         if status.is_online:
             online_agent_count += 1
     
-    logger.info(f"Current agent states: {agent_status_list}")
     logger.info(f"Online agents: {[s['agent_id'] for s in agent_status_list if s['is_online']]}")
     
     # Check if anything changed or full update is forced
@@ -73,49 +75,50 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
             logger.debug("No agent status changes detected and not forced, skipping broadcast")
             return
     
-    # STEP 1: Send update to all brokers via gRPC
+    # STEP 1: Send update to all brokers via gRPC (primary method)
     logger.info(f"Broadcasting agent status via gRPC to all subscribers")
     await grpc_services.broadcast_agent_status_updates(is_full_update=is_full_update or force_full_update)
     
-    # STEP 2: Send update to all frontends via WebSockets
-    logger.info(f"Broadcasting agent status via WebSockets to {len(state.frontend_connections)} frontends")
-    
-    # Prepare status update message for frontends
-    status_update = {
-        "message_type": MessageType.AGENT_STATUS_UPDATE,
-        "agents": agent_status_list,
-        "is_full_update": is_full_update or force_full_update
-    }
-    
-    try:
-        status_update_json = json.dumps(status_update)
+    # STEP 2: Send update to all frontends via WebSockets (for backward compatibility)
+    # Only frontends use WebSockets for agent status updates
+    if state.frontend_connections:
+        logger.info(f"Broadcasting agent status via WebSockets to {len(state.frontend_connections)} frontends")
         
-        # Send agent status to all connected frontends via WebSockets
-        frontend_send_count = 0
-        for websocket in state.frontend_connections:
-            try:
-                frontend_id = getattr(websocket, 'client_id', 'unknown')
-                if not websocket.client_state == WebSocketState.CONNECTED:
-                    logger.warning(f"Cannot send agent status to frontend {frontend_id}: WebSocket not connected")
-                    continue
+        # Prepare status update message for frontends
+        status_update = {
+            "message_type": MessageType.AGENT_STATUS_UPDATE,
+            "agents": agent_status_list,
+            "is_full_update": is_full_update or force_full_update
+        }
+        
+        try:
+            status_update_json = json.dumps(status_update)
+            
+            # Send agent status to all connected frontends via WebSockets
+            frontend_send_count = 0
+            for websocket in state.frontend_connections:
+                try:
+                    frontend_id = getattr(websocket, 'client_id', 'unknown')
+                    if not websocket.client_state == WebSocketState.CONNECTED:
+                        logger.warning(f"Cannot send agent status to frontend {frontend_id}: WebSocket not connected")
+                        continue
+                        
+                    logger.info(f"Sending agent status ({online_agent_count} online) to frontend {frontend_id}")
+                    await websocket.send_text(status_update_json)
+                    frontend_send_count += 1
+                    logger.info(f"Successfully sent agent status to frontend {frontend_id}")
+                except Exception as e:
+                    frontend_id = getattr(websocket, 'client_id', 'unknown')
+                    logger.error(f"Error sending agent status to frontend {frontend_id}: {e}")
                     
-                logger.info(f"Sending agent status ({online_agent_count} online) to frontend {frontend_id}")
-                await websocket.send_text(status_update_json)
-                frontend_send_count += 1
-                logger.info(f"Successfully sent agent status to frontend {frontend_id}")
-            except Exception as e:
-                frontend_id = getattr(websocket, 'client_id', 'unknown')
-                logger.error(f"Error sending agent status to frontend {frontend_id}: {e}")
-                
-        logger.info(f"Sent agent status to {frontend_send_count}/{len(state.frontend_connections)} frontends")
-        
-        # Update history with current state
-        for agent_id, status in state.agent_statuses.items():
-            if agent_id in state.agent_status_history:
-                state.agent_status_history[agent_id] = status.model_copy()
+            logger.info(f"Sent agent status to {frontend_send_count}/{len(state.frontend_connections)} frontends")
+        except Exception as e:
+            logger.error(f"Error preparing or sending agent status update to frontends: {e}")
     
-    except Exception as e:
-        logger.error(f"Error preparing or sending agent status update: {e}")
+    # Update history with current state regardless of broadcast success
+    for agent_id, status in state.agent_statuses.items():
+        if agent_id in state.agent_status_history:
+            state.agent_status_history[agent_id] = status.model_copy()
 
 def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool:
     """Updates an agent's status in the state.

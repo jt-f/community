@@ -19,6 +19,7 @@ sys.path.insert(0, parent_dir)
 # Import generated gRPC code
 from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
 from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
+import broker_registration_service
 
 # Import shared modules
 from shared_models import setup_logging, AgentStatus
@@ -191,7 +192,14 @@ def start_grpc_server(port=50051):
     """Start the gRPC server in a separate thread"""
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
+    broker_registration_service.add_to_server(server)
     server.add_insecure_port(f'[::]:{port}')
     
     logger.info(f"Starting gRPC server on port {port}")
     return server 
+
+def add_services_to_server(server):
+    """Add all gRPC services to the server"""
+    add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
+    broker_registration_service.add_to_server(server)
+    logger.info("All gRPC services added to server") 

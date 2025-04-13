@@ -25,6 +25,8 @@ logger = setup_logging(__name__)
 try:
     from generated.agent_status_service_pb2 import AgentStatusRequest
     from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
+    from generated.broker_registration_service_pb2 import BrokerRegistrationRequest, BrokerRegistrationResponse
+    from generated.broker_registration_service_pb2_grpc import BrokerRegistrationServiceStub
     GRPC_IMPORTS_SUCCESSFUL = True
 except ImportError as e:
     logger.warning(f"gRPC generated code not found. Please run generate_grpc.py first. Error: {e}")
@@ -275,3 +277,47 @@ async def request_agent_status(host: str, port: int, broker_id: str) -> Optional
     except Exception as e:
         logger.error(f"Error requesting agent status via gRPC: {e}")
         return None
+
+async def register_broker(host: str, port: int, broker_id: str, broker_name: str) -> BrokerRegistrationResponse:
+    """
+    Register the broker with the server.
+    
+    Args:
+        host: The gRPC server hostname or IP
+        port: The gRPC server port
+        broker_id: The broker's unique ID
+        broker_name: The broker's display name
+        
+    Returns:
+        A BrokerRegistrationResponse containing the registration status
+    """
+    if not GRPC_IMPORTS_SUCCESSFUL:
+        logger.error("gRPC imports failed. Cannot register broker.")
+        return BrokerRegistrationResponse(success=False, message="gRPC imports failed")
+    
+    try:
+        # Create a channel to the server
+        logger.info(f"Connecting to gRPC server at {host}:{port} for broker registration")
+        channel = grpc.aio.insecure_channel(f"{host}:{port}")
+        
+        # Create the stub
+        stub = BrokerRegistrationServiceStub(channel)
+        
+        # Prepare registration request
+        request = BrokerRegistrationRequest(
+            broker_id=broker_id,
+            broker_name=broker_name
+        )
+        
+        # Register the broker
+        logger.info(f"Registering broker: {broker_name} (ID: {broker_id})")
+        response = await stub.RegisterBroker(request)
+        
+        # Close the channel
+        await channel.close()
+        
+        return response
+            
+    except Exception as e:
+        logger.error(f"Error registering broker: {e}")
+        return BrokerRegistrationResponse(success=False, message=str(e))
