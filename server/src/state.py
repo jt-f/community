@@ -10,10 +10,7 @@ from shared_models import AgentStatus, setup_logging
 logger = setup_logging(__name__)
 
 # WebSocket Connections
-active_connections: Set[WebSocket] = set()
-agent_connections: Dict[str, WebSocket] = {}
 frontend_connections: Set[WebSocket] = set()
-broker_connections: Dict[str, WebSocket] = {}  # broker_id -> WebSocket
 
 # Agent Status Tracking
 agent_statuses: Dict[str, AgentStatus] = {}

@@ -16,7 +16,7 @@ sys.path.insert(0, parent_dir)
 # Import generated gRPC code
 from generated.agent_registration_service_pb2 import (
     AgentRegistrationResponse, AgentUnregistrationResponse, 
-    HeartbeatResponse, Command, CommandResultResponse
+    Command, CommandResultResponse
 )
 from generated.agent_registration_service_pb2_grpc import (
     AgentRegistrationServiceServicer, add_AgentRegistrationServiceServicer_to_server
@@ -31,8 +31,6 @@ logger = setup_logging(__name__)
 # Global variables
 # Map of agent_id to stream context
 agent_command_streams = {}
-# Map of agent_id to last heartbeat time
-agent_heartbeats = {}
 # Lock for accessing the command streams
 command_stream_lock = asyncio.Lock()
 # Map of command_id to pending commands
@@ -116,50 +114,9 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
                 logger.info(f"Closing command stream for agent: {agent_id}")
                 agent_command_streams.pop(agent_id, None)
         
-        # Remove heartbeat record
-        agent_heartbeats.pop(agent_id, None)
-        
         return AgentUnregistrationResponse(
             success=True,
             message="Agent unregistered successfully"
-        )
-    
-    async def SendHeartbeat(self, request, context):
-        """
-        Process a heartbeat from an agent.
-        This is a unary RPC that updates the agent's status and returns a heartbeat response.
-        """
-        agent_id = request.agent_id
-        status_text = request.status
-        metrics = dict(request.metrics)
-        
-        if not agent_id:
-            return HeartbeatResponse(
-                success=False,
-                interval=30  # Default interval
-            )
-        
-        # Update the agent's last heartbeat time
-        current_time = time.time()
-        agent_heartbeats[agent_id] = current_time
-        
-        # Update agent status
-        if agent_id in state.agent_statuses:
-            status = state.agent_statuses[agent_id]
-            status.is_online = True
-            status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            state.update_agent_status(agent_id, status)
-            
-            # Also update metrics if needed
-            if metrics and agent_id in state.agent_metadata:
-                state.agent_metadata[agent_id]["metrics"] = metrics
-        
-        logger.debug(f"Received heartbeat from agent: {agent_id} (status: {status_text})")
-        
-        # Return the recommended heartbeat interval
-        return HeartbeatResponse(
-            success=True,
-            interval=30  # Heartbeat interval in seconds
         )
     
     async def ReceiveCommands(self, request, context):
@@ -344,47 +301,8 @@ async def cancel_command(command_id: str) -> bool:
         logger.info(f"Cancellation for command {command_id} sent to agent {agent_id}")
         return True
 
-async def process_heartbeats():
-    """
-    Periodic task to check agent heartbeats and mark agents as offline if they haven't
-    sent a heartbeat in the configured timeout period.
-    """
-    while True:
-        try:
-            current_time = time.time()
-            timeout = 90  # 3x the heartbeat interval
-            
-            offline_agents = []
-            
-            for agent_id, last_heartbeat in agent_heartbeats.items():
-                if current_time - last_heartbeat > timeout:
-                    # Agent hasn't sent a heartbeat in the timeout period
-                    offline_agents.append(agent_id)
-            
-            # Update the status of offline agents
-            status_updated = False
-            for agent_id in offline_agents:
-                if agent_id in state.agent_statuses and state.agent_statuses[agent_id].is_online:
-                    logger.info(f"Agent {agent_id} marked as offline due to missed heartbeats")
-                    status = state.agent_statuses[agent_id]
-                    status.is_online = False
-                    status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                    state.update_agent_status(agent_id, status)
-                    status_updated = True
-            
-            # Sleep for a while before checking again
-            await asyncio.sleep(30)
-            
-        except Exception as e:
-            logger.error(f"Error in heartbeat processing: {e}")
-            await asyncio.sleep(30)  # Sleep and retry
-
 def start_registration_service(server):
     """Add the agent registration service to the given gRPC server"""
     servicer = AgentRegistrationServicer()
     add_AgentRegistrationServiceServicer_to_server(servicer, server)
-    
-    # Start the heartbeat processing task
-    asyncio.create_task(process_heartbeats())
-    
     logger.info("Agent registration service added to gRPC server") 

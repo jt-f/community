@@ -194,43 +194,4 @@ def mark_agent_offline(agent_id: str) -> bool:
             logger.debug(f"Agent {agent_id} already marked as offline.")
     else:
         logger.warning(f"Cannot mark unknown agent {agent_id} as offline.")
-    return False
-
-def handle_pong(agent_id: str):
-    """Update last seen timestamp for agent, mark as online if previously offline."""
-    # Check if this is actually a broker ID
-    if agent_id.startswith("broker_"):
-        # This is a broker PONG, update broker status
-        async def update_broker_status():
-            async with state.broker_status_lock:
-                state.broker_statuses[agent_id] = {
-                    "is_online": True,
-                    "last_seen": datetime.now().isoformat()
-                }
-            logger.debug(f"Updated broker {agent_id} status from PONG.")
-        
-        # Run the update function in the event loop
-        asyncio.create_task(update_broker_status())
-        return
-    
-    # For agents, update its status
-    logger.debug(f"Handling PONG from agent: {agent_id}")
-    current_time = datetime.now().isoformat()
-    
-    # Simple case: already registered agent 
-    if agent_id in state.agent_statuses:
-        agent_status = state.agent_statuses[agent_id] 
-        old_online_status = agent_status.is_online
-        
-        # Update last seen and ensure is_online=True
-        agent_status.last_seen = current_time
-        agent_status.is_online = True
-        
-        if not old_online_status:
-            # If status changed from offline to online, trigger broadcast
-            logger.info(f"Agent {agent_id} came back online due to PONG.")
-            asyncio.create_task(broadcast_agent_status())
-    else:
-        logger.warning(f"Received PONG from unknown agent: {agent_id}")
-        # We don't have enough info to create a full agent entry
-        # Could create a minimal entry with just ID if needed 
+    return False 

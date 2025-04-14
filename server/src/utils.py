@@ -17,12 +17,12 @@ async def shutdown_server():
     # 1. Stop background services
     await services.stop_services()
 
-    # 2. Close all active WebSocket connections gracefully
-    logger.info(f"Closing {len(state.active_connections)} active WebSocket connections...")
-    connections_to_close = list(state.active_connections)
-    if connections_to_close:
+    # 2. Close all WebSocket connections gracefully
+    all_connections = list(state.frontend_connections) + list(state.agent_connections.values())
+    logger.info(f"Closing {len(all_connections)} WebSocket connections...")
+    if all_connections:
         results = await asyncio.gather(
-            *[ws.close(code=1001, reason="Server shutdown") for ws in connections_to_close],
+            *[ws.close(code=1001, reason="Server shutdown") for ws in all_connections],
             return_exceptions=True
         )
         for result in results:
@@ -31,10 +31,8 @@ async def shutdown_server():
     logger.info("WebSocket connections closed.")
 
     # 3. Clear state
-    state.active_connections.clear()
     state.agent_connections.clear()
     state.frontend_connections.clear()
-    state.broker_connections.clear()
     state.agent_statuses.clear()
     state.agent_status_history.clear()
     logger.debug("Server state cleared.")

@@ -4,10 +4,6 @@ from .shared_models import (
     AgentStatus,
     AgentStatusUpdate,
     ChatMessage,
-    AgentRegistrationMessage,
-    AgentRegistrationResponse,
-    create_text_message,
-    create_reply_message,
     setup_logging
 )
 
@@ -17,9 +13,5 @@ __all__ = [
     'AgentStatus',
     'AgentStatusUpdate',
     'ChatMessage',
-    'AgentRegistrationMessage',
-    'AgentRegistrationResponse',
-    'create_text_message',
-    'create_reply_message',
     'setup_logging'
 ] 

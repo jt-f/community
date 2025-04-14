@@ -26,7 +26,7 @@ logger = setup_logging(__name__)
 try:
     from generated.agent_registration_service_pb2 import (
         AgentRegistrationRequest, AgentUnregistrationRequest, 
-        HeartbeatRequest, CommandStreamRequest, CommandResult
+        CommandStreamRequest, CommandResult
     )
     from generated.agent_registration_service_pb2_grpc import AgentRegistrationServiceStub
     GRPC_IMPORTS_SUCCESSFUL = True
@@ -38,8 +38,6 @@ except ImportError as e:
 agent_id = None  # Will be set during registration
 agent_name = None  # Will be set during registration
 _command_callback = None  # Callback for handling commands
-_heartbeat_interval = 30  # Default interval in seconds
-_heartbeat_task = None  # Task for sending heartbeats
 _command_stream_task = None  # Task for receiving commands
 
 def set_command_callback(callback: Callable):
@@ -117,8 +115,7 @@ async def register_agent(
             
             logger.info(f"Agent registered successfully with ID: {agent_id}")
             
-            # Start heartbeat and command stream tasks
-            start_heartbeat_task(server_host, server_port)
+            # Start command stream task
             start_command_stream_task(server_host, server_port)
             
             return agent_id
@@ -141,7 +138,7 @@ async def unregister_agent(server_host: str, server_port: int) -> bool:
     Returns:
         True if unregistration was successful, False otherwise
     """
-    global agent_id, _heartbeat_task, _command_stream_task
+    global agent_id, _command_stream_task
     
     if not agent_id:
         logger.error("Cannot unregister: Agent is not registered")
@@ -151,14 +148,7 @@ async def unregister_agent(server_host: str, server_port: int) -> bool:
         logger.error("gRPC imports failed. Cannot unregister agent.")
         return False
     
-    # Stop heartbeat and command stream tasks
-    if _heartbeat_task and not _heartbeat_task.done():
-        _heartbeat_task.cancel()
-        try:
-            await _heartbeat_task
-        except asyncio.CancelledError:
-            pass
-    
+    # Stop command stream task
     if _command_stream_task and not _command_stream_task.done():
         _command_stream_task.cancel()
         try:
@@ -192,17 +182,6 @@ async def unregister_agent(server_host: str, server_port: int) -> bool:
         logger.error(f"Error unregistering agent: {e}")
         return False
 
-def start_heartbeat_task(server_host: str, server_port: int):
-    """Start the heartbeat task"""
-    global _heartbeat_task
-    
-    if _heartbeat_task and not _heartbeat_task.done():
-        logger.info("Heartbeat task already running")
-        return
-    
-    _heartbeat_task = asyncio.create_task(heartbeat_loop(server_host, server_port))
-    logger.info("Heartbeat task started")
-
 def start_command_stream_task(server_host: str, server_port: int):
     """Start the command stream task"""
     global _command_stream_task
@@ -213,64 +192,6 @@ def start_command_stream_task(server_host: str, server_port: int):
     
     _command_stream_task = asyncio.create_task(command_stream_loop(server_host, server_port))
     logger.info("Command stream task started")
-
-async def heartbeat_loop(server_host: str, server_port: int):
-    """
-    Send periodic heartbeats to the server.
-    
-    Args:
-        server_host: The gRPC server hostname or IP
-        server_port: The gRPC server port
-    """
-    global agent_id, _heartbeat_interval
-    
-    if not agent_id:
-        logger.error("Cannot send heartbeat: Agent is not registered")
-        return
-    
-    try:
-        # Create a channel to the server
-        channel = grpc.aio.insecure_channel(f"{server_host}:{server_port}")
-        
-        # Create the stub
-        stub = AgentRegistrationServiceStub(channel)
-        
-        while True:
-            try:
-                # Prepare heartbeat request with metrics
-                metrics = {
-                    "memory_percent": str(round(get_memory_usage(), 2)),
-                    "cpu_percent": str(round(get_cpu_usage(), 2))
-                }
-                
-                request = HeartbeatRequest(
-                    agent_id=agent_id,
-                    status="IDLE",  # You can change this based on your agent's state
-                    metrics=metrics
-                )
-                
-                # Send heartbeat
-                logger.debug(f"Sending heartbeat for agent: {agent_id}")
-                response = await stub.SendHeartbeat(request)
-                
-                if response.success:
-                    # Update heartbeat interval if server suggests a different value
-                    if response.interval != _heartbeat_interval and response.interval > 0:
-                        logger.info(f"Updating heartbeat interval from {_heartbeat_interval} to {response.interval} seconds")
-                        _heartbeat_interval = response.interval
-                else:
-                    logger.warning("Heartbeat was not acknowledged by server")
-                
-            except Exception as e:
-                logger.error(f"Error sending heartbeat: {e}")
-            
-            # Sleep until next heartbeat
-            await asyncio.sleep(_heartbeat_interval)
-            
-    except asyncio.CancelledError:
-        logger.info("Heartbeat task cancelled")
-    except Exception as e:
-        logger.error(f"Heartbeat loop terminated with error: {e}")
 
 async def command_stream_loop(server_host: str, server_port: int):
     """

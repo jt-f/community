@@ -161,11 +161,8 @@ class Agent:
             message_type = message_dict.get("message_type", "unknown")
             message_id = message_dict.get("message_id", "unknown")
             sender_id = message_dict.get("sender_id", "unknown")
-            if message_type == MessageType.SERVER_HEARTBEAT:
-                logger.debug(f"Received heartbeat from server")
-            else:
-                logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
-                logger.info(f"Message: {message_dict}")
+            logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
+            logger.info(f"Message: {message_dict}")
             
             # Introduce a delay
             delay = 5

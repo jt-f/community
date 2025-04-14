@@ -22,9 +22,6 @@ shutdown_event = asyncio.Event()
 # Create lock for thread-safe access to agent connections
 agent_connections_lock = asyncio.Lock()
 
-# Use the same ping interval as configured for agents
-PING_INTERVAL = config.AGENT_PING_INTERVAL
-
 logger = setup_logging(__name__)
 
 # --- Helper Functions ---
@@ -272,59 +269,6 @@ async def server_input_consumer():
             
     logger.info("Server input consumer service stopped.")
 
-# --- Agent Ping Service --- 
-
-async def agent_ping_service():
-    """Periodically pings all connected agents to check their status."""
-    while not shutdown_event.is_set():
-        try:
-            # Get list of current agents
-            async with agent_connections_lock:
-                current_agents = list(state.agent_connections.items())
-            
-            disconnected_agents = set()
-            if not current_agents:
-                logger.debug("Agent ping service: No agents connected, skipping ping cycle.")
-            else:
-                logger.debug(f"Agent ping service: Sending PING to {len(current_agents)} agents...")
-                ping_message = json.dumps({"message_type": MessageType.PING, "timestamp": datetime.now().isoformat()})
-                for agent_id, ws in current_agents:
-                    client_desc = f"agent {agent_id}"
-                    logger.debug(f"Pinging {client_desc}")
-                    if not await _safe_send_websocket(ws, ping_message, client_desc):
-                        logger.error(f"Error sending PING to agent {agent_id}, marking for disconnection.")
-                        disconnected_agents.add(agent_id) # Mark agent ID for removal
-            
-            # Handle disconnected agents
-            needs_broadcast = False
-            if disconnected_agents:
-                logger.info(f"Handling {len(disconnected_agents)} agents disconnected during ping.")
-                # No lock needed here as handle_agent_disconnection manages its own logic if necessary
-                for agent_id in disconnected_agents:
-                     # Use the centralized handler which also removes from state.agent_connections if present
-                    if await agent_manager.handle_agent_disconnection(agent_id):
-                            needs_broadcast = True # Flag if any agent status actually changed to offline
-                            logger.info(f"Agent {agent_id} marked as offline due to ping failure/send error.")
-            
-            # Broadcast status update if needed
-            if needs_broadcast:
-                logger.info("Triggering agent status broadcast via WebSocket after handling ping failures")
-                # Use create_task to avoid blocking the ping service loop
-                asyncio.create_task(agent_manager.broadcast_agent_status())
-            
-        except asyncio.CancelledError:
-            logger.info("Agent ping service task cancelled.")
-            break
-        except Exception as e:
-            logger.exception(f"Error in agent ping service: {e}")
-
-        # Wait for next ping cycle
-        try:
-            await asyncio.sleep(PING_INTERVAL)
-        except asyncio.CancelledError:
-            logger.info("Agent ping service cancelled during sleep.")
-            break
-
 # --- Periodic Status Broadcast Service --- 
 
 async def periodic_status_broadcast():
@@ -347,95 +291,6 @@ async def periodic_status_broadcast():
             await asyncio.sleep(5) # Avoid rapid failure loops
 
     logger.info("Periodic status broadcast service stopped.")
-
-# --- Server Heartbeat Service ---
-
-async def server_heartbeat_service():
-    """Service to periodically send heartbeat messages to all connected clients."""
-    logger.info("Starting server heartbeat service...")
-    while not shutdown_event.is_set():
-        try:
-            heartbeat_message = {
-                "message_type": MessageType.SERVER_HEARTBEAT,
-                "timestamp": datetime.now().isoformat(),
-                "sender_id": "server"
-            }
-            
-            heartbeat_str = json.dumps(heartbeat_message)
-            
-            # Collect clients to send to
-            all_clients = []
-            frontend_clients = [(ws, f"frontend {getattr(ws, 'client_id', '?')}") for ws in list(state.frontend_connections)]
-            agent_clients = [(ws, f"agent {agent_id}") for agent_id, ws in list(state.agent_connections.items())]
-            broker_clients = [(ws, f"broker {broker_id}") for broker_id, ws in list(state.broker_connections.items())]
-            all_clients.extend(frontend_clients)
-            all_clients.extend(agent_clients)
-            all_clients.extend(broker_clients)
-
-            if not all_clients:
-                 logger.debug("Heartbeat: No clients connected.")
-            else:
-                 logger.debug(f"Sending heartbeat to {len(all_clients)} clients...")
-
-            # Send heartbeats and collect disconnections
-            disconnected_frontends = set()
-            disconnected_agents = set()
-            disconnected_brokers = set()
-
-            for ws, client_desc in all_clients:
-                if not await _safe_send_websocket(ws, heartbeat_str, client_desc):
-                    # Determine client type based on state collections (might be imperfect if ws object is reused)
-                    if ws in state.frontend_connections:
-                         disconnected_frontends.add(ws)
-                    else:
-                         # Check agents
-                         found_agent = False
-                         for agent_id, agent_ws in list(state.agent_connections.items()):
-                             if ws == agent_ws:
-                                 disconnected_agents.add(agent_id)
-                                 found_agent = True
-                                 break
-                         # Check brokers if not agent
-                         if not found_agent:
-                              for broker_id, broker_ws in list(state.broker_connections.items()):
-                                  if ws == broker_ws:
-                                      disconnected_brokers.add(broker_id)
-                                      break
-            
-            # Handle disconnected clients
-            if disconnected_frontends:
-                state.frontend_connections -= disconnected_frontends
-                logger.info(f"Removed {len(disconnected_frontends)} disconnected frontend clients during heartbeat")
-            
-            needs_agent_broadcast = False
-            # Use agent_manager for agent disconnections
-            for agent_id in disconnected_agents:
-                 if await agent_manager.handle_agent_disconnection(agent_id):
-                     needs_agent_broadcast = True
-            
-            # Handle broker disconnections (simple removal for now)
-            if disconnected_brokers:
-                 for broker_id in disconnected_brokers:
-                     if broker_id in state.broker_connections:
-                         del state.broker_connections[broker_id]
-                         logger.info(f"Removed disconnected broker {broker_id} during heartbeat.")
-
-            # Broadcast agent status if any agents were disconnected
-            if needs_agent_broadcast:
-                 logger.info("Triggering agent status broadcast due to heartbeat disconnections.")
-                 await agent_manager.broadcast_agent_status()
-            
-            # Wait for next heartbeat interval
-            await asyncio.sleep(10)  # Send heartbeat every 10 seconds
-            
-        except asyncio.CancelledError:
-            logger.info("Server heartbeat service task cancelled.")
-            break
-        except Exception as e:
-            logger.exception(f"Error in server heartbeat service: {e}")
-            await asyncio.sleep(5)  # Wait a bit before retrying
-    
-    logger.info("Server heartbeat service stopped.")
 
 # --- Agent Metadata Consumer Service ---
 
@@ -599,9 +454,7 @@ async def start_services():
     service_tasks = [
         # Replace response_consumer with server_input_consumer
         asyncio.create_task(server_input_consumer(), name="ServerInputConsumer"),
-        asyncio.create_task(agent_ping_service(), name="AgentPingService"),
         asyncio.create_task(periodic_status_broadcast(), name="PeriodicStatusBroadcast"),
-        asyncio.create_task(server_heartbeat_service(), name="ServerHeartbeat"),
         asyncio.create_task(agent_metadata_consumer(), name="AgentMetadataConsumer")
     ]
     logger.info(f"Started {len(service_tasks)} background services:")

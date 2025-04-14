@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
     await grpc_server.start()
     logger.info(f"gRPC server started on port {grpc_port}")
     
-    # Start background services (response consumer, pinger, etc.)
+    # Start background services 
     await services.start_services()
     # Advertise server availability via RabbitMQ
     rabbitmq_utils.publish_server_advertisement()

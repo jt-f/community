@@ -44,7 +44,6 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
     
     # Send an immediate agent status update to the newly connected frontend
-    logger.debug(f"Sending immediate agent status update to new frontend {frontend_id}")
     asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
     
     return {
@@ -79,7 +78,6 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
             logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
 
     # Forward to Broker via RabbitMQ
-    logger.debug(f"Forwarding {message_type} message from {client_id} to broker input queue.")
     if not rabbitmq_utils.publish_to_broker_input_queue(message_data):
         logger.error(f"Failed to publish incoming message from {client_id} to RabbitMQ.")
         error_resp = {
@@ -119,32 +117,23 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
     """Handle REQUEST_AGENT_STATUS message from clients."""
     connection_type = getattr(websocket, "connection_type", "unknown")
         
-    if connection_type == "frontend":
-        logger.info(f"Frontend {client_id} requested agent status update")
-        status_update = {
-            "message_type": MessageType.AGENT_STATUS_UPDATE,
-            "agents": [
-                {
-                    "agent_id": agent_id,
-                    "agent_name": status.agent_name,
-                    "is_online": status.is_online,
-                    "last_seen": status.last_seen
-                }
-                for agent_id, status in state.agent_statuses.items()
-            ],
-            "is_full_update": True
-        }
-        await websocket.send_text(json.dumps(status_update))
-        logger.info(f"Sent agent status update to frontend {client_id}")
-    else:
-        logger.warning(f"Client type {connection_type} requested agent status via WebSocket, should use gRPC")
-        response = {
-            "message_type": MessageType.ERROR,
-            "text_payload": "Please use gRPC for agent status updates",
-            "sender_id": "Server",
-            "receiver_id": client_id
-        }
-        await websocket.send_text(json.dumps(response))
+    logger.info(f"Frontend {client_id} requested agent status update")
+    status_update = {
+        "message_type": MessageType.AGENT_STATUS_UPDATE,
+        "agents": [
+            {
+                "agent_id": agent_id,
+                "agent_name": status.agent_name,
+                "is_online": status.is_online,
+                "last_seen": status.last_seen
+            }
+            for agent_id, status in state.agent_statuses.items()
+        ],
+        "is_full_update": True
+    }
+    await websocket.send_text(json.dumps(status_update))
+    logger.info(f"Sent agent status update to frontend {client_id}")
+
 
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
@@ -155,21 +144,49 @@ async def _handle_disconnect(websocket: WebSocket, client_id: str):
     disconnected_agent_id = None
     
     try:
-        state.active_connections.discard(websocket)
-            
-        if connection_type == "frontend":
-            state.frontend_connections.discard(websocket)
-            logger.info(f"Frontend client connection closed: {client_id}")
-                    
-        logger.info(f"Connection counts after cleanup: {len(state.active_connections)} active, {len(state.frontend_connections)} frontend, {len(state.agent_connections)} agent, {len(state.broker_connections)} broker")
+        state.frontend_connections.discard(websocket)
+        logger.info(f"Frontend client connection closed: {client_id}")
+        logger.info(f"Connection counts after cleanup: {len(state.frontend_connections)} frontend, {len(state.agent_connections)} agent, {len(state.broker_connections)} broker")
         
         if needs_status_broadcast:
             asyncio.create_task(agent_manager.broadcast_agent_status())
     
     except Exception as e:
         logger.error(f"Error during disconnect cleanup for {client_id}: {e}")
-        state.active_connections.discard(websocket)
         state.frontend_connections.discard(websocket)
+
+async def handle_websocket(websocket: WebSocket, client_type: str, client_id: str = None):
+    """Handle WebSocket connection based on client type."""
+    try:
+        await websocket.accept()
+        logger.info(f"New {client_type} connection established")
+        
+        if client_type == "frontend":
+            state.frontend_connections.add(websocket)
+            try:
+                await handle_frontend_connection(websocket)
+            finally:
+                state.frontend_connections.remove(websocket)
+        else:
+            raise ValueError(f"Invalid client type: {client_type}")
+            
+    except Exception as e:
+        logger.error(f"Error handling {client_type} WebSocket connection: {e}")
+        await websocket.close(code=1011, reason=str(e))
+    finally:
+        logger.info(f"{client_type} connection closed")
+
+async def handle_frontend_connection(websocket: WebSocket):
+    """Handle frontend WebSocket connection."""
+    try:
+        while True:
+            message = await websocket.receive_text()
+            await _handle_chat_message(websocket, websocket.client_id, json.loads(message))
+    except WebSocketDisconnect:
+        logger.info(f"Frontend {websocket.client_id} disconnected")
+    except Exception as e:
+        logger.error(f"Error handling frontend {websocket.client_id} message: {e}")
+        raise
 
 async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket handling endpoint"""
@@ -205,11 +222,6 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
                 await _handle_chat_message(websocket, client_id, message_data)
-            elif message_type == MessageType.PONG:
-                logger.debug(f"Received PONG from {client_id}")
-            elif message_type == MessageType.PING:
-                logger.debug(f"Received PING from {client_id}, sending PONG")
-                await websocket.send_text(json.dumps({"message_type": MessageType.PONG}))
             elif message_type == MessageType.CLIENT_DISCONNECTED:
                 await _handle_client_disconnected_message(websocket, client_id, message_data)
             elif message_type == MessageType.REQUEST_AGENT_STATUS:

@@ -12,19 +12,10 @@ class MessageType(str, Enum):
     AGENT_STATUS_UPDATE = "AGENT_STATUS_UPDATE"
     CLIENT_DISCONNECTED = "CLIENT_DISCONNECTED"
     ERROR = "ERROR"
-    PING = "PING"
-    PONG = "PONG"
-    REGISTER_AGENT = "REGISTER_AGENT"
-    REGISTER_AGENT_RESPONSE = "REGISTER_AGENT_RESPONSE"
-    REGISTER_BROKER = "REGISTER_BROKER"
-    REGISTER_BROKER_RESPONSE = "REGISTER_BROKER_RESPONSE"
     REGISTER_FRONTEND = "REGISTER_FRONTEND"
     REGISTER_FRONTEND_RESPONSE = "REGISTER_FRONTEND_RESPONSE"
     REQUEST_AGENT_STATUS = "REQUEST_AGENT_STATUS"
     REPLY = "REPLY"
-    SERVER_AVAILABLE = "SERVER_AVAILABLE"
-    SERVER_HEARTBEAT = "SERVER_HEARTBEAT"
-    SHUTDOWN = "SHUTDOWN"
     SYSTEM = "SYSTEM"
     TEXT = "TEXT"
 
@@ -83,79 +74,6 @@ class ChatMessage(BaseModel):
             in_reply_to_message_id=data.get("in_reply_to_message_id")
         )
 
-class AgentRegistrationMessage(BaseModel):
-    """Message sent by an agent to register with the broker."""
-    agent_id: str
-    agent_name: str
-    message_type: MessageType = MessageType.REGISTER_AGENT
-    
-    def to_dict(self) -> dict:
-        """Convert the AgentRegistrationMessage to a dictionary for JSON serialization."""
-        return {
-            "agent_id": self.agent_id,
-            "agent_name": self.agent_name,
-            "message_type": self.message_type
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> "AgentRegistrationMessage":
-        """Create an AgentRegistrationMessage from a dictionary."""
-        return cls(
-            agent_id=data.get("agent_id", ""),
-            agent_name=data.get("agent_name", ""),
-            message_type=data.get("message_type", MessageType.REGISTER_AGENT)
-        )
-
-class AgentRegistrationResponse(BaseModel):
-    """Response to an agent registration request."""
-    status: ResponseStatus
-    agent_id: str
-    message: str
-    message_type: MessageType = MessageType.REGISTER_AGENT_RESPONSE
-    
-    def to_dict(self) -> dict:
-        """Convert the AgentRegistrationResponse to a dictionary for JSON serialization."""
-        return {
-            "status": self.status,
-            "agent_id": self.agent_id,
-            "message": self.message,
-            "message_type": self.message_type
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> "AgentRegistrationResponse":
-        """Create an AgentRegistrationResponse from a dictionary."""
-        return cls(
-            status=data.get("status", ResponseStatus.ERROR),
-            agent_id=data.get("agent_id", ""),
-            message=data.get("message", ""),
-            message_type=data.get("message_type", MessageType.REGISTER_AGENT_RESPONSE)
-        )
-
-def create_text_message(sender_id: str, text_payload: str, 
-                        in_reply_to_message_id: Optional[str] = None,
-                        message_type: MessageType = MessageType.TEXT) -> ChatMessage:
-    """Create a new text message with a random ID."""
-    return ChatMessage(
-        message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
-        sender_id=sender_id,
-        text_payload=text_payload,
-        send_timestamp=datetime.now().isoformat(),
-        message_type=message_type,
-        in_reply_to_message_id=in_reply_to_message_id
-    )
-
-def create_reply_message(original_message: ChatMessage, sender_id: str, text_payload: str) -> ChatMessage:
-    """Create a reply to an existing message."""
-    return ChatMessage(
-        message_id=''.join(random.choices(string.ascii_lowercase + string.digits, k=8)),
-        sender_id=sender_id,
-        text_payload=text_payload,
-        send_timestamp=datetime.now().isoformat(),
-        message_type=MessageType.REPLY,
-        in_reply_to_message_id=original_message.message_id
-    )
-
 class AgentStatus(BaseModel):
     """Represents the status of a single agent."""
     agent_id: str
@@ -182,7 +100,7 @@ class AgentStatusUpdate(BaseModel):
             message_type=data.get("message_type", MessageType.AGENT_STATUS_UPDATE),
             agents=[AgentStatus(**agent) for agent in data.get("agents", [])]
         )
-    
+
 def setup_logging(
     name: str,
     level: int = logging.INFO,
