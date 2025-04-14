@@ -129,8 +129,7 @@ async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect
                     try:
                         # Process the response
                         if _agent_status_callback:
-                            # Convert the response to a dictionary format that matches the current
-                            # WebSocket format for backward compatibility
+                            # Convert the response to a dictionary format
                             agents_data = []
                             for agent in response.agents:
                                 agents_data.append({
