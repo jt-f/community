@@ -36,6 +36,18 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
     const incomingRoutingStatus = lastMessage.routing_status;
     const incomingMessageType = lastMessage.message_type;
 
+    // --- Filter for displayable message types ---
+    const displayableMessageTypes = [
+      MessageType.TEXT,
+      MessageType.REPLY,
+      MessageType.SYSTEM,
+      MessageType.ERROR,
+    ];
+    if (!incomingMessageType || !displayableMessageTypes.includes(incomingMessageType)) {
+      console.log(`Ignoring non-displayable message type: ${incomingMessageType}`);
+      return; // Don't process messages not meant for the chat display
+    }
+
     // --- Skip processing for Agent Status Updates --- 
     if (incomingMessageType === MessageType.AGENT_STATUS_UPDATE) {
       console.log('Received AGENT_STATUS_UPDATE, ignoring for chat display:', lastMessage);
@@ -245,7 +257,7 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
   };
 
   // Function to get display text for status
-  const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string, routingStatusMessage?: string): string => {
+  const getStatusText = (status: MessageWithAnimation['status'], routedTo?: string): string => {
     // Use default status text ONLY for non-error states
     switch (status) {
       case 'pending': return 'AWAITING ROUTING';
@@ -325,8 +337,8 @@ const Chat = ({ wsRef, userId }: ChatProps): React.ReactElement => {
                 <span className="message-id">ID: {message.message_id ? message.message_id.substring(0, 8) : 'unknown'}</span>
                 <div className="status-container">
                   {(message.status === 'pending' || message.status === 'routed' || message.status === 'error' || message.status === 'routing_failed') && (
-                    <span className={`routing-status ${message.status}`}>
-                      {getStatusText(message.status, getDisplayName(message.routedTo), message.routing_status_message)}
+                    <span className={`routing-status ${message.status}`} title={message.routing_status_message}>
+                      {getStatusText(message.status, getDisplayName(message.routedTo))}
                     </span>
                   )}
                   {getErrorMessage(message) && (
