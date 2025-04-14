@@ -17,10 +17,6 @@ logger = setup_logging(__name__)
 # Store client names
 client_names: Dict[str, str] = {}
 
-def generate_unique_id(client_type: str) -> str:
-    """Generate a unique ID for a client based on their type."""
-    return f"{client_type}_{uuid.uuid4().hex[:8]}"
-
 async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict:
     """Handle frontend registration."""
     frontend_name = message.get("frontend_name")
@@ -29,23 +25,23 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
             "message_type": MessageType.ERROR,
             "text_payload": "Frontend name is required for registration"
         }
-    
-    # Generate unique ID for frontend
-    frontend_id = generate_unique_id("web")
-    
+
+    # Generate unique ID for frontend - Keep this specific to frontend WS registration
+    frontend_id = f"web_{uuid.uuid4().hex[:8]}"
+
     # Store the connection and name
     state.frontend_connections.add(websocket)
     client_names[frontend_id] = frontend_name
-    
+
     # Set the client_id attribute on the websocket
     websocket.client_id = frontend_id
     websocket.connection_type = "frontend"
-    
+
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
-    
+
     # Send an immediate agent status update to the newly connected frontend
     asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
-    
+
     return {
         "message_type": MessageType.REGISTER_FRONTEND_RESPONSE,
         "status": ResponseStatus.SUCCESS,
@@ -114,9 +110,12 @@ async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_
         logger.error(f"Failed to send unknown message type error back to client {client_id}: {e}")
 
 async def _handle_request_agent_status(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handle REQUEST_AGENT_STATUS message from clients."""
+    """Handle REQUEST_AGENT_STATUS message from frontend clients."""
     connection_type = getattr(websocket, "connection_type", "unknown")
-        
+    if connection_type != "frontend":
+        logger.warning(f"Received REQUEST_AGENT_STATUS from non-frontend client {client_id}. Ignoring.")
+        return
+
     logger.info(f"Frontend {client_id} requested agent status update")
     status_update = {
         "message_type": MessageType.AGENT_STATUS_UPDATE,
@@ -134,107 +133,92 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
     await websocket.send_text(json.dumps(status_update))
     logger.info(f"Sent agent status update to frontend {client_id}")
 
-
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
     logger.info(f"Cleaning up connection for {client_id} ({getattr(websocket, 'connection_type', 'unknown')})")
-    
+
     connection_type = getattr(websocket, "connection_type", "unknown")
-    needs_status_broadcast = False
-    disconnected_agent_id = None
-    
+
     try:
-        state.frontend_connections.discard(websocket)
-        logger.info(f"Frontend client connection closed: {client_id}")
-        logger.info(f"Connection counts after cleanup: {len(state.frontend_connections)} frontend, {len(state.agent_connections)} agent, {len(state.broker_connections)} broker")
-        
-        if needs_status_broadcast:
-            asyncio.create_task(agent_manager.broadcast_agent_status())
-    
+        # Only handle frontend disconnects here explicitly
+        if connection_type == "frontend":
+            state.frontend_connections.discard(websocket)
+            client_names.pop(client_id, None) # Clean up name mapping
+            logger.info(f"Frontend client connection closed: {client_id}")
+        else:
+            logger.info(f"Non-frontend client {client_id} ({connection_type}) disconnected. Cleanup handled elsewhere.")
+
+        # Log current counts
+        logger.info(f"Connection counts after cleanup: {len(state.frontend_connections)} frontend")
+
     except Exception as e:
         logger.error(f"Error during disconnect cleanup for {client_id}: {e}")
-        state.frontend_connections.discard(websocket)
-
-async def handle_websocket(websocket: WebSocket, client_type: str, client_id: str = None):
-    """Handle WebSocket connection based on client type."""
-    try:
-        await websocket.accept()
-        logger.info(f"New {client_type} connection established")
-        
-        if client_type == "frontend":
-            state.frontend_connections.add(websocket)
-            try:
-                await handle_frontend_connection(websocket)
-            finally:
-                state.frontend_connections.remove(websocket)
-        else:
-            raise ValueError(f"Invalid client type: {client_type}")
-            
-    except Exception as e:
-        logger.error(f"Error handling {client_type} WebSocket connection: {e}")
-        await websocket.close(code=1011, reason=str(e))
-    finally:
-        logger.info(f"{client_type} connection closed")
-
-async def handle_frontend_connection(websocket: WebSocket):
-    """Handle frontend WebSocket connection."""
-    try:
-        while True:
-            message = await websocket.receive_text()
-            await _handle_chat_message(websocket, websocket.client_id, json.loads(message))
-    except WebSocketDisconnect:
-        logger.info(f"Frontend {websocket.client_id} disconnected")
-    except Exception as e:
-        logger.error(f"Error handling frontend {websocket.client_id} message: {e}")
-        raise
+        if connection_type == "frontend":
+            state.frontend_connections.discard(websocket)
 
 async def websocket_endpoint(websocket: WebSocket):
-    """Main WebSocket handling endpoint"""
+    """Main WebSocket handling endpoint - Primarily for Frontends now"""
     await websocket.accept()
     client_id = None
-    
+    connection_type = "unknown" # Track connection type
+
     try:
-        logger.debug("New WebSocket connection")
-        
-        # First message should be a registration message
+        logger.debug("New WebSocket connection attempting registration...")
+
+        # First message should be a registration message (only frontend expected now)
         registration_msg_str = await websocket.receive_text()
         registration_msg = json.loads(registration_msg_str)
-        
+
         message_type = registration_msg.get("message_type")
-        
+
         if message_type == MessageType.REGISTER_FRONTEND:
             response = await _handle_register_frontend(websocket, registration_msg)
             await websocket.send_text(json.dumps(response))
-            client_id = websocket.client_id
+            client_id = websocket.client_id # Set after successful registration
+            connection_type = "frontend" # Mark as frontend
+            logger.info(f"WebSocket connection registered as frontend: {client_id}")
         else:
-            logger.warning(f"Invalid first message type: {message_type}")
+            logger.warning(f"Invalid first message type for WebSocket: {message_type}. Expected REGISTER_FRONTEND.")
             await websocket.send_text(json.dumps({
                 "message_type": MessageType.ERROR,
-                "text_payload": "First message must be a registration message"
+                "text_payload": "Invalid registration message. Only frontend registration supported via WebSocket."
             }))
+            await websocket.close(code=1008) # Policy Violation
+            return # Close connection immediately
+
+        # Only proceed if registration was successful
+        if not client_id:
+            logger.error("Registration failed or did not set client_id. Closing WebSocket.")
+            await websocket.close(code=1011) # Internal Error
             return
-        
+
+        # Main message loop for the registered client (frontend)
         while True:
             message_str = await websocket.receive_text()
             message_data = json.loads(message_str)
-            
-            message_type = message_data.get("message_type")
-            
-            if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
+
+            msg_type = message_data.get("message_type")
+
+            if msg_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
                 await _handle_chat_message(websocket, client_id, message_data)
-            elif message_type == MessageType.CLIENT_DISCONNECTED:
+            elif msg_type == MessageType.CLIENT_DISCONNECTED:
                 await _handle_client_disconnected_message(websocket, client_id, message_data)
-            elif message_type == MessageType.REQUEST_AGENT_STATUS:
+            elif msg_type == MessageType.REQUEST_AGENT_STATUS:
                 await _handle_request_agent_status(websocket, client_id, message_data)
             else:
                 await _handle_unknown_message(websocket, client_id, message_data)
-    
+
     except WebSocketDisconnect:
-        logger.info(f"WebSocket client disconnected: {client_id}")
+        logger.info(f"WebSocket client disconnected: {client_id} ({connection_type})")
     except Exception as e:
-        logger.exception(f"Error in WebSocket handler: {e}")
+        logger.exception(f"Error in WebSocket handler for client {client_id} ({connection_type}): {e}")
     finally:
         if client_id:
             await _handle_disconnect(websocket, client_id)
         else:
-            logger.info("WebSocket disconnected before registration completed")
+            logger.info("WebSocket disconnected before registration completed.")
+        try:
+            await websocket.close()
+        except RuntimeError as e:
+            if "WebSocket is not connected" not in str(e):
+                logger.warning(f"Error closing websocket during final cleanup: {e}")

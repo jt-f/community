@@ -2,254 +2,222 @@ poetry run python src/main.py
 
 # Agent Communication Server
 
-This service provides the backend infrastructure for agent communication, acting as a message router between agents, brokers, and frontend clients.
+This service provides the backend infrastructure for agent communication, acting as a message router between agents, brokers, and frontend clients. It utilizes FastAPI for WebSocket handling (primarily for frontends) and gRPC for agent/broker interactions.
 
-## Updates: gRPC for Agent Status Updates
+## Architecture Overview
 
-The server now supports gRPC for efficient streaming of agent status updates to brokers. This architectural change provides:
-
-- Efficient streaming of updates (vs. polling)
-- Lower latency for status changes
-- Reduced websocket traffic (status updates now go through dedicated gRPC channel)
-
-WebSockets are still used for chat messaging and other communication, but agent status distribution is now handled through gRPC.
+*   **FastAPI & WebSockets:** Manages WebSocket connections, primarily for frontend clients (`/ws`). Handles frontend registration and chat message exchange.
+*   **gRPC:** Provides services for agent registration (`AgentRegistrationService`), agent status updates (`AgentStatusService`), and potentially broker registration (`BrokerRegistrationService`). This is the primary communication channel for agents and brokers.
+*   **RabbitMQ:** Used as a message bus for decoupling components. Handles message forwarding between the server, broker, and agents. Also used for server discovery and potentially broker registration notifications.
+*   **Background Services:** Asynchronous tasks manage consuming messages from RabbitMQ, broadcasting status updates, and potentially other periodic tasks.
 
 ## Core Responsibilities
 
-*   **WebSocket Management:** Accepts and manages WebSocket connections from Frontends, Agents, and Brokers.
-*   **Client Registration:** Handles registration messages (`REGISTER_FRONTEND`, `REGISTER_AGENT`, `REGISTER_BROKER`), assigns unique IDs (e.g., `agent_xxx`, `broker_yyy`, `web_zzz`), and stores connection details.
-*   **Message Handling:** Receives messages via WebSocket, adds necessary metadata (like `_client_id`), and forwards them to the appropriate destination (usually the `broker_input_queue` via RabbitMQ).
-*   **Broker Response Processing:** Consumes messages from the `broker_output_queue` (via RabbitMQ), which contain messages routed by the broker (e.g., agent replies, errors).
-*   **Response Forwarding:** Forwards messages received from the broker's output queue to the correct WebSocket client (Frontend or Agent) based on `receiver_id` or original `_client_id`.
-*   **Agent Presence & Status Management (`agent_manager.py`):**
-    *   Maintains the canonical state of all registered agents (`agent_statuses`), including name, online status, and last seen time.
-    *   Sends periodic `PING` messages *only* to connected Agents via WebSocket.
-    *   Handles `PONG` responses from agents to update their `last_seen` time and mark them as online if they were previously offline.
-    *   Marks agents as offline if their WebSocket disconnects or they fail to respond to pings within the timeout (`config.AGENT_INACTIVITY_TIMEOUT`).
-    *   Broadcasts agent status updates (`AGENT_STATUS_UPDATE`) to connected Frontends and Brokers via WebSocket whenever an agent's status changes or periodically (`config.PERIODIC_STATUS_INTERVAL`).
-*   **Broker Status Management:** Tracks connected brokers (`broker_connections`, `broker_statuses`).
-*   **General Keepalive:** Sends periodic `SERVER_HEARTBEAT` messages to *all* connected clients (Agents, Brokers, Frontends) via WebSocket to allow clients to detect dead connections.
-*   **Graceful Shutdown:** Handles SIGINT/SIGTERM signals for cleaning up connections and background tasks.
+*   **Frontend WebSocket Management:** Accepts and manages WebSocket connections from Frontend clients. Handles `REGISTER_FRONTEND` and chat messages (`TEXT`, `REPLY`, `SYSTEM`). Forwards messages from the broker (via RabbitMQ) to the appropriate frontend client.
+*   **gRPC Service Implementation:**
+    *   `AgentRegistrationService`: Handles agent registration, unregistration, heartbeats (if implemented via gRPC), and command streaming/results.
+    *   `AgentStatusService`: Provides streaming agent status updates to connected brokers and allows one-time status requests.
+    *   `BrokerRegistrationService`: Handles broker registration requests.
+*   **Message Routing (via RabbitMQ):**
+    *   Receives messages from frontends (via WebSocket) and publishes them to the `broker_input_queue`.
+    *   Receives messages from agents/brokers (via RabbitMQ queues like `agent_output_queue` or `broker_input_queue`) and processes them.
+    *   Consumes routed messages/errors from the `server_input_queue` (published by the broker or other services).
+    *   Forwards messages destined for frontends via their WebSocket connection.
+    *   Forwards messages destined for specific agents by publishing to their dedicated RabbitMQ queue (`agent_queue_<agent_id>`).
+*   **Agent Presence & Status Management (`agent_manager.py`, `state.py`, gRPC Services):**
+    *   Maintains the canonical state of all registered agents (`state.agent_statuses`) based on gRPC registration and potentially heartbeats/connection status.
+    *   Updates agent status (online/offline, last seen) based on gRPC interactions or timeouts.
+    *   Broadcasts agent status updates primarily via the `AgentStatusService` gRPC stream to brokers.
+    *   Broadcasts agent status updates via WebSocket (`AGENT_STATUS_UPDATE`) to connected *frontend* clients for UI display.
+*   **Broker Status Management:** Tracks broker status based on gRPC connections or RabbitMQ messages (`state.broker_statuses`).
+*   **Graceful Shutdown:** Handles SIGINT/SIGTERM signals for cleaning up connections, gRPC server, and background tasks.
 
 ## Project Structure (`src/`)
 
-*   `main.py`: FastAPI application setup, entry point, lifespan management, CORS, Uvicorn runner.
-*   `config.py`: Configuration loaded from environment variables (ports, queues, timeouts, etc.).
-*   `state.py`: Shared application state (connection dictionaries/sets, agent statuses, locks).
-*   `websocket_handler.py`: Handles WebSocket connections, parses incoming messages, and dispatches them to specific handler functions (_handle_register_..., _handle_pong, _handle_chat_message, etc.). Manages connection cleanup.
-*   `rabbitmq_utils.py`: Functions for interacting with RabbitMQ (publishing, connecting, channel management).
-*   `agent_manager.py`: Core logic for managing agent status (online/offline), history, broadcasting status updates, and handling PONGs/disconnections related to agents.
-*   `services.py`: Background asyncio tasks (RabbitMQ `broker_output_queue` consumer, agent-specific pinger, periodic status broadcaster, server heartbeat service).
-*   `utils.py`: Utility functions (signal handling, graceful shutdown orchestration).
+*   `main.py`: FastAPI application setup, entry point, lifespan management (including gRPC server start/stop), CORS, Uvicorn runner.
+*   `config.py`: Configuration loaded from environment variables.
+*   `state.py`: Shared application state (connection sets for frontends, agent/broker statuses, locks).
+*   `websocket_handler.py`: Handles WebSocket connections *primarily for frontends*. Parses incoming frontend messages (registration, chat, status requests).
+*   `rabbitmq_utils.py`: Functions for interacting with RabbitMQ.
+*   `agent_manager.py`: Logic for managing agent status in `state.py` and triggering broadcasts.
+*   `services.py`: Background asyncio tasks (RabbitMQ consumers, periodic status broadcaster).
+*   `grpc_services.py`: Manages the gRPC server lifecycle and provides helper functions for gRPC communication (like broadcasting status).
+*   `agent_registration_service.py`: gRPC Servicer implementation for agent registration.
+*   `agent_status_service.py`: (Likely exists or needed) gRPC Servicer implementation for agent status.
+*   `broker_registration_service.py`: (Likely exists or needed) gRPC Servicer implementation for broker registration.
+*   `utils.py`: Utility functions (signal handling).
+*   `protos/`: Protocol Buffer definitions for gRPC services.
+*   `generated/`: Python code generated from `.proto` files.
 
 ## Prerequisites
 
--   Python 3.13 or newer (as specified in pyproject.toml)
--   RabbitMQ server running
--   Poetry for dependency management
+*   Python 3.13+
+*   RabbitMQ server running
+*   Poetry
 
 ## Installation
 
 1.  Navigate to the `server` directory.
-2.  Create a virtual environment (optional but recommended):
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-    ```
-3.  Install dependencies using Poetry:
-    ```bash
-    poetry install
-    ```
-
-2. Generate the gRPC code:
-   ```
-   python generate_grpc.py
-   ```
+2.  Create/activate a virtual environment.
+3.  Install dependencies: `poetry install`
+4.  Generate gRPC code: `python generate_grpc.py` (assuming this script exists)
 
 ## Configuration
 
-The server reads configuration from environment variables. Key variables include:
+Key environment variables (see `src/config.py`):
 
--   `RABBITMQ_HOST` (default: `localhost`)
--   `RABBITMQ_PORT` (default: `5672`)
--   `WEBSOCKET_HOST` (default: `localhost`)
--   `WEBSOCKET_PORT` (default: `8765`)
--   `HOST` (Uvicorn host, default: `0.0.0.0`)
--   `PORT` (Uvicorn port, default: `8765`)
--   `AGENT_INACTIVITY_TIMEOUT` (default: 15 seconds)
--   `AGENT_PING_INTERVAL` (default: 10 seconds)
--   `PERIODIC_STATUS_INTERVAL` (default: 60 seconds)
--   `GRPC_HOST` (default: `localhost`)
--   `GRPC_PORT` (default: `50051`)
-
-See `src/config.py` for all options. These can be set directly in the environment or via a `.env` file (requires `python-dotenv` to be installed and loaded, e.g., in `main.py`).
+*   `RABBITMQ_HOST`, `RABBITMQ_PORT`
+*   `HOST` (Uvicorn host, default: `0.0.0.0`)
+*   `PORT` (Uvicorn port, default: `8765`)
+*   `GRPC_HOST` (default: `localhost`)
+*   `GRPC_PORT` (default: `50051`)
+*   `PERIODIC_STATUS_INTERVAL` (default: 60 seconds)
+*   *(Potentially others like agent timeouts if managed via gRPC heartbeats)*
 
 ## Running the Server
 
 Ensure RabbitMQ is running.
 
-Start the server using Poetry:
-
 ```bash
 poetry run python src/main.py
 ```
 
-The server will start listening on the configured host and port (default: `0.0.0.0:8765`).
+The server will start the FastAPI/Uvicorn server (default: `0.0.0.0:8765`) and the gRPC server (default: `localhost:50051`).
 
-## Communication Flows (Mermaid Diagrams)
+## Communication Flows (Simplified)
 
-*(Note: RMQ = RabbitMQ, WS = WebSocket)*
+*(Note: RMQ = RabbitMQ, WS = WebSocket, gRPC = gRPC)*
 
-### 1. Client Connection & Registration
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Client as Client (FE/Agent/Broker)
-    participant Srv as Server
-    participant Broker as Broker
-    participant RMQ as RabbitMQ
-
-    Client->>+Srv: WS Connect (/ws)
-    Srv-->>-Client: WS Accept
-
-    alt Frontend Registration
-        Client->>Srv: Send REGISTER_FRONTEND (WS)
-        Note over Srv: Add WS to state.frontend_connections, assign client_id (web_...)
-        Srv->>Client: Send REGISTER_FRONTEND_RESPONSE (WS) { frontend_id }
-        Srv->>Client: Broadcast AGENT_STATUS_UPDATE (Full List) (WS)
-    else Agent Registration
-        Client->>Srv: Send REGISTER_AGENT (WS) { agent_name }
-        Note over Srv: Assign ID (agent_...), add WS to state.agent_connections,
-Update state.agent_statuses, set connection_type='agent'
-        Srv->>Client: Send REGISTER_AGENT_RESPONSE (WS) { agent_id, ... }
-        Note over Srv: Trigger Full Agent Status Broadcast
-        Srv-->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
-        Srv-->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS) (To all FE clients)
-    else Broker Registration
-        Client->>Srv: Send REGISTER_BROKER (WS) { broker_name }
-        Note over Srv: Assign ID (broker_...), add WS to state.broker_connections,
-Update state.broker_statuses, set connection_type='broker'
-        Srv->>Client: Send REGISTER_BROKER_RESPONSE (WS) { broker_id, ... }
-        Note over Srv: Trigger Full Agent Status Broadcast
-        Srv-->>Client: Broadcast AGENT_STATUS_UPDATE (Full List) (WS)
-    end
-```
-
-### 2. Frontend Sending Message to Agent
+### 1. Frontend Connection & Registration
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Frontend as Frontend
-    participant Srv as Server
-    participant Broker as Broker
+    participant Srv as Server (FastAPI/WS)
+    participant SrvGRPC as Server (gRPC)
+    participant AgentMgr as Agent Manager
+
+    Frontend->>+Srv: WS Connect (/ws)
+    Srv-->>-Frontend: WS Accept
+    Frontend->>Srv: Send REGISTER_FRONTEND (WS)
+    Note over Srv: Add WS to state.frontend_connections, assign client_id (web_...)
+    Srv->>Frontend: Send REGISTER_FRONTEND_RESPONSE (WS) { frontend_id }
+    Note over Srv: Trigger Agent Status Broadcast
+    Srv->>AgentMgr: Request Agent Status Broadcast
+    AgentMgr->>SrvGRPC: Get Current Agent Status
+    AgentMgr->>Srv: Send AGENT_STATUS_UPDATE (Full List) (WS) to Frontend
+```
+
+### 2. Agent Connection & Registration (via gRPC)
+
+```mermaid
+sequenceDiagram
+    autonumber
     participant Agent as Agent
+    participant SrvGRPC as Server (gRPC)
+    participant AgentMgr as Agent Manager
+    participant Broker as Broker (via gRPC)
+    participant Frontend as Frontend (via WS)
+
+    Agent->>+SrvGRPC: Connect (gRPC)
+    Agent->>SrvGRPC: Call RegisterAgent RPC { agent_name, ... }
+    Note over SrvGRPC: Process registration, update state.agent_statuses
+    SrvGRPC-->>-Agent: Return RegisterAgent Response { success, agent_id }
+    Note over SrvGRPC: Trigger Agent Status Broadcast
+    SrvGRPC->>AgentMgr: Notify Agent Status Change (Agent Online)
+    AgentMgr->>SrvGRPC: Broadcast AGENT_STATUS_UPDATE (gRPC Stream to Brokers)
+    AgentMgr->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS to Frontends)
+```
+
+### 3. Broker Connection & Status Subscription (via gRPC)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Broker as Broker
+    participant SrvGRPC as Server (gRPC)
+    participant AgentMgr as Agent Manager
+
+    Broker->>+SrvGRPC: Connect (gRPC)
+    Broker->>SrvGRPC: Call RegisterBroker RPC (Optional, might use RMQ)
+    SrvGRPC-->>-Broker: Return RegisterBroker Response
+    Broker->>SrvGRPC: Call SubscribeToAgentStatus RPC
+    Note over SrvGRPC: Add Broker to list of gRPC status subscribers
+    SrvGRPC-->>Broker: Stream initial AGENT_STATUS_UPDATE (Full List)
+    loop Agent Status Changes
+        Note over AgentMgr: Detects agent status change (connect/disconnect)
+        AgentMgr->>SrvGRPC: Trigger Agent Status Broadcast
+        SrvGRPC-->>Broker: Stream AGENT_STATUS_UPDATE (Delta or Full)
+    end
+```
+
+### 4. Frontend Sending Message to Agent
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Frontend as Frontend
+    participant SrvWS as Server (FastAPI/WS)
+    participant SrvRMQ as Server (RMQ Consumer)
+    participant Broker as Broker (via RMQ)
+    participant Agent as Agent (via RMQ)
     participant RMQ as RabbitMQ
 
-    Frontend->>Srv: Send TEXT Message (WS) { sender: web_..., text: "Hi!" }
-    Note over Srv: Add internal _client_id = web_...
-    Srv->>RMQ: Publish TEXT Message (broker_input_queue) { ..., _client_id: web_... }
-    Note over Broker: Consume from broker_input_queue
+    Frontend->>SrvWS: Send TEXT Message (WS) { sender: web_..., text: "Hi!" }
+    SrvWS->>RMQ: Publish TEXT Message (broker_input_queue) { ..., _client_id: web_... }
+    Broker->>RMQ: Consume TEXT Message (broker_input_queue)
     Note over Broker: Route message: Select Agent_X
-    Broker->>RMQ: Publish TEXT Message (broker_output_queue) { receiver: Agent_X, sender: web_..., ... }
-    Note over Srv: Consume from broker_output_queue
-    Note over Srv: Publish message to Agent_X's queue
-    Srv->>RMQ: Publish TEXT Message (agent_queue_Agent_X) { receiver: Agent_X, sender: web_..., ... }
-    Note over Agent: Consume from agent_queue_Agent_X
+    Broker->>RMQ: Publish TEXT Message (server_input_queue) { receiver: Agent_X, sender: web_..., routing_status: routed }
+    SrvRMQ->>RMQ: Consume TEXT Message (server_input_queue)
+    Note over SrvRMQ: Message is routed, forward to agent queue
+    SrvRMQ->>RMQ: Publish TEXT Message (agent_queue_Agent_X) { receiver: Agent_X, sender: web_..., ... }
+    Agent->>RMQ: Consume TEXT Message (agent_queue_Agent_X)
     Note over Agent: Process message, generate reply
     Agent->>RMQ: Publish REPLY Message (broker_input_queue) { receiver: web_..., sender: Agent_X, ... }
-    Note over Broker: Consume from broker_input_queue
-    Broker->>RMQ: Publish REPLY Message (broker_output_queue) { receiver: web_..., sender: Agent_X, ... }
-    Note over Srv: Consume from broker_output_queue
-    Note over Srv: Forward message directly to client via WS
-    Srv->>Frontend: Forward REPLY Message (WS) { sender: Agent_X, ... }
-
+    Broker->>RMQ: Consume REPLY Message (broker_input_queue)
+    Broker->>RMQ: Publish REPLY Message (server_input_queue) { receiver: web_..., sender: Agent_X, routing_status: routed }
+    SrvRMQ->>RMQ: Consume REPLY Message (server_input_queue)
+    Note over SrvRMQ: Message is routed to frontend (web_...)
+    SrvRMQ->>SrvWS: Forward message to specific Frontend WS connection
+    SrvWS->>Frontend: Forward REPLY Message (WS) { sender: Agent_X, ... }
 ```
 
-### 3. Agent Status Updates & Keepalives
+### 5. Agent Disconnection (via gRPC)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Frontend as Frontend
-    participant Srv as Server
-    participant Broker as Broker
     participant Agent as Agent
+    participant SrvGRPC as Server (gRPC)
+    participant AgentMgr as Agent Manager
+    participant Broker as Broker (via gRPC)
+    participant Frontend as Frontend (via WS)
 
-    loop Agent Ping Service (every ~10s)
-        Srv->>Agent: Send PING (WS)
-        Agent->>Srv: Send PONG (WS) { agent_id }
-        Note over Srv: agent_manager.handle_pong(agent_id)
-Update agent_statuses[agent_id].last_seen
-    end
-
-    loop Server Heartbeat Service (every ~10s)
-        Srv->>Agent: Send SERVER_HEARTBEAT (WS)
-        Srv->>Broker: Send SERVER_HEARTBEAT (WS)
-        Srv->>Frontend: Send SERVER_HEARTBEAT (WS)
-        Broker->>Srv: Send PONG (WS) # Broker responds to keepalive
-        # Agents/Frontends typically don't need to reply to SERVER_HEARTBEAT
-    end
-
-    Note over Srv: Agent status changes (connect/disconnect/timeout) OR Periodic Broadcast Timer (~60s)
-    Note over Srv: agent_manager.broadcast_agent_status()
-    Srv->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS)
-    Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
-
+    Agent--xSrvGRPC: gRPC Connection Lost / UnregisterAgent RPC called
+    Note over SrvGRPC: Detects disconnection / processes unregistration
+    SrvGRPC->>AgentMgr: Notify Agent Status Change (Agent Offline)
+    Note over AgentMgr: Update state.agent_statuses
+    AgentMgr->>SrvGRPC: Broadcast AGENT_STATUS_UPDATE (gRPC Stream to Brokers)
+    AgentMgr->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS to Frontends)
 ```
-
-### 4. Agent Disconnection
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Frontend as Frontend
-    participant Srv as Server
-    participant Broker as Broker
-    participant Agent as Agent
-
-    Agent--xSrv: WebSocket Disconnect / Error / Ping Timeout
-    Note over Srv: websocket_handler detects disconnect OR services.agent_ping_service detects timeout
-    Note over Srv: Call agent_manager.handle_agent_disconnection(Agent_X)
-    Note over Srv: Removes Agent WS from state.agent_connections,
-Marks Agent offline in state.agent_statuses
-    Note over Srv: Trigger Agent Status Broadcast
-    Srv->>Frontend: Broadcast AGENT_STATUS_UPDATE (WS)
-    Srv->>Broker: Broadcast AGENT_STATUS_UPDATE (WS)
-
-```
-
-## Architecture
-
-The system now uses a dual-communication approach:
-
-1. **WebSockets** - For chat messages, registration, and general events
-2. **gRPC Streaming** - For efficient agent status updates
-
-When a broker connects:
-1. It first establishes a WebSocket connection and registers
-2. The server responds with gRPC endpoint details
-3. The broker connects to the gRPC endpoint to receive streaming status updates
-4. WebSocket connection remains active for all other message types
 
 ## API Reference
 
-### WebSocket Endpoints
+### WebSocket Endpoints (Primarily Frontend)
 
-- `/ws` - Main WebSocket endpoint for all client types (agents, brokers, frontends)
+*   `/ws` - Main WebSocket endpoint for frontend clients.
 
 ### gRPC Services
 
-- `AgentStatusService.SubscribeToAgentStatus` - Stream of agent status updates
-- `AgentStatusService.GetAgentStatus` - One-time request for agent status
+*   `AgentRegistrationService`: See `protos/agent_registration_service.proto`
+*   `AgentStatusService`: See `protos/agent_status_service.proto`
+*   `BrokerRegistrationService`: See `protos/broker_registration_service.proto`
 
 ## For Developers
 
-To modify the gRPC service:
+To modify gRPC services:
 
-1. Edit the proto definition in `src/protos/agent_status_service.proto`
-2. Regenerate the gRPC code:
-   ```
-   python generate_grpc.py
-   ```
+1.  Edit the `.proto` definition(s) in `src/protos/`.
+2.  Regenerate the gRPC code: `python generate_grpc.py`
+3.  Update the corresponding Servicer implementation(s) in `src/`.
