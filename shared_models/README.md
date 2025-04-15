@@ -10,7 +10,7 @@ This directory contains Python data models and enumerations shared across the di
 
 ### Enumerations
 
--   **`MessageType(str, Enum)`**: Defines the valid types for messages exchanged within the system (e.g., `TEXT`, `REPLY`, `REGISTER_AGENT`, `AGENT_STATUS_UPDATE`, `PING`, `PONG`, `ERROR`).
+-   **`MessageType(str, Enum)`**: Defines the valid types for messages exchanged within the system (e.g., `AGENT_STATUS_UPDATE`, `CLIENT_DISCONNECTED`, `ERROR`, `REGISTER_FRONTEND`, `REGISTER_FRONTEND_RESPONSE`, `REQUEST_AGENT_STATUS`, `REPLY`, `SYSTEM`, `TEXT`).
 -   **`ResponseStatus(str, Enum)`**: Defines simple status values for response messages (e.g., `SUCCESS`, `ERROR`).
 
 ### Pydantic Models (`BaseModel`)
@@ -20,7 +20,7 @@ This directory contains Python data models and enumerations shared across the di
 -   **`AgentRegistrationMessage`**: Structure for the message sent by an agent *to the server* during registration (now contains primarily `agent_name`, as `agent_id` is assigned by the server).
 -   **`AgentRegistrationResponse`**: Structure for the server's response to an agent's registration attempt, including `status`, assigned `agent_id`, and a `message`.
 -   **`AgentStatus`**: Represents the status information for a single agent, including `agent_id`, `agent_name`, `is_online`, and `last_seen` timestamp.
--   **`AgentStatusUpdate`**: Structure for the message broadcast by the server containing a list of `AgentStatus` objects for multiple agents. Includes `is_full_update` flag (though not explicitly defined in the provided snippet, it's used elsewhere).
+-   **`AgentStatusUpdate`**: Structure for the message broadcast by the server containing a list of `AgentStatus` objects for multiple agents. Includes `message_type` and a list of `AgentStatus` objects.
 
 ### Helper Functions
 

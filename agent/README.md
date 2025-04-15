@@ -1,83 +1,151 @@
 # Agent
 
-This agent connects to a central server via WebSocket for status and control, and uses RabbitMQ for message processing. When a message is received from its dedicated RabbitMQ queue, the agent uses the Mistral AI API to generate a response and sends it back via the broker.
+This agent connects to a central server via **gRPC** for registration and command handling, and uses RabbitMQ for message processing. When a message arrives on its dedicated RabbitMQ queue, the agent utilizes the Mistral AI API to generate a response and sends it back through the message broker.
 
 ## Prerequisites
 
-- Python 3.13 or newer (as specified in pyproject.toml)
+- Python 3.13 or newer
 - RabbitMQ server running
-- WebSocket server (the central server component) running
+- **gRPC server** (central server component) running
 - Poetry for dependency management
 - Mistral AI API Key
+- Generated gRPC code (run `python generate_grpc.py`)
 
 ## Installation
 
-1.  Navigate to the `agent` directory.
-2.  Create a virtual environment (optional but recommended):
+1.  Clone the repository (if you haven't already).
+2.  Navigate to the `agent` directory.
+3.  **Generate gRPC code:**
+    ```bash
+    python generate_grpc.py
+    ```
+4.  Create and activate a virtual environment (recommended):
     ```bash
     python -m venv .venv
-    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    # On Linux/macOS:
+    source .venv/bin/activate
+    # On Windows:
+    .venv\Scripts\activate
     ```
-3.  Install dependencies using Poetry:
+5.  Install dependencies using Poetry:
     ```bash
     poetry install
     ```
 
 ## Configuration
 
-1.  **Mistral API Key**: The agent requires a Mistral API key to function. Set the following environment variable:
+Configure the agent using environment variables. Consider using a `.env` file with `python-dotenv` for development.
+
+-   **`MISTRAL_API_KEY` (Required)**: Your Mistral AI API key.
     ```bash
     export MISTRAL_API_KEY='YOUR_MISTRAL_API_KEY'
     ```
-    Replace `YOUR_MISTRAL_API_KEY` with your actual key. Consider using a `.env` file and `python-dotenv` for easier management in development.
-
-2.  **Model Selection (Optional)**: You can specify a different Mistral model by setting the `MISTRAL_MODEL` environment variable. The default is `mistral-small-latest`. See `agent/src/config.py`.
+-   **`MISTRAL_MODEL` (Optional)**: The Mistral model to use. Defaults to `mistral-small-latest`. See `agent/src/config.py`.
+    ```bash
+    export MISTRAL_MODEL='mistral-large-latest'
+    ```
+-   **`GRPC_HOST` (Optional)**: gRPC server host. Defaults to `localhost`.
+-   **`GRPC_PORT` (Optional)**: gRPC server port. Defaults to `50051`.
+-   **`RABBITMQ_HOST` (Optional)**: RabbitMQ server host. Defaults to `localhost`.
 
 ## Usage
 
-Ensure the environment variables (especially `MISTRAL_API_KEY`) are set.
+Ensure the required environment variables (especially `MISTRAL_API_KEY`) are set and gRPC code is generated.
 
-Run the agent with a unique name:
+Run the agent, providing a unique name:
 
 ```bash
+# Example using agent.py (Mistral LLM + RabbitMQ)
 poetry run python src/agent.py --name "MistralAgent"
+
+# Example using example_agent.py (Shell/Python execution via gRPC commands)
+# poetry run python src/example_agent.py --name "ExecutorAgent"
 ```
 
-### Command-line Arguments
+### Command-line Arguments (`agent.py`)
 
--   `--id`: Unique identifier for this agent (optional, auto-generated if not provided)
--   `--name`: Human-readable name for this agent (required)
--   `--ws-url`: WebSocket server URL (default: fetched from environment or defaults to "ws://localhost:8765/ws")
--   `--rabbitmq-host`: RabbitMQ server host (default: fetched from environment or defaults to "localhost")
+-   `--name`: (Required) Human-readable name for this agent.
+-   `--id`: (Optional) Unique identifier for this agent. Auto-generated if not provided.
+-   `--rabbitmq-host`: (Optional) Overrides the `RABBITMQ_HOST` environment variable or default RabbitMQ server host.
+-   *(Note: `agent.py` currently uses `GRPC_HOST`/`GRPC_PORT` environment variables for gRPC connection, not command-line args)*
 
-Example with custom options:
+Example with custom options for `agent.py`:
 
 ```bash
-poetry run python src/agent.py --id agent_mistral_1 --name "Mistral Agent Alpha" --ws-url "ws://server.example.com:8765/ws" --rabbitmq-host "rabbitmq.example.com"
+export MISTRAL_API_KEY='your_key_here'
+export GRPC_HOST='server.example.com'
+export GRPC_PORT='50051'
+poetry run python src/agent.py \
+    --id agent_mistral_1 \
+    --name "Mistral Agent Alpha" \
+    --rabbitmq-host "rabbitmq.example.com"
 ```
 
-## How It Works
+## Information Flow Diagram (`agent.py`)
 
-1.  The agent connects to the WebSocket server for status updates and control (like PING/PONG).
-2.  It registers itself with the server by sending a `REGISTER_AGENT` message and receives a unique server-assigned ID.
-3.  It connects to RabbitMQ.
-4.  It declares a unique RabbitMQ queue based on its server-assigned ID.
-5.  It starts consuming messages from its dedicated queue in a separate thread.
-6.  When a message is received from the queue:
-    -   It pauses for a configured delay (currently 10 seconds).
-    -   It sends the message content to the configured Mistral AI model via the API.
-    -   It receives the generated text response from Mistral.
-    -   It formats the LLM response into a `REPLY` message.
-    -   It publishes the `REPLY` message to the `broker_input_queue` for the server/broker to handle.
-7.  The agent responds to `PING` messages from the server on the WebSocket to maintain its online status.
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant gRPC Server
+    participant RabbitMQ
+    participant MistralAI
+
+    Agent->>gRPC Server: RegisterAgent(name, id)
+    gRPC Server-->>Agent: Registration Confirmation (agent_id)
+    Note over Agent: Starts gRPC Command Stream Listener (background)
+    gRPC Server->>Agent: ReceiveCommands Stream (optional commands)
+
+    Agent->>RabbitMQ: Connect & Declare Queue (agent_queue_{agent_id})
+    Note over Agent: Starts RabbitMQ Consumer Thread
+
+    Note over RabbitMQ, Agent: Message arrives on agent_queue_{agent_id}
+    RabbitMQ->>Agent: Consume Message (JSON payload)
+    Agent->>Agent: Pause (delay)
+    Agent->>MistralAI: chat.complete(text_payload)
+    MistralAI-->>Agent: LLM Response
+    Agent->>Agent: Format REPLY message
+    Agent->>RabbitMQ: Publish REPLY to broker_input_queue
+    Agent->>RabbitMQ: Acknowledge Original Message (basic_ack)
+
+    Note over Agent, gRPC Server: On SIGINT/SIGTERM
+    Agent->>Agent: Stop RabbitMQ Consumer
+    Agent->>RabbitMQ: Close Connection
+    Note over Agent: (Should call UnregisterAgent via gRPC)
+```
+
+## How It Works (`agent.py`)
+
+1.  **Initialization**: The agent starts, parses command-line arguments (`--name`, `--id`, `--rabbitmq-host`), and reads environment variables (`GRPC_HOST`, `GRPC_PORT`, `MISTRAL_API_KEY`, etc.).
+2.  **gRPC Registration**: It connects to the specified gRPC server (`GRPC_HOST`:`GRPC_PORT`) and calls the `RegisterAgent` RPC method, sending its name and ID. The server confirms registration. *(See `grpc_client.py`)*.
+3.  **RabbitMQ Connection**: It connects to the specified RabbitMQ host (`--rabbitmq-host` or `RABBITMQ_HOST` env var).
+4.  **Queue Declaration**: It declares a unique RabbitMQ queue named `agent_queue_{agent_id}`.
+5.  **Message Consumption**: It starts listening for messages on its dedicated queue in a separate thread using `pika`.
+6.  **Message Processing**: When a message is received from the RabbitMQ queue:
+    a.  The agent pauses for a configured delay.
+    b.  It sends the message content (`text_payload`) to the configured Mistral AI model via the API.
+    c.  It receives the generated text response from Mistral.
+    d.  It formats the LLM response into a `REPLY` message.
+    e.  It publishes the `REPLY` message to the `broker_input_queue` for the central server/broker to handle via RabbitMQ.
+    f.  The original message is acknowledged (`basic_ack`).
+7.  **gRPC Command Stream (Implicit)**: Although `agent.py` doesn't explicitly handle commands via gRPC in its main loop, the `grpc_client.py` starts a background task (`command_stream_loop`) upon successful registration. This task listens for commands on the `ReceiveCommands` gRPC stream. If a command callback were set (like in `example_agent.py`), it would process commands here.
+8.  **Shutdown**: The agent listens for termination signals (SIGINT, SIGTERM). On receiving a signal:
+    a.  It attempts to gracefully close the RabbitMQ connection.
+    b.  *(Implicit gRPC Unregistration: While `agent.py`'s signal handler doesn't explicitly call `unregister_agent`, a more robust implementation would do so here. `example_agent.py` demonstrates this.)*
+    c.  The main loop and consumer thread stop.
+
+*(Note: `example_agent.py` provides a different example focusing on receiving and executing shell/python commands via the gRPC `ReceiveCommands` stream and sending results back via `SendCommandResult`.)*
 
 ## Customization
 
--   The core LLM interaction logic is within the `generate_response` method in `agent/src/agent.py`.
--   API key and model are configured via environment variables (see `agent/src/config.py`).
+-   Modify the `generate_response` method in `agent/src/agent.py` to change the core LLM interaction logic.
+-   Adjust API key, model, and connection details via environment variables or command-line arguments as described in the Configuration and Usage sections.
+-   See `agent/src/config.py` for default values and environment variable names.
+-   Implement command handling by setting a callback using `grpc_client.set_command_callback(your_handler_function)` (see `example_agent.py`).
 
 ## Shutdown
 
-The agent will attempt to gracefully shut down when:
--   It receives a SIGINT or SIGTERM signal (e.g., Ctrl+C).
--   It receives a `SHUTDOWN` message from the server via WebSocket (if implemented on the server).
+The agent attempts a graceful shutdown upon receiving:
+-   A SIGINT or SIGTERM signal (e.g., pressing `Ctrl+C`).
+-   *(gRPC Shutdown Command: The gRPC `Command` message definition includes `is_cancellation`, suggesting the server could potentially send a specific shutdown command via the `ReceiveCommands` stream, although this is not explicitly handled in `agent.py`.)*
+
+During shutdown, connections (RabbitMQ, potentially gRPC) should be closed gracefully. Explicitly calling `grpc_client.unregister_agent` is recommended for clean server-side state management.

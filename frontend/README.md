@@ -72,81 +72,84 @@ serve -s dist
 
 ## Core Components
 
--   **`src/main.tsx`**: Entry point of the application.
--   **`src/App.tsx`**: Main application component, sets up routing or main layout.
--   **`src/components/ChatUI.tsx`**: Orchestrates the main UI, manages WebSocket connection, context provider, and renders `Chat` and `AgentPanel`.
--   **`src/components/Chat.tsx`**: Implements the chat message display and input area. Consumes `WebSocketContext`.
--   **`src/components/AgentPanel.tsx`**: Displays the list of agents and their status. Consumes `WebSocketContext` and uses `agentStore`.
--   **`src/store/agentStore.ts`**: Zustand store for managing agent state.
--   **`src/config.ts`**: Loads and exports configuration (like WebSocket URL).
--   **`src/types/message.ts`**: Defines shared TypeScript types for messages.
+-   **`src/main.tsx`**: Application entry point, renders `App`.
+-   **`src/App.tsx`**: Main application component, sets up the `WebSocketProvider` and renders `ChatUI`.
+-   **`src/components/ChatUI/ChatUI.tsx`**: Orchestrates the main UI layout, including `AgentPanel` and `ChatWindow`. Manages WebSocket connection state via `useWebSocket` hook.
+-   **`src/components/ChatWindow/ChatWindow.tsx`**: Displays chat messages and provides the input area for sending messages. Uses `WebSocketContext`.
+-   **`src/components/AgentPanel/AgentPanel.tsx`**: Displays the list of connected agents and their status. Uses `agentStore`.
+-   **`src/context/WebSocketContext.tsx`**: React Context provider for WebSocket state (connection status, messages, sendMessage function).
+-   **`src/hooks/useWebSocket.ts`**: Custom hook encapsulating WebSocket connection logic (connect, disconnect, message handling, registration, heartbeats, reconnection).
+-   **`src/store/agentStore.ts`**: Zustand store for managing the state of connected agents.
+-   **`src/config.ts`**: Loads and exports configuration (e.g., WebSocket URL).
+-   **`src/types/message.ts`**: Defines shared TypeScript types for WebSocket messages.
 
 ## WebSocket Communication
 
--   Managed primarily within `ChatUI.tsx`.
+-   Managed primarily by the `useWebSocket` hook, initiated within `App.tsx` via `WebSocketProvider`.
 -   Connects to the URL specified by `VITE_WS_URL`.
--   Registers itself as a `REGISTER_FRONTEND` client upon connection.
--   Listens for incoming messages (`AGENT_STATUS_UPDATE`, `TEXT`, `REPLY`, `ERROR`, etc.).
--   Handles `SERVER_HEARTBEAT` messages from the server to maintain connection awareness.
--   Provides a `sendMessage` function via `WebSocketContext` for child components to send messages.
--   Includes logic for automatic reconnection on disconnect.
+-   Registers the client as `REGISTER_FRONTEND` upon successful connection.
+-   Listens for incoming messages (`AGENT_STATUS_UPDATE`, `TEXT`, `REPLY`, `ERROR`, `SERVER_HEARTBEAT`, etc.).
+    -   `AGENT_STATUS_UPDATE` messages trigger updates in the `agentStore`.
+    -   Other messages (like `TEXT`, `REPLY`) are stored in the `WebSocketContext` for display by components like `ChatWindow`.
+-   Handles `SERVER_HEARTBEAT` messages to confirm the connection is alive.
+-   Provides connection status (`isConnected`) and a `sendMessage` function via `WebSocketContext` for components to use.
+-   Includes logic for automatic reconnection attempts on disconnection.
 
-## Hot Module Replacement (HMR)
+## Information Flow (Example: User sends a message)
 
-This project uses Vite's built-in HMR, which provides instant updates as you edit your code. HMR is enabled by default and works out of the box.
+```mermaid
+sequenceDiagram
+    participant User
+    participant ChatWindow
+    participant WebSocketContext
+    participant useWebSocket
+    participant WebSocketServer
+    participant TargetAgent
 
-### How it works
-
-- When you make changes to your React components, the changes will be reflected immediately in the browser without a full page reload
-- Component state is preserved during updates
-- The WebSocket connection will automatically reconnect if needed
-
-### Custom HMR Configuration
-
-If you need to customize HMR behavior, you can modify the `vite.config.ts` file:
-
-```typescript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    hmr: {
-      // Enable HMR overlay
-      overlay: true,
-      // Custom HMR protocol
-      protocol: 'ws',
-      // Custom HMR host
-      host: 'localhost',
-      // Custom HMR port
-      port: 24678
-    }
-  }
-})
+    User->>ChatWindow: Types message and clicks send
+    ChatWindow->>WebSocketContext: Calls sendMessage(message)
+    WebSocketContext->>useWebSocket: Triggers sending via WebSocket instance
+    useWebSocket->>WebSocketServer: Sends JSON message (e.g., { type: 'TEXT', content: 'Hello', target_id: 'agent_1' })
+    WebSocketServer->>TargetAgent: Forwards message
+    TargetAgent->>WebSocketServer: Sends reply (e.g., { type: 'REPLY', content: 'Hi back!', original_id: '...' })
+    WebSocketServer->>useWebSocket: Sends reply message to Frontend client
+    useWebSocket->>WebSocketContext: Updates received messages state
+    WebSocketContext->>ChatWindow: Context updates, triggering re-render
+    ChatWindow->>User: Displays the agent's reply
 ```
-
-### Troubleshooting HMR
-
-If HMR isn't working as expected:
-
-1. Make sure you're not using any browser extensions that might interfere with WebSocket connections
-2. Check if your firewall is blocking WebSocket connections
-3. Try clearing your browser cache
-4. Ensure you're running the latest version of the development server
 
 ## Project Structure
 
 ```
 frontend/
+├── public/               # Static assets (e.g., favicons)
 ├── src/
+│   ├── assets/           # Asset files (if any)
 │   ├── components/
-│   │   └── Chat.tsx       # Main chat component
-│   ├── App.tsx           # Root component
-│   ├── main.tsx          # Application entry point
-│   └── index.css         # Global styles
-├── public/               # Static assets
-└── package.json          # Project dependencies and scripts
+│   │   ├── AgentPanel/   # Agent status display component
+│   │   ├── ChatUI/       # Main UI orchestrator component
+│   │   └── ChatWindow/   # Chat message display and input component
+│   ├── context/
+│   │   └── WebSocketContext.tsx # WebSocket state context
+│   ├── hooks/
+│   │   └── useWebSocket.ts    # WebSocket management hook
+│   ├── store/
+│   │   └── agentStore.ts      # Agent state management (Zustand)
+│   ├── types/
+│   │   └── message.ts         # TypeScript message types
+│   ├── App.tsx           # Root React component
+│   ├── config.ts         # Configuration loader
+│   ├── index.css         # Global styles
+│   └── main.tsx          # Application entry point
+├── .env.example          # Example environment variables
+├── .eslintrc.cjs         # ESLint configuration
+├── .gitignore            # Git ignore rules
+├── index.html            # Main HTML file
+├── package.json          # Project dependencies and scripts
+├── README.md             # This file
+├── tsconfig.json         # TypeScript configuration
+├── tsconfig.node.json    # TypeScript config for Node environment (e.g., Vite config)
+└── vite.config.ts        # Vite build tool configuration
 ```
 
 ---
