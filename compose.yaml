@@ -1,0 +1,70 @@
+# This compose.yaml file starts the core infrastructure:
+# - RabbitMQ for message queuing
+# - Server for WebSocket and gRPC services
+# - Broker for message routing 
+# - Frontend web application
+#
+# NOTE: Agents should be started separately outside of Docker Compose
+# to allow for dynamic configuration and API key management.
+# See README.md and GETTING_STARTED.md for instructions on running agents.
+#
+# Start with: docker compose up --build
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8765:8765"  # WebSocket
+      - "50051:50051" # gRPC
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - WEBSOCKET_HOST=0.0.0.0
+      - GRPC_HOST=0.0.0.0
+      - HOST=0.0.0.0
+      - PORT=8765
+      - GRPC_PORT=50051
+    volumes:
+      - ./shared_models:/app/shared_models
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  broker:
+    build:
+      context: .
+      dockerfile: broker/Dockerfile
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - GRPC_HOST=server
+      - GRPC_PORT=50051
+    volumes:
+      - ./shared_models:/app/shared_models
+    depends_on:
+      - server
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_WS_URL=ws://localhost:8765/ws
+      - VITE_API_URL=http://localhost:8765
+    depends_on:
+      - server 

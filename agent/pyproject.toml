@@ -1,30 +1,21 @@
-[project]
+[tool.poetry]
 name = "agent"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "joe.fox",email = "j.oefox@gmail.com"}
-]
+description = "Agent Service for Communication System"
+authors = ["joefox@gmail.com"]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "pika (>=1.3.2,<2.0.0)",
-    "mistralai (>=1.6.0,<2.0.0)",
-    "dotenv (>=0.9.9,<0.10.0)",
-    "shared-models @ file:///mnt/c/Users/joefo/community/shared_models",
-    "protobuf (>=5.26.1,<6.0.0)",
-    "grpcio (>=1.71.0,<2.0.0)",
-    "grpcio-tools (>=1.71.0,<2.0.0)",
-]
+packages = [{include = "src"}]
 
-[tool.poetry] 
-packages = [
-    {include = "src"}
-]
+[tool.poetry.dependencies]
+python = ">=3.13"
+pika = "^1.3.2"
+mistralai = "^1.6.0"
+python-dotenv = "^1.0.0"
+protobuf = "^5.26.1"
+grpcio = "^1.71.0"
+grpcio-tools = "^1.71.0"
+shared-models = {path = "../shared_models"}
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.dependencies]
-shared-models = {develop = true}

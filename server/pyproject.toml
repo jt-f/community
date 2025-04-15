@@ -1,31 +1,22 @@
-[project]
+[tool.poetry]
 name = "server"
 version = "0.1.0"
-description = ""
+description = "Agent Communication Server"
 authors = [
-    {name = "joe.fox",email = "j.oefox@gmail.com"}
+    "joefox@gmail.com"
 ]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "fastapi[standard] (>=0.115.12,<0.116.0)",
-    "websockets (>=15.0.1,<16.0.0)",
-    "uvicorn (>=0.34.0,<0.35.0)",
-    "pika (>=1.3.2,<2.0.0)",
-    "protobuf (>=5.26.1,<6.0.0)",
-    "grpcio (>=1.71.0,<2.0.0)",
-    "grpcio-tools (>=1.71.0,<2.0.0)",
-    "shared-models @ file:///mnt/c/Users/joefo/community/shared_models",
-]
-
-[tool.poetry] 
-packages = [
-    {include = "src"}
-]
+packages = [{include = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.13"
-shared-models = {develop = true}
+fastapi = "^0.115.12"
+websockets = "^15.0.1"
+uvicorn = "^0.34.0"
+pika = "^1.3.2"
+protobuf = "^5.26.1"
+grpcio = "^1.71.0"
+grpcio-tools = "^1.71.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -1,6 +1,59 @@
-# Agent Communication System
+# Community - Agent Communication System
 
-This project demonstrates a distributed system featuring a central server, message broker, agents, and a web frontend. Communication relies on WebSockets (Frontend <-> Server), gRPC (Server <-> Agent/Broker for registration/status/commands), and RabbitMQ (Server <-> Broker <-> Agent for message queuing).
+This project provides a communication infrastructure for agents to interact with each other and with humans.
+
+## Architecture
+
+The system consists of:
+
+- **RabbitMQ** message broker for agent-to-agent and agent-to-system communication
+- **Server** providing WebSocket and gRPC services
+- **Broker** for message routing between different parts of the system
+- **Agents** that can be connected to various LLMs and tools
+- **Frontend** web application for human interaction
+
+Docker and Docker Compose V2 are used for the core infrastructure. For installation instructions, see [GETTING_STARTED.md](GETTING_STARTED.md).
+
+## Requirements
+
+- Python 3.13.2+ (for running agents)
+- Docker and Docker Compose V2 (for infrastructure)
+
+## Running the System
+
+Start the core infrastructure:
+
+```bash
+docker compose up --build
+```
+
+Run an agent:
+
+```bash
+cd agent
+poetry install
+poetry run python src/agent.py --name "MyAgent"
+```
+
+To stop all services:
+
+```bash
+docker compose down
+```
+
+## Documentation
+
+- [Getting Started Guide](GETTING_STARTED.md) - Instructions for setting up the system
+- [API Documentation](docs/api.md) - API reference
+- [Agent Development](docs/agents.md) - Guide to developing new agents
+
+## Contributing
+
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to this project.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Components
 
@@ -97,49 +150,75 @@ sequenceDiagram
 
 ## Prerequisites
 
--   Docker (for RabbitMQ)
--   Python 3.13+ & Poetry
--   Node.js & npm/yarn
--   Environment variables set as required by each component (e.g., `MISTRAL_API_KEY` for the agent).
+-   Docker & Docker Compose V2 for core infrastructure
+    -   For installation instructions, see [GETTING_STARTED.md](./GETTING_STARTED.md#installing-docker-and-docker-compose)
+-   Python 3.13.2+ & Poetry for running agents
+-   Environment variables set as required for agents (e.g., `MISTRAL_API_KEY`)
 
 ## Running the System
 
+### Option 1: Docker Compose V2 (Recommended)
+
+The system includes Docker Compose configuration in compose.yaml for easy setup of the core infrastructure (RabbitMQ, Server, Broker, and Frontend).
+
+1. **Start core infrastructure:**
+```bash
+# Build and start all core services
+docker compose up --build
+
+# Access the frontend at: http://localhost:5173
+# Access RabbitMQ Management UI at: http://localhost:15673 (guest/guest)
+```
+
+2. **Start Agents separately:**
+
+Agents are run separately to allow for dynamic addition and custom configuration:
+
+```bash
+cd agent
+source ~/.bashrc
+poetry run python src/agent.py --name "AgentName1"
+
+# Optional: Start additional agents in separate terminals
+cd agent
+source ~/.bashrc
+poetry run python src/agent.py --name "AgentName2"
+```
+
+### Option 2: Manual Startup (For Development)
+
 Run each component in a separate terminal.
 
-### 1. RabbitMQ (using Docker)
+1. **RabbitMQ (using Docker):**
 ```bash
 docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
 # Management UI: http://localhost:15672/ (guest/guest)
 ```
 
-### 2. WebSocket Server
+2. **WebSocket Server:**
 ```bash
 cd server
 source ~/.bashrc
 poetry run python src/main.py
 ```
 
-### 3. Frontend
+3. **Frontend:**
 ```bash
 cd frontend
 npm run dev
 # Access via http://localhost:5173 (or as indicated by Vite)
 ```
 
-### 4. Message Routing Broker
+4. **Message Routing Broker:**
 ```bash
 cd broker
 source ~/.bashrc
 poetry run python src/broker.py
 ```
 
-### 5. Agent(s)
+5. **Agent(s):**
 ```bash
 cd agent
 source ~/.bashrc
 poetry run python src/agent.py --name "AgentName1"
-
-# In another terminal (optional, for multiple agents):
-cd agent
-source ~/.bashrc
-poetry run python src/agent.py --name "AgentName2"
+```
