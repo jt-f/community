@@ -50,12 +50,15 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           <h3>Agents</h3>
           <div className="header-controls">
             <div className="connection-status">
-              <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
-              <span className="status-text">{isConnected ? 'Connected' : 'Disconnected'}</span>
+              <div
+                className={`status-indicator ${isConnected ? 'online' : 'offline'}`}
+                title={isConnected ? 'Receiving agent status updates' : 'Not receiving agent status updates'}
+              ></div>
+              <span className="status-text connectivity-status-text">{isConnected ? 'Receiving agent status updates' : 'Not connected'}</span>
             </div>
             <button className="refresh-button" onClick={handleRefresh} title="Refresh agents">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" />
               </svg>
             </button>
           </div>
@@ -276,9 +279,11 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           background-color: #f44336;
         }
         
-        .status-text {
-          font-weight: 500;
+        .status-text, .connectivity-status-text {
+          font-size: 0.75em;
+          font-weight: 600;
           color: var(--color-text-secondary);
+          letter-spacing: 0.5px;
         }
         
         .last-seen {

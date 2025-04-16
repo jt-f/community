@@ -202,3 +202,11 @@ select:focus {
 .bg-raised {
   background-color: var(--color-surface-raised);
 }
+
+.status-text,
+.connectivity-status-text {
+  font-size: 0.75em;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}

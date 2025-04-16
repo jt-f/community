@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AgentStatus, AgentStatusUpdateMessage, MessageType } from '../types/message';
 
 interface AgentStatusProps {
@@ -13,7 +13,7 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
     const handleMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         // Only process agent status update messages
         if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
           const statusUpdate = data as AgentStatusUpdateMessage;
@@ -43,7 +43,7 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
         <h3>Agent Status</h3>
         <span className="agent-count">{agents.length} agents</span>
       </div>
-      
+
       <div className="agents-list">
         {agents.length === 0 ? (
           <div className="no-agents">No agents connected</div>
@@ -56,14 +56,14 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
               </div>
               <div className="agent-status">
                 <div className={`status-indicator ${agent.is_online ? 'online' : 'offline'}`}></div>
-                <span className="status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
+                <span className="status-text connectivity-status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
                 <span className="last-seen">Last seen: {agent.last_seen}</span>
               </div>
             </div>
           ))
         )}
       </div>
-      
+
       <style>
         {`
          .agent-status-panel {
@@ -175,4 +175,4 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
       </style>
     </div>
   );
-} 
+}
