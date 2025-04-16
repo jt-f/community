@@ -34,6 +34,7 @@ class Agent:
         self.agent_id = agent_id
         self.agent_name = agent_name
         self.rabbitmq_host = rabbitmq_host
+        self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
         self.rabbitmq_connection = None
         self.rabbitmq_channel = None
         self.queue_name = f"agent_queue_{self.agent_id}"
@@ -61,9 +62,9 @@ class Agent:
                 logger.info("RabbitMQ connection already established")
                 return True
                 
-            logger.info(f"Connecting to RabbitMQ at {self.rabbitmq_host} for message processing...")
+            logger.info(f"Connecting to RabbitMQ at {self.rabbitmq_host}:{self.rabbitmq_port} for message processing...")
             self.rabbitmq_connection = pika.BlockingConnection(
-                pika.ConnectionParameters(host=self.rabbitmq_host)
+                pika.ConnectionParameters(host=self.rabbitmq_host, port=self.rabbitmq_port)
             )
             self.rabbitmq_channel = self.rabbitmq_connection.channel()
             logger.info("Connected to RabbitMQ")
@@ -329,7 +330,8 @@ def parse_arguments():
     
     parser.add_argument("--id", type=str, help="Unique identifier for this agent")
     parser.add_argument("--name", type=str, required=True, help="Human-readable name for this agent")
-    parser.add_argument("--rabbitmq-host", type=str, default="localhost", help="RabbitMQ server host for message processing")
+    parser.add_argument("--rabbitmq-host", type=str, default=os.getenv("RABBITMQ_HOST", "localhost"), 
+                       help="RabbitMQ server host for message processing")
     
     return parser.parse_args()
 

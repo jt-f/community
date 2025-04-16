@@ -23,7 +23,7 @@ logger.info("Pika library logging level set to WARNING.")
 
 # Connection details
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
-RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
+RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5673))
 BROKER_INPUT_QUEUE = "broker_input_queue"         
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
 SERVER_INPUT_QUEUE = "server_input_queue"
@@ -39,7 +39,7 @@ shutdown_event = asyncio.Event()
 def setup_rabbitmq_channel(queue_name, callback_function):
     """Set up a RabbitMQ channel and consumer."""
     try:
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT))
         channel = connection.channel()
         
         # Declare the queue, ensuring it exists
@@ -63,7 +63,7 @@ def publish_to_server_input_queue(message_data: dict) -> bool:
     try:
         # Re-establish connection for each publish for simplicity
         # In high-throughput scenarios, consider a persistent connection/channel
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT))
         channel = connection.channel()
 
         # Ensure the queue exists (server should primarily declare it)
