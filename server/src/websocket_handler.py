@@ -40,7 +40,7 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
 
     # Send an immediate agent status update to the newly connected frontend
-    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None))
 
     return {
         "message_type": MessageType.REGISTER_FRONTEND_RESPONSE,
@@ -100,12 +100,11 @@ async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_
     logger.warning(f"{error_text} from {client_id}. Data: {message_data}")
     error_resp = ChatMessage.create(
         sender_id="server",
-        receiver_id=message_data.get("sender_id", client_id),
         text_payload=error_text,
         message_type=MessageType.ERROR
     )
     try: 
-        await websocket.send_text(error_resp.model_dump_json()) 
+        await websocket.send_text(json.dumps(error_resp.model_dump())) 
     except Exception as e:
         logger.error(f"Failed to send unknown message type error back to client {client_id}: {e}")
 
@@ -117,21 +116,16 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
         return
 
     logger.info(f"Frontend {client_id} requested agent status update")
-    status_update = {
-        "message_type": MessageType.AGENT_STATUS_UPDATE,
-        "agents": [
-            {
-                "agent_id": agent_id,
-                "agent_name": status.agent_name,
-                "is_online": status.is_online,
-                "last_seen": status.last_seen
-            }
-            for agent_id, status in state.agent_statuses.items()
-        ],
-        "is_full_update": True
-    }
-    await websocket.send_text(json.dumps(status_update))
-    logger.info(f"Sent agent status update to frontend {client_id}")
+    
+    # Use the agent_manager's broadcast_agent_status function to send the update
+    # to just the requesting frontend using the target_websocket parameter
+    await agent_manager.broadcast_agent_status(
+        force_full_update=True, 
+        is_full_update=True,
+        target_websocket=websocket
+    )
+    
+    logger.info(f"Agent status update sent to requesting frontend {client_id}")
 
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""

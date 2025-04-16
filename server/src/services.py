@@ -278,7 +278,7 @@ async def periodic_status_broadcast():
         try:
             logger.info(f"Scheduled broadcast of full agent status...")
             # Broadcast full agent status (includes online/offline)
-            await agent_manager.broadcast_agent_status(force_full_update=True)
+            await agent_manager.broadcast_agent_status(force_full_update=True, target_websocket=None)
             
             # Wait for the next interval, checking for cancellation
             await asyncio.sleep(config.PERIODIC_STATUS_INTERVAL)

@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
     rabbitmq_utils.publish_server_advertisement()
     # Force a broadcast of agent statuses (empty at startup) to synchronize with brokers
     logger.info("Broadcasting initial agent status to any connecting brokers...")
-    await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True)
+    await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None)
     # Setup signal handlers for graceful shutdown
     utils.setup_signal_handlers()
     logger.info("Server startup complete (lifespan).")

@@ -1,10 +1,12 @@
 import { useState, useEffect, useContext } from 'react';
-import { MessageType } from '../types/message';
 import { useAgentStore } from '../store/agentStore';
 import { WebSocketContext } from './ChatUI';
+import React from 'react';
+import { MessageType } from '../types/messages';
 
+// Define the AgentPanelProps interface
 interface AgentPanelProps {
-  wsRef: React.MutableRefObject<WebSocket | null>;
+  wsRef: React.RefObject<WebSocket>;
   isConnected: boolean;
 }
 
@@ -35,13 +37,28 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
 
   const filteredAgents = getFilteredAgents();
 
+  const handleRefresh = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.REQUEST_AGENT_STATUS }));
+    }
+  };
+
   return (
     <div className="agent-panel">
       <div className="panel-header">
-        <h3>Agents</h3>
-        <div className="connection-status">
-          <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
-          <span className="status-text">{isConnected ? 'Connected' : 'Disconnected'}</span>
+        <div className="header-top">
+          <h3>Agents</h3>
+          <div className="header-controls">
+            <div className="connection-status">
+              <div className={`status-indicator ${isConnected ? 'online' : 'offline'}`}></div>
+              <span className="status-text">{isConnected ? 'Connected' : 'Disconnected'}</span>
+            </div>
+            <button className="refresh-button" onClick={handleRefresh} title="Refresh agents">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="agent-filters">
           <button
@@ -120,6 +137,46 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           background-color: var(--color-surface-raised);
           border-bottom: 1px solid var(--color-border);
           min-height: 92px;
+        }
+        
+        .header-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .header-controls {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .refresh-button {
+          width: 32px;
+          height: 32px;
+          padding: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 4px;
+          border: 1px solid var(--color-border);
+          background: var(--color-surface);
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .refresh-button:hover {
+          background: var(--color-surface-raised);
+          border-color: var(--color-border-strong);
+        }
+
+        .refresh-button svg {
+          color: #4caf50;
+          transition: transform 0.3s ease;
+        }
+
+        .refresh-button:hover svg {
+          transform: rotate(180deg);
         }
         
         .agent-filters {
