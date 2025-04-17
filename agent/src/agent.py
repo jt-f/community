@@ -19,15 +19,16 @@ from shared_models import (
 import config as agent_config
 import grpc_client
 
+# Import new modules
+from agent_init import register_with_server, connect_rabbitmq, setup_rabbitmq_queue, start_rabbitmq_consumer
+from messaging import publish_to_broker_input_queue, process_rabbitmq_message
+
 # Configure logging
 logger = setup_logging(__name__)
 
 # Reduce verbosity from pika library
 logging.getLogger("pika").setLevel(logging.WARNING)
 logger.info("Pika library logging level set to WARNING.")
-
-# Define the server input queue name (should match server config)
-# SERVER_INPUT_QUEUE = "server_input_queue" # Not directly used by agent, defined in publish func
 
 class Agent:
     def __init__(self, agent_id: str, agent_name: str, rabbitmq_host: str):
@@ -43,9 +44,9 @@ class Agent:
         
         # Initialize Mistral Client
         self.mistral_client = None
+        self.mistral_model = agent_config.MISTRAL_MODEL
         logger.info(f"agent config key: {agent_config.MISTRAL_API_KEY}")
         logger.info(f"agent config model: {agent_config.MISTRAL_MODEL}")
-        # Initialize Mistral Client
         if agent_config.MISTRAL_API_KEY:
             try:
                 self.mistral_client = Mistral(api_key=agent_config.MISTRAL_API_KEY)
@@ -56,221 +57,51 @@ class Agent:
             logger.warning("Mistral API key not found, LLM features disabled.")
         
     def connect_rabbitmq(self) -> bool:
-        """Connect to RabbitMQ server for message processing."""
-        try:
-            if self.rabbitmq_connection and self.rabbitmq_connection.is_open:
-                logger.info("RabbitMQ connection already established")
-                return True
-                
-            logger.info(f"Connecting to RabbitMQ at {self.rabbitmq_host}:{self.rabbitmq_port} for message processing...")
-            self.rabbitmq_connection = pika.BlockingConnection(
-                pika.ConnectionParameters(host=self.rabbitmq_host, port=self.rabbitmq_port)
-            )
-            self.rabbitmq_channel = self.rabbitmq_connection.channel()
-            logger.info("Connected to RabbitMQ")
+        """Connect to RabbitMQ server for message processing using registration module."""
+        connection, channel = connect_rabbitmq(self.rabbitmq_host, self.rabbitmq_port, logger)
+        if connection and channel:
+            self.rabbitmq_connection = connection
+            self.rabbitmq_channel = channel
             return True
-        except Exception as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
-            return False
-            
+        return False
+
     async def register_with_server(self) -> bool:
         """Register the agent with the server via gRPC."""
-        try:
-            # Get server host and port from environment or use defaults
-            server_host = os.getenv("GRPC_HOST", "localhost")
-            server_port = int(os.getenv("GRPC_PORT", "50051"))
-            
-            # Send registration via gRPC
-            response = await grpc_client.register_agent(
-                server_host=server_host,
-                server_port=server_port,
-                name=self.agent_name,
-                custom_id=self.agent_id
-            )
-            
-            if response:
-                logger.info(f"Agent registered successfully with ID: {self.agent_id}")
-                self.is_registered = True
-                return True
-            else:
-                logger.error("Registration failed")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error during registration: {e}")
-            return False
+        # Get server host and port from environment or use defaults
+        server_host = os.getenv("GRPC_HOST", "localhost")
+        server_port = int(os.getenv("GRPC_PORT", "50051"))
+        
+        # Send registration via gRPC with server host and port first
+        result = await grpc_client.register_agent(
+            server_host=server_host,
+            server_port=server_port,
+            name=self.agent_name,
+            custom_id=self.agent_id
+        )
+        self.is_registered = result
+        return result
     
     def setup_rabbitmq_queue(self) -> bool:
-        """Set up the RabbitMQ queue for receiving messages."""
-        if not self.rabbitmq_connection or not self.rabbitmq_connection.is_open:
-            logger.error("Cannot setup queue: RabbitMQ connection not established")
+        """Set up the RabbitMQ queue for receiving messages using registration module."""
+        if not self.rabbitmq_channel:
+            logger.error("Cannot setup queue: RabbitMQ channel not established")
             return False
-            
-        try:
-            # Declare a queue for this agent
-            self.rabbitmq_channel.queue_declare(queue=self.queue_name, durable=True)
-            
-            # Set up a consumer with callback
-            self.rabbitmq_channel.basic_consume(
-                queue=self.queue_name,
-                on_message_callback=self.process_rabbitmq_message,
-                auto_ack=False  # We'll acknowledge manually after processing
-            )
-            
-            logger.info(f"RabbitMQ queue {self.queue_name} set up successfully for message processing")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to set up RabbitMQ queue: {e}")
-            return False
+        return setup_rabbitmq_queue(self.rabbitmq_channel, self.queue_name, self.process_rabbitmq_message, logger)
     
     def publish_to_broker_input_queue(self, message_data: dict) -> bool:
-        """Publish a response message to the broker input queue."""
-        if not self.rabbitmq_channel:
-            logger.error("Cannot publish: RabbitMQ connection not established")
-            return False
-
-        try:
-            # Add a routing status to indicate this message is pending broker routing
-            message_data["routing_status"] = "pending"
-            
-            # Ensure the queue exists (optional, server should declare it)
-            self.rabbitmq_channel.queue_declare(queue="broker_input_queue", durable=True)
-
-            # Publish the message
-            self.rabbitmq_channel.basic_publish(
-                exchange='',
-                routing_key="broker_input_queue",
-                body=json.dumps(message_data),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # make message persistent
-                )
-            )
-
-            logger.info(f"Published response message {message_data.get('message_id', 'N/A')} to broker_input_queue")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to publish to broker_input_queue: {e}")
-            return False
+        return publish_to_broker_input_queue(self.rabbitmq_channel, message_data)
     
     def process_rabbitmq_message(self, ch, method, properties, body):
-        """Process a message received from RabbitMQ queue."""
-        try:
-            # Parse the message
-            message_dict = json.loads(body)
-            logger.info(f"Received message: {message_dict}")
-            # Log the received message
-            message_type = message_dict.get("message_type", "unknown")
-            message_id = message_dict.get("message_id", "unknown")
-            sender_id = message_dict.get("sender_id", "unknown")
-            logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
-            logger.info(f"Message: {message_dict}")
-            
-            # Introduce a delay
-            delay = 5
-            logger.info(f"Waiting {delay} seconds before processing...")
-            time.sleep(delay)
-            logger.info("Finished waiting, proceeding with processing.")
-            
-            # Process the message and generate response
-            response = self.generate_response(message_dict)
-            logger.info(f"Generated response: {response.get('text_payload','ERROR: NO TEXT PAYLOAD')}")
-            # Send response back through broker_input_queue
-            if self.publish_to_broker_input_queue(response):
-                logger.info(f"Sent response {response.get('message_id','ERROR: NO MESSAGE ID')} to message {message_id} to broker_input_queue")
-            else:
-                logger.error(f"Failed to send response to message {message_id}")
-            
-            # Acknowledge the message
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            
-        except json.JSONDecodeError:
-            logger.error("Received invalid JSON in queue message")
-            # Reject the message
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-        except Exception as e:
-            logger.error(f"Error processing queue message: {e}")
-            # Requeue the message for later processing
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        return process_rabbitmq_message(self, ch, method, properties, body)
+    
+    def start_rabbitmq_consumer(self) -> None:
+        return start_rabbitmq_consumer(self)
     
     def generate_response(self, message: dict) -> dict:
         """Generate a response for a received message using Mistral LLM."""
-        sender_id = message.get("sender_id", "unknown")
-        text_payload = message.get("text_payload", "")
-        message_id = message.get("message_id", None)
-        llm_response_text = "Sorry, I cannot generate a response right now." # Default response
-        
-        message_type = MessageType.REPLY
-        if self.mistral_client and text_payload:
-            logger.info(f"Sending text to Mistral model {agent_config.MISTRAL_MODEL}...")
-            try:
-                chat_response = self.mistral_client.chat.complete(
-                    model = agent_config.MISTRAL_MODEL,
-                    messages = [
-                        {
-                            "role": "user",
-                            "content": text_payload,
-                        },
-                    ]
-                )
+        from processing import generate_response
+        return generate_response(self, message)
 
-                logger.info(f'Mistral response: {chat_response.choices[0].message.content}')
-                llm_response_text = chat_response.choices[0].message.content
-            except Exception as e:
-                logger.error(f"Error generating with Mistral: {str(e)}")
-                return {"error": str(e)}
-            
-        elif not self.mistral_client:
-            message_type = MessageType.ERROR
-            logger.warning("Mistral client not available. Cannot generate LLM response.")
-            llm_response_text = "LLM client is not configured." # Config specific response
-
-        # Create a response dictionary
-        response = {
-            "message_type": message_type,
-            "sender_id": self.agent_id,
-            "receiver_id": sender_id,
-            "text_payload": llm_response_text,
-            "timestamp": datetime.now().isoformat(),
-            "message_id": f"msg_{uuid.uuid4().hex}" # Add a unique ID for this reply message
-        }
-
-        logger.info(f"Generated response: {response['text_payload']}")
-
-        # Add reference to original message if available
-        if message_id:
-            response["in_reply_to_message_id"] = message_id # Use the correct key
-            
-        return response
-
-    def start_rabbitmq_consumer(self) -> None:
-        """Start consuming messages from the RabbitMQ queue."""
-        if not self.rabbitmq_connection or not self.rabbitmq_connection.is_open:
-            logger.error("Cannot start consumer: RabbitMQ connection not established")
-            return
-            
-        try:
-            logger.info(f"Starting to consume messages from queue {self.queue_name}")
-            while self.running:
-                try:
-                    self.rabbitmq_connection.process_data_events(time_limit=1)
-                except pika.exceptions.ConnectionClosedByBroker:
-                    logger.warning("RabbitMQ connection closed by broker. Attempting to reconnect...")
-                    if not self.connect_rabbitmq() or not self.setup_rabbitmq_queue():
-                        logger.error("Failed to reconnect to RabbitMQ. Exiting consumer thread.")
-                        break
-                except pika.exceptions.AMQPConnectionError:
-                    logger.warning("RabbitMQ connection error. Attempting to reconnect...")
-                    if not self.connect_rabbitmq() or not self.setup_rabbitmq_queue():
-                        logger.error("Failed to reconnect to RabbitMQ. Exiting consumer thread.")
-                        break
-                except Exception as e:
-                    logger.error(f"Error in RabbitMQ consumer: {e}")
-                    time.sleep(1)  # Wait before retrying
-        except Exception as e:
-            logger.error(f"Error in RabbitMQ consumer: {e}")
-        finally:
-            self.cleanup()
-    
     async def run(self) -> None: # Keep async for gRPC registration
         """Run the agent's main loop (gRPC for registration, RabbitMQ for messages)."""
         self.running = True

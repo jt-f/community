@@ -1,7 +1,7 @@
 """
 gRPC client implementation for the agent to register with the server
 """
-import grpc
+
 import asyncio
 import time
 import inspect
@@ -10,6 +10,7 @@ import platform
 import os
 import sys
 from typing import Callable, Dict, Optional
+import grpc
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -23,7 +23,7 @@ logger.info("Pika library logging level set to WARNING.")
 
 # Connection details
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'localhost')
-RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5673))
+RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
 BROKER_INPUT_QUEUE = "broker_input_queue"         
 AGENT_METADATA_QUEUE = "agent_metadata_queue"
 SERVER_INPUT_QUEUE = "server_input_queue"
