@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 import uuid
 from shared_models import MessageType
-from publishing import publish_to_broker_input_queue
+from  messaging import publish_to_broker_input_queue
 
 logger = logging.getLogger(__name__)
 

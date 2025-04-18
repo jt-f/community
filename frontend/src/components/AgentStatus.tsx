@@ -1,41 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { AgentStatus, AgentStatusUpdateMessage, MessageType } from '../types/message';
+import React from 'react';
+import { AgentList } from './AgentList';
+import { useAgentStore } from '../store/agentStore';
 
-interface AgentStatusProps {
+interface AgentStatusPanelProps {
   wsRef: React.MutableRefObject<WebSocket | null>;
 }
 
-export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
-  const [agents, setAgents] = useState<AgentStatus[]>([]);
-
-  useEffect(() => {
-    // Handle agent status updates
-    const handleMessage = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        // Only process agent status update messages
-        if (data.message_type === MessageType.AGENT_STATUS_UPDATE) {
-          const statusUpdate = data as AgentStatusUpdateMessage;
-          setAgents(statusUpdate.agents);
-        }
-      } catch (error) {
-        console.error('Error processing agent status update:', error);
-      }
-    };
-
-    // Add the message handler if the websocket is available
-    if (wsRef.current) {
-      wsRef.current.addEventListener('message', handleMessage);
-    }
-
-    // Clean up the event listener when the component unmounts
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.removeEventListener('message', handleMessage);
-      }
-    };
-  }, [wsRef]);
+export function AgentStatusPanel({ wsRef }: AgentStatusPanelProps) {
+  // Use Zustand for agent state
+  const { agents } = useAgentStore();
 
   return (
     <div className="agent-status-panel">
@@ -43,27 +16,7 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
         <h3>Agent Status</h3>
         <span className="agent-count">{agents.length} agents</span>
       </div>
-
-      <div className="agents-list">
-        {agents.length === 0 ? (
-          <div className="no-agents">No agents connected</div>
-        ) : (
-          agents.map(agent => (
-            <div key={agent.agent_id} className="agent-item">
-              <div className="agent-info">
-                <span className="agent-name">{agent.agent_name}</span>
-                <span className="agent-id">ID: {agent.agent_id.substring(0, 8)}</span>
-              </div>
-              <div className="agent-status">
-                <div className={`status-indicator ${agent.is_online ? 'online' : 'offline'}`}></div>
-                <span className="status-text connectivity-status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
-                <span className="last-seen">Last seen: {agent.last_seen}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
+      <AgentList agents={agents} showId emptyText="No agents connected" />
       <style>
         {`
          .agent-status-panel {
@@ -98,78 +51,6 @@ export function AgentStatusPanel({ wsRef }: AgentStatusProps) {
            background-color: var(--color-surface-sunken);
            padding: 2px 8px;
            border-radius: 12px;
-         }
-         
-         .agents-list {
-           padding: 8px;
-           overflow-y: auto;
-           flex-grow: 1;
-         }
-         
-         .no-agents {
-           text-align: center;
-           color: var(--color-text-muted);
-           padding: 20px 0;
-           font-style: italic;
-         }
-         
-         .agent-item {
-           padding: 10px;
-           border-bottom: 1px solid var(--color-border);
-           display: flex;
-           flex-direction: column;
-           gap: 6px;
-         }
-         
-         .agent-item:last-child {
-           border-bottom: none;
-         }
-         
-         .agent-info {
-           display: flex;
-           justify-content: space-between;
-           align-items: center;
-         }
-         
-         .agent-name {
-           font-weight: 500;
-           font-size: 14px;
-         }
-         
-         .agent-id {
-           font-size: 12px;
-           color: var(--color-text-muted);
-         }
-         
-         .agent-status {
-           display: flex;
-           align-items: center;
-           font-size: 12px;
-           gap: 6px;
-         }
-         
-         .status-indicator {
-           width: 8px;
-           height: 8px;
-           border-radius: 50%;
-         }
-         
-         .status-indicator.online {
-           background-color: #4caf50;
-           box-shadow: 0 0 4px #4caf50;
-         }
-         
-         .status-indicator.offline {
-           background-color: #f44336;
-         }
-         
-         .status-text {
-           font-weight: 500;
-         }
-         
-         .last-seen {
-           margin-left: auto;
-           color: var(--color-text-muted);
          }
         `}
       </style>

@@ -3,6 +3,7 @@ import { useAgentStore } from '../store/agentStore';
 import { WebSocketContext } from './ChatUI';
 import React from 'react';
 import { MessageType } from '../types/messages';
+import { AgentList } from './AgentList';
 
 // Define the AgentPanelProps interface
 interface AgentPanelProps {
@@ -84,39 +85,7 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           </button>
         </div>
       </div>
-
-      <div className="agents-list">
-        {!isConnected ? (
-          <div className="no-agents">Connecting to server...</div>
-        ) : filteredAgents.length === 0 ? (
-          <div className="no-agents">
-            {selectedFilter === 'all'
-              ? 'No agents registered'
-              : selectedFilter === 'online'
-                ? 'No agents online'
-                : 'No agents offline'
-            }
-          </div>
-        ) : (
-          filteredAgents.map(agent => (
-            <div key={agent.agent_id} className="agent-item">
-              <div className="agent-info">
-                <div className="agent-name-container">
-                  <div className={`status-indicator ${agent.is_online ? 'online' : 'offline'}`}></div>
-                  <span className="agent-name" title={agent.agent_id}>{agent.agent_name}</span>
-                </div>
-                {/* Optionally hide or keep the explicit ID display */}
-                {/* <span className="agent-id">ID: {agent.agent_id.substring(0, 8)}</span> */}
-              </div>
-              <div className="agent-meta">
-                <span className="last-seen">Last seen: {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : 'Never'}</span>
-                <span className="status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
+      <AgentList agents={filteredAgents} />
       <style>
         {`
         .agent-panel {
