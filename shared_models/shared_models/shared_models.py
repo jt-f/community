@@ -18,6 +18,15 @@ class MessageType(str, Enum):
     REPLY = "REPLY"
     SYSTEM = "SYSTEM"
     TEXT = "TEXT"
+    PAUSE_AGENT = "PAUSE_AGENT"
+    UNPAUSE_AGENT = "UNPAUSE_AGENT"
+    DEREGISTER_AGENT = "DEREGISTER_AGENT"
+    REREGISTER_AGENT = "REREGISTER_AGENT"
+    PAUSE_ALL_AGENTS = "PAUSE_ALL_AGENTS"
+    UNPAUSE_ALL_AGENTS = "UNPAUSE_ALL_AGENTS"
+    DEREGISTER_ALL_AGENTS = "DEREGISTER_ALL_AGENTS"
+    REREGISTER_ALL_AGENTS = "REREGISTER_ALL_AGENTS"
+    RESET_ALL_QUEUES = "RESET_ALL_QUEUES"
 
 class ResponseStatus(str, Enum):
     """Enumeration of possible response statuses."""
@@ -80,6 +89,7 @@ class AgentStatus(BaseModel):
     agent_name: str
     is_online: bool = True
     last_seen: str = datetime.now().strftime("%H:%M:%S")
+    status: str = "online"  # New field: online, paused, offline, etc.
 
 class AgentStatusUpdate(BaseModel):
     """Message containing the current status of all registered agents."""
@@ -123,4 +133,4 @@ def setup_logging(
     # Add handler to logger
     logger.addHandler(stream)
     
-    return logger 
+    return logger

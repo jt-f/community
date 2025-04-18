@@ -170,9 +170,6 @@ async def _process_server_input_message(message_data: dict):
                 logger.warning(f"Known agents: {list(state.agent_statuses.keys())}")
 
         # --- Case 4: Unrecognized message or routing status ---
-        elif message_type in [MessageType.PAUSE_AGENT, MessageType.UNPAUSE_AGENT, MessageType.DEREGISTER_AGENT, MessageType.REREGISTER_AGENT, MessageType.PAUSE_ALL_AGENTS, MessageType.UNPAUSE_ALL_AGENTS, MessageType.DEREGISTER_ALL_AGENTS, MessageType.REREGISTER_ALL_AGENTS, MessageType.RESET_ALL_QUEUES]:
-            await _handle_control_message(message_data)
-            return
         else:
             logger.warning(f"Unrecognized message: sender={sender_id}, routing_status={routing_status}, receiver={receiver_id}")
             # Try to handle as a legacy message for backward compatibility
@@ -449,7 +446,25 @@ async def _handle_control_message(message_data: dict):
     message_type = message_data.get("message_type")
     agent_id = message_data.get("agent_id")
     logger.info(f"[CONTROL] Received control message: {message_type} agent_id={agent_id}")
-    # In the future, implement the actual logic for each control type here
+
+    # Handle PAUSE_ALL_AGENTS
+    if message_type == MessageType.PAUSE_ALL_AGENTS:
+        from agent_registration_service import send_command_to_agent
+        # Iterate over all online agents and send a pause command
+        tasks = []
+        for agent_id, status in state.agent_statuses.items():
+            if status.is_online:
+                # Set agent status to paused
+                status.status = "paused"
+                # Send a 'pause' command (type can be 'pause', content can be empty or a message)
+                tasks.append(send_command_to_agent(agent_id, "pause", ""))
+        if tasks:
+            await asyncio.gather(*tasks)
+            logger.info(f"Sent PAUSE command to {len(tasks)} agents.")
+            # Broadcast updated status
+            await agent_manager.broadcast_agent_status(force_full_update=True)
+        else:
+            logger.info("No online agents to pause.")
 
 # --- Service Management --- 
 

@@ -328,6 +328,10 @@ async def process_command(command: Dict, server_host: str, server_port: int):
     command_id = command["command_id"]
     
     try:
+        # Log if this is a pause command
+        if command.get("type") == "pause":
+            logger.info(f"Received PAUSE command (id={command.get('command_id')}) from server. Agent will pause when implemented.")
+        
         # Start timing
         start_time = time.time()
         
@@ -381,6 +385,7 @@ async def run_sync_command_callback(command: Dict, server_host: str, server_port
     
     try:
         # Parse the result
+        logger.info(f"Received command result: {result}")
         success = result.get("success", False)
         output = result.get("output", "")
         error_message = result.get("error_message", "")
@@ -499,4 +504,4 @@ def get_cpu_usage() -> float:
         import psutil
         return psutil.cpu_percent(interval=0.1)
     except ImportError:
-        return 0.0 
+        return 0.0

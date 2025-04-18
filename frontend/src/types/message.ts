@@ -35,6 +35,7 @@ export interface AgentStatus {
   agent_name: string;
   is_online: boolean;
   last_seen: string;
+  status?: string; // Add status field (online, paused, offline)
 }
 
 export interface AgentStatusUpdateMessage {

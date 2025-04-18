@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x61gent_status_service.proto\x12\x0c\x61gent_status\"\'\n\x12\x41gentStatusRequest\x12\x11\n\tbroker_id\x18\x01 \x01(\t\"V\n\x13\x41gentStatusResponse\x12\'\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x17.agent_status.AgentInfo\x12\x16\n\x0eis_full_update\x18\x02 \x01(\x08\"W\n\tAgentInfo\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x12\n\nagent_name\x18\x02 \x01(\t\x12\x11\n\tis_online\x18\x03 \x01(\x08\x12\x11\n\tlast_seen\x18\x04 \x01(\t2\xd0\x01\n\x12\x41gentStatusService\x12\x61\n\x16SubscribeToAgentStatus\x12 .agent_status.AgentStatusRequest\x1a!.agent_status.AgentStatusResponse\"\x00\x30\x01\x12W\n\x0eGetAgentStatus\x12 .agent_status.AgentStatusRequest\x1a!.agent_status.AgentStatusResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1a\x61gent_status_service.proto\x12\x0c\x61gent_status\"\'\n\x12\x41gentStatusRequest\x12\x11\n\tbroker_id\x18\x01 \x01(\t\"V\n\x13\x41gentStatusResponse\x12\'\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x17.agent_status.AgentInfo\x12\x16\n\x0eis_full_update\x18\x02 \x01(\x08\"g\n\tAgentInfo\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\t\x12\x12\n\nagent_name\x18\x02 \x01(\t\x12\x11\n\tis_online\x18\x03 \x01(\x08\x12\x11\n\tlast_seen\x18\x04 \x01(\t\x12\x0e\n\x06status\x18\x05 \x01(\t2\xd0\x01\n\x12\x41gentStatusService\x12\x61\n\x16SubscribeToAgentStatus\x12 .agent_status.AgentStatusRequest\x1a!.agent_status.AgentStatusResponse\"\x00\x30\x01\x12W\n\x0eGetAgentStatus\x12 .agent_status.AgentStatusRequest\x1a!.agent_status.AgentStatusResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -36,7 +36,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_AGENTSTATUSRESPONSE']._serialized_start=85
   _globals['_AGENTSTATUSRESPONSE']._serialized_end=171
   _globals['_AGENTINFO']._serialized_start=173
-  _globals['_AGENTINFO']._serialized_end=260
-  _globals['_AGENTSTATUSSERVICE']._serialized_start=263
-  _globals['_AGENTSTATUSSERVICE']._serialized_end=471
+  _globals['_AGENTINFO']._serialized_end=276
+  _globals['_AGENTSTATUSSERVICE']._serialized_start=279
+  _globals['_AGENTSTATUSSERVICE']._serialized_end=487
 # @@protoc_insertion_point(module_scope)

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ChatUI } from './components/ChatUI'
 import './App.css'
+import React from 'react';
 
 function App() {
   // Generate and store the user ID in format 'Human-<3 random characters>'

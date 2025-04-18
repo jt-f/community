@@ -28,4 +28,5 @@ message AgentInfo {
   string agent_name = 2;
   bool is_online = 3;
   string last_seen = 4;  // ISO format timestamp
-} 
+  string status = 5;     // Agent status: online, paused, offline, etc.
+}

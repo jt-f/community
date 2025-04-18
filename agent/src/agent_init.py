@@ -116,9 +116,19 @@ def start_rabbitmq_consumer(agent):
         logger.info(f"Starting to consume messages from queue {agent.queue_name}")
         while agent.running:
             try:
+                # Skip processing data events if agent is paused
+                if agent.paused:
+                    # When paused, just check the connection is still alive but don't process messages
+                    import time
+                    time.sleep(1)
+                    continue
+                
+                # Only process events if we're not paused
                 agent.rabbitmq_connection.process_data_events(time_limit=1)
             except Exception as e:
-                logger.error(f"Error in RabbitMQ consumer: {e}")
+                # Log the error but only if we're not paused (to reduce log spam)
+                if not agent.paused:
+                    logger.error(f"Error in RabbitMQ consumer: {e}")
                 import time
                 time.sleep(1)
     except Exception as e:

@@ -46,7 +46,8 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
             "agent_id": agent_id,
             "agent_name": status.agent_name,
             "is_online": status.is_online,
-            "last_seen": status.last_seen
+            "last_seen": status.last_seen,
+            "status": status.status  # Include status field
         })
         if status.is_online:
             online_agent_count += 1
@@ -211,4 +212,4 @@ def mark_agent_offline(agent_id: str) -> bool:
             logger.debug(f"Agent {agent_id} already marked as offline.")
     else:
         logger.warning(f"Cannot mark unknown agent {agent_id} as offline.")
-    return False 
+    return False

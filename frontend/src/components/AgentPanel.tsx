@@ -1,17 +1,17 @@
-import { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import { WebSocketContext } from './ChatUI';
-import React from 'react';
-import { MessageType } from '../types/messages';
 import { AgentList } from './AgentList';
+import { AgentStatus, MessageType } from '../types/message';
 
 // Define the AgentPanelProps interface
 interface AgentPanelProps {
-  wsRef: React.RefObject<WebSocket>;
+  wsRef: React.MutableRefObject<WebSocket | null>;
+  clientId: string;
   isConnected: boolean;
 }
 
-export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
+export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConnected }) => {
   const { agents, updateAgents, getOnlineAgents, getOfflineAgents } = useAgentStore();
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'online' | 'offline'>('all');
   const { lastMessage, sendMessage } = useContext(WebSocketContext);
@@ -27,42 +27,73 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
     }
   }, [lastMessage, updateAgents]);
 
-  // --- Systemwide control handlers ---
-  const handlePauseAll = () => {
+  // --- System-wide control handlers ---
+  const handlePauseAllAgents = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.PAUSE_ALL_AGENTS }));
+      wsRef.current.send(JSON.stringify({
+        message_type: MessageType.PAUSE_ALL_AGENTS,
+        sender_id: clientId
+      }));
     }
   };
-  const handleUnpauseAll = () => {
+  
+  const handleResumeAllAgents = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.UNPAUSE_ALL_AGENTS }));
+      wsRef.current.send(JSON.stringify({
+        message_type: MessageType.UNPAUSE_ALL_AGENTS,
+        sender_id: clientId
+      }));
     }
   };
-  const handleDeregisterAll = () => {
+  
+  const handleDeregisterAllAgents = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.DEREGISTER_ALL_AGENTS }));
+      wsRef.current.send(JSON.stringify({
+        message_type: MessageType.DEREGISTER_ALL_AGENTS,
+        sender_id: clientId
+      }));
     }
   };
-  const handleReregisterAll = () => {
+  
+  const handleReregisterAllAgents = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.REREGISTER_ALL_AGENTS }));
+      wsRef.current.send(JSON.stringify({
+        message_type: MessageType.REREGISTER_ALL_AGENTS,
+        sender_id: clientId
+      }));
     }
   };
+  
   const handleResetAllQueues = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.RESET_ALL_QUEUES }));
+      wsRef.current.send(JSON.stringify({
+        message_type: MessageType.RESET_ALL_QUEUES,
+        sender_id: clientId
+      }));
     }
   };
 
   // --- Per-agent control handlers ---
-  const handlePauseToggle = (agent) => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({
-        message_type: agent.is_online ? MessageType.PAUSE_AGENT : MessageType.UNPAUSE_AGENT,
-        agent_id: agent.agent_id
-      }));
+  const handlePauseAgent = (agent: AgentStatus) => {
+    if (!wsRef.current) return;
+    
+    // If agent is paused, send resume command, otherwise send pause command
+    const commandType = agent.status === 'paused' ? MessageType.UNPAUSE_AGENT : MessageType.PAUSE_AGENT;
+    
+    const message = {
+      message_type: commandType,
+      agent_id: agent.agent_id,
+      sender_id: clientId
+    };
+    
+    try {
+      wsRef.current.send(JSON.stringify(message));
+      console.log(`Sent ${commandType} command for agent ${agent.agent_id}`);
+    } catch (error) {
+      console.error("Failed to send pause/resume command:", error);
     }
   };
+  
   const handleDeregisterToggle = (agent) => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
@@ -85,7 +116,10 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
 
   const handleRefresh = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.REQUEST_AGENT_STATUS }));
+      wsRef.current.send(JSON.stringify({ 
+        message_type: "REQUEST_AGENT_STATUS", 
+        sender_id: clientId 
+      }));
     }
   };
 
@@ -132,7 +166,7 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
       </div>
       <AgentList
         agents={filteredAgents}
-        onPauseToggle={handlePauseToggle}
+        onPauseToggle={handlePauseAgent}
         onDeregisterToggle={handleDeregisterToggle}
       />
       <style>

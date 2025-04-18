@@ -108,6 +108,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
             agent_info.agent_name = status.agent_name
             agent_info.is_online = status.is_online
             agent_info.last_seen = status.last_seen
+            agent_info.status = status.status  # Include status field
             response.agents.append(agent_info)
         
         return response
@@ -195,4 +196,4 @@ def add_services_to_server(server):
     """Add all gRPC services to the server"""
     add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
     broker_registration_service.add_to_server(server)
-    logger.info("All gRPC services added to server") 
+    logger.info("All gRPC services added to server")
