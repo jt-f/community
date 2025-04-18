@@ -20,9 +20,17 @@ export const WebSocketContext = createContext<WebSocketContextValue>({
 
 interface ChatUIProps {
   userId: string;
+  onSystemControl?: {
+    isConnected: boolean;
+    handlePauseAll: () => void;
+    handleUnpauseAll: () => void;
+    handleDeregisterAll: () => void;
+    handleReregisterAll: () => void;
+    handleResetAllQueues: () => void;
+  };
 }
 
-export function ChatUI({ userId }: ChatUIProps) {
+export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
@@ -43,6 +51,33 @@ export function ChatUI({ userId }: ChatUIProps) {
         scheduleReconnect();
       }
       return false;
+    }
+  };
+
+  // --- Systemwide control handlers ---
+  const handlePauseAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.PAUSE_ALL_AGENTS }));
+    }
+  };
+  const handleUnpauseAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.UNPAUSE_ALL_AGENTS }));
+    }
+  };
+  const handleDeregisterAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.DEREGISTER_ALL_AGENTS }));
+    }
+  };
+  const handleReregisterAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.REREGISTER_ALL_AGENTS }));
+    }
+  };
+  const handleResetAllQueues = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.RESET_ALL_QUEUES }));
     }
   };
 
@@ -221,6 +256,19 @@ export function ChatUI({ userId }: ChatUIProps) {
       setIsConnected(false); // Ensure state reflects closed connection
     };
   }, []);
+
+  // Provide system control handlers to parent if requested
+  useEffect(() => {
+    if (onSystemControl) {
+      onSystemControl.isConnected = isConnected;
+      onSystemControl.handlePauseAll = handlePauseAll;
+      onSystemControl.handleUnpauseAll = handleUnpauseAll;
+      onSystemControl.handleDeregisterAll = handleDeregisterAll;
+      onSystemControl.handleReregisterAll = handleReregisterAll;
+      onSystemControl.handleResetAllQueues = handleResetAllQueues;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
 
   // Return the UI with the WebSocketContext provider
   return (

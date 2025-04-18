@@ -8,6 +8,16 @@ function App() {
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [sessionValue] = useState(() => `CB-${Math.floor(Math.random() * 9000) + 1000}`);
 
+  // Systemwide control handlers from ChatUI
+  const systemControlRef = useRef({
+    isConnected: false,
+    handlePauseAll: () => { },
+    handleUnpauseAll: () => { },
+    handleDeregisterAll: () => { },
+    handleReregisterAll: () => { },
+    handleResetAllQueues: () => { },
+  });
+
   // Update time every second
   useEffect(() => {
     const timer = setInterval(() => {
@@ -33,6 +43,24 @@ function App() {
           </div>
         </div>
         <div className="header-right">
+          {/* Systemwide control icon buttons */}
+          <div className="systemwide-controls-header">
+            <button className="icon-btn" title="Pause All Agents" onClick={() => systemControlRef.current.handlePauseAll()} disabled={!systemControlRef.current.isConnected}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+            </button>
+            <button className="icon-btn" title="Unpause All Agents" onClick={() => systemControlRef.current.handleUnpauseAll()} disabled={!systemControlRef.current.isConnected}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            </button>
+            <button className="icon-btn" title="Deregister All Agents" onClick={() => systemControlRef.current.handleDeregisterAll()} disabled={!systemControlRef.current.isConnected}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
+            </button>
+            <button className="icon-btn" title="Reregister All Agents" onClick={() => systemControlRef.current.handleReregisterAll()} disabled={!systemControlRef.current.isConnected}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" /><path d="M20.49 9A9 9 0 0 0 5.51 15M3.51 9A9 9 0 0 1 18.49 15" /></svg>
+            </button>
+            <button className="icon-btn" title="Reset All Queues & Restart" onClick={() => systemControlRef.current.handleResetAllQueues()} disabled={!systemControlRef.current.isConnected}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" /><path d="M20.49 9A9 9 0 0 0 5.51 15M3.51 9A9 9 0 0 1 18.49 15" /><rect x="9" y="9" width="6" height="6" rx="1" /></svg>
+            </button>
+          </div>
           <div className="session-info">
             <div className="session-label">SESSION ID</div>
             <div className="session-value">{sessionValue}</div>
@@ -44,7 +72,7 @@ function App() {
         </div>
       </header>
       <main>
-        <ChatUI userId={userId.current} />
+        <ChatUI userId={userId.current} onSystemControl={systemControlRef.current} />
       </main>
       <style>{`
         .app {
@@ -137,6 +165,38 @@ function App() {
           font-family: monospace;
           font-size: 0.8rem;
           color: var(--color-text-secondary);
+        }
+        
+        .systemwide-controls-header {
+          display: flex;
+          gap: 6px;
+          margin-right: 18px;
+        }
+
+        .icon-btn {
+          background: none;
+          border: none;
+          padding: 2px;
+          margin: 0 1px;
+          cursor: pointer;
+          color: var(--color-text-secondary);
+          border-radius: 3px;
+          transition: background 0.15s;
+          height: 28px;
+          width: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .icon-btn:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+
+        .icon-btn:hover:not(:disabled) {
+          background: var(--color-surface-raised);
+          color: var(--color-primary);
         }
         
         .session-info, .user-info {

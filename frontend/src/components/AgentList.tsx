@@ -5,9 +5,11 @@ interface AgentListProps {
     agents: AgentStatus[];
     showId?: boolean;
     emptyText?: string;
+    onPauseToggle?: (agent: AgentStatus) => void;
+    onDeregisterToggle?: (agent: AgentStatus) => void;
 }
 
-export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, emptyText = 'No agents found' }) => (
+export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, emptyText = 'No agents found', onPauseToggle, onDeregisterToggle }) => (
     <div className="agents-list">
         {agents.length === 0 ? (
             <div className="no-agents">{emptyText}</div>
@@ -24,6 +26,18 @@ export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, em
                     <div className="agent-meta">
                         <span className="last-seen">Last seen: {agent.last_seen ? new Date(agent.last_seen).toLocaleString() : 'Never'}</span>
                         <span className="status-text">{agent.is_online ? 'Online' : 'Offline'}</span>
+                    </div>
+                    <div className="agent-actions">
+                        {onPauseToggle && (
+                            <button onClick={() => onPauseToggle(agent)} className="agent-action-btn">
+                                {agent.is_online ? 'Pause' : 'Unpause'}
+                            </button>
+                        )}
+                        {onDeregisterToggle && (
+                            <button onClick={() => onDeregisterToggle(agent)} className="agent-action-btn">
+                                {agent.is_online ? 'Deregister' : 'Reregister'}
+                            </button>
+                        )}
                     </div>
                 </div>
             ))

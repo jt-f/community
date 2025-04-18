@@ -14,7 +14,7 @@ interface AgentPanelProps {
 export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
   const { agents, updateAgents, getOnlineAgents, getOfflineAgents } = useAgentStore();
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const { lastMessage } = useContext(WebSocketContext);
+  const { lastMessage, sendMessage } = useContext(WebSocketContext);
 
   // Process messages from WebSocketContext
   useEffect(() => {
@@ -26,6 +26,51 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
       updateAgents(lastMessage.agents, lastMessage.is_full_update);
     }
   }, [lastMessage, updateAgents]);
+
+  // --- Systemwide control handlers ---
+  const handlePauseAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.PAUSE_ALL_AGENTS }));
+    }
+  };
+  const handleUnpauseAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.UNPAUSE_ALL_AGENTS }));
+    }
+  };
+  const handleDeregisterAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.DEREGISTER_ALL_AGENTS }));
+    }
+  };
+  const handleReregisterAll = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.REREGISTER_ALL_AGENTS }));
+    }
+  };
+  const handleResetAllQueues = () => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.RESET_ALL_QUEUES }));
+    }
+  };
+
+  // --- Per-agent control handlers ---
+  const handlePauseToggle = (agent) => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({
+        message_type: agent.is_online ? MessageType.PAUSE_AGENT : MessageType.UNPAUSE_AGENT,
+        agent_id: agent.agent_id
+      }));
+    }
+  };
+  const handleDeregisterToggle = (agent) => {
+    if (wsRef.current && isConnected) {
+      wsRef.current.send(JSON.stringify({
+        message_type: agent.is_online ? MessageType.DEREGISTER_AGENT : MessageType.REREGISTER_AGENT,
+        agent_id: agent.agent_id
+      }));
+    }
+  };
 
   // Get the agents to display based on selected filter
   const getFilteredAgents = () => {
@@ -85,7 +130,11 @@ export function AgentPanel({ wsRef, isConnected }: AgentPanelProps) {
           </button>
         </div>
       </div>
-      <AgentList agents={filteredAgents} />
+      <AgentList
+        agents={filteredAgents}
+        onPauseToggle={handlePauseToggle}
+        onDeregisterToggle={handleDeregisterToggle}
+      />
       <style>
         {`
         .agent-panel {

@@ -170,6 +170,9 @@ async def _process_server_input_message(message_data: dict):
                 logger.warning(f"Known agents: {list(state.agent_statuses.keys())}")
 
         # --- Case 4: Unrecognized message or routing status ---
+        elif message_type in [MessageType.PAUSE_AGENT, MessageType.UNPAUSE_AGENT, MessageType.DEREGISTER_AGENT, MessageType.REREGISTER_AGENT, MessageType.PAUSE_ALL_AGENTS, MessageType.UNPAUSE_ALL_AGENTS, MessageType.DEREGISTER_ALL_AGENTS, MessageType.REREGISTER_ALL_AGENTS, MessageType.RESET_ALL_QUEUES]:
+            await _handle_control_message(message_data)
+            return
         else:
             logger.warning(f"Unrecognized message: sender={sender_id}, routing_status={routing_status}, receiver={receiver_id}")
             # Try to handle as a legacy message for backward compatibility
@@ -440,6 +443,13 @@ async def _handle_client_disconnected(message_data: dict):
                 state.broker_statuses[client_id]["is_online"] = False
                 state.broker_statuses[client_id]["last_seen"] = datetime.now().isoformat()
                 logger.info(f"Marked broker {client_id} as offline due to disconnection message")
+
+async def _handle_control_message(message_data: dict):
+    """Handle new agent/system control messages (pause, deregister, reset, etc)."""
+    message_type = message_data.get("message_type")
+    agent_id = message_data.get("agent_id")
+    logger.info(f"[CONTROL] Received control message: {message_type} agent_id={agent_id}")
+    # In the future, implement the actual logic for each control type here
 
 # --- Service Management --- 
 
