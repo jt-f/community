@@ -5,6 +5,7 @@ import asyncio
 
 # Import shared models
 from shared_models import AgentStatus, setup_logging
+import agent_manager
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -26,8 +27,8 @@ rabbitmq_connection: Optional[pika.BlockingConnection] = None
 broker_statuses: Dict[str, Dict] = {}  # broker_id -> status dict
 broker_status_lock = asyncio.Lock()
 
-def update_agent_status(agent_id: str, status: AgentStatus) -> None:
-    """Update an agent's status and record history."""
+async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
+    """Update an agent's status, record history, and broadcast updates to all clients."""
     # Save previous status for change detection
     if agent_id in agent_statuses:
         agent_status_history[agent_id] = agent_statuses[agent_id]
@@ -35,6 +36,16 @@ def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     # Update with new status
     agent_statuses[agent_id] = status
     logger.debug(f"Updated status for agent {agent_id}: online={status.is_online}")
+    
+    # Broadcast updates to all clients
+    try:
+        # Broadcast to frontends via WebSockets
+        asyncio.create_task(agent_manager.broadcast_agent_status(is_full_update=True, target_websocket=None))
+        
+        # Broadcast to brokers via gRPC
+        asyncio.create_task(broadcast_agent_status_update(is_full_update=True))
+    except Exception as e:
+        logger.error(f"Error broadcasting agent status updates: {e}")
 
 async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
     """Broadcast agent status updates to all subscribers via gRPC."""

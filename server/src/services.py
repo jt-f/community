@@ -466,6 +466,49 @@ async def _handle_control_message(message_data: dict):
         else:
             logger.info("No online agents to pause.")
 
+    # Handle UNPAUSE_ALL_AGENTS
+    elif message_type == MessageType.UNPAUSE_ALL_AGENTS:
+        from agent_registration_service import send_command_to_agent
+        tasks = []
+        updated = False
+        for agent_id, status in state.agent_statuses.items():
+            if status.status == "paused":
+                status.status = "online"
+                tasks.append(send_command_to_agent(agent_id, "resume", ""))
+                updated = True
+        if tasks:
+            await asyncio.gather(*tasks)
+            logger.info(f"Sent RESUME command to {len(tasks)} agents.")
+            if updated:
+                await agent_manager.broadcast_agent_status(force_full_update=True)
+        else:
+            logger.info("No paused agents to resume.")
+
+    # Handle PAUSE_AGENT
+    elif message_type == MessageType.PAUSE_AGENT and agent_id:
+        from agent_registration_service import send_command_to_agent
+        if agent_id in state.agent_statuses and state.agent_statuses[agent_id].is_online:
+            state.agent_statuses[agent_id].status = "paused"
+            await send_command_to_agent(agent_id, "pause", "")
+            logger.info(f"Sent PAUSE command to agent {agent_id}.")
+            await agent_manager.broadcast_agent_status(force_full_update=True)
+        else:
+            logger.warning(f"Cannot pause agent {agent_id}: Not found or not online.")
+
+    # Handle UNPAUSE_AGENT
+    elif message_type == MessageType.UNPAUSE_AGENT and agent_id:
+        from agent_registration_service import send_command_to_agent
+        if agent_id in state.agent_statuses and state.agent_statuses[agent_id].status == "paused":
+            state.agent_statuses[agent_id].status = "online"
+            await send_command_to_agent(agent_id, "resume", "")
+            logger.info(f"Sent RESUME command to agent {agent_id}.")
+            await agent_manager.broadcast_agent_status(force_full_update=True)
+        else:
+            logger.warning(f"Cannot resume agent {agent_id}: Not found or not paused.")
+
+    # Handle DEREGISTER_AGENT, REREGISTER_AGENT, etc. (Add logic as needed)
+    # ... other control message handling ...
+
 # --- Service Management --- 
 
 async def start_services():

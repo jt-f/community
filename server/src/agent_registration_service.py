@@ -6,6 +6,7 @@ import time
 import uuid
 import sys
 import os
+import re
 from typing import Dict, Optional
 
 # Add the parent directory to sys.path so we can import the generated modules
@@ -25,6 +26,7 @@ from generated.agent_registration_service_pb2_grpc import (
 # Import shared modules
 from shared_models import setup_logging, AgentStatus
 import state
+import agent_manager
 
 logger = setup_logging(__name__)
 
@@ -63,7 +65,7 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         )
         
         logger.info(f"Registering agent: {agent_id} ({agent_name})")
-        state.update_agent_status(agent_id, status)
+        await state.update_agent_status(agent_id, status)
         
         # Store capabilities and metadata
         capabilities = dict(request.capabilities)
@@ -213,6 +215,24 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         # Store in the completed commands and remove from pending
         command_results[command_id] = result
         pending_commands.pop(command_id, None)
+        
+        # Check if this is a status update
+        if command_id.startswith("status_update_"):
+            # Parse the status from the output
+            status_match = re.search(r"Status updated to (\w+)", output)
+            if status_match:
+                new_status = status_match.group(1).lower()
+                logger.info(f"Processing status update for agent {agent_id}: {new_status}")
+                
+                # Update the agent's status
+                if agent_id in state.agent_statuses:
+                    status = state.agent_statuses[agent_id]
+                    status.status = new_status
+                    status.is_online = new_status != "offline"
+                    status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    await state.update_agent_status(agent_id, status)
+                else:
+                    logger.warning(f"Cannot update status for unknown agent: {agent_id}")
         
         return CommandResultResponse(
             received=True,

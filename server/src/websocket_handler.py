@@ -151,6 +151,30 @@ async def _handle_pause_all_agents(websocket: WebSocket, client_id: str, message
     except Exception as e:
         logger.error(f"Failed to send PAUSE_ALL_AGENTS ack to client {client_id}: {e}")
 
+async def _handle_unpause_all_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
+    """Handle UNPAUSE_ALL_AGENTS control message from frontend."""
+    logger.info(f"Received UNPAUSE_ALL_AGENTS from {client_id}. Sending unpause command to all agents via gRPC.")
+    from agent_registration_service import send_command_to_agent
+    tasks = []
+    for agent_id, status in state.agent_statuses.items():
+        if status.is_online:
+            tasks.append(send_command_to_agent(agent_id, "unpause", ""))
+    if tasks:
+        await asyncio.gather(*tasks)
+        logger.info(f"Sent UNPAUSE command to {len(tasks)} agents.")
+    else:
+        logger.info("No online agents to unpause.")
+    # Optionally, send a response/ack to the frontend
+    ack = {
+        "message_type": MessageType.UNPAUSE_ALL_AGENTS,
+        "status": ResponseStatus.SUCCESS,
+        "text_payload": f"Unpause command sent to {len(tasks)} agents."
+    }
+    try:
+        await websocket.send_text(json.dumps(ack))
+    except Exception as e:
+        logger.error(f"Failed to send UNPAUSE_ALL_AGENTS ack to client {client_id}: {e}")
+
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
     logger.info(f"Cleaning up connection for {client_id} ({getattr(websocket, 'connection_type', 'unknown')})")
@@ -225,6 +249,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await _handle_request_agent_status(websocket, client_id, message_data)
             elif msg_type == MessageType.PAUSE_ALL_AGENTS:
                 await _handle_pause_all_agents(websocket, client_id, message_data)
+            elif msg_type == MessageType.UNPAUSE_ALL_AGENTS:
+                await _handle_unpause_all_agents(websocket, client_id, message_data)
             else:
                 await _handle_unknown_message(websocket, client_id, message_data)
 

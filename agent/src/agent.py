@@ -111,6 +111,9 @@ class Agent:
         if not await self.register_with_server():
             logger.error("Failed to register with server. Exiting.")
             return
+            
+        # Update status to online after successful registration
+        await self.update_status("online")
         
         # Connect to RabbitMQ for message processing
         if not self.connect_rabbitmq():
@@ -145,6 +148,9 @@ class Agent:
         """Clean up connections before exit."""
         logger.info("Cleaning up before exit...")
         
+        # Update status to offline before cleanup
+        asyncio.run(self.update_status("offline"))
+        
         # Close RabbitMQ connection
         if self.rabbitmq_connection and self.rabbitmq_connection.is_open:
             try:
@@ -168,65 +174,99 @@ class Agent:
         self.paused = True
         
         # Now that consumer thread is skipping process_data_events, we can safely cancel consumers
+        pause_success = True
         if self.rabbitmq_channel and self.rabbitmq_channel.is_open:
             try:
-                # Store consumer tags before cancelling so we can restart consumption later
-                self.saved_consumer_tags = list(self.rabbitmq_channel.consumer_tags) if hasattr(self.rabbitmq_channel, 'consumer_tags') else []
+                # Get consumer tags safely
+                consumer_tags = []
+                if hasattr(self.rabbitmq_channel, 'consumer_tags'):
+                    try:
+                        consumer_tags = list(self.rabbitmq_channel.consumer_tags)
+                    except Exception as e:
+                        logger.warning(f"Error getting consumer tags: {e}")
+                        consumer_tags = []
                 
-                if self.saved_consumer_tags:
-                    for tag in self.saved_consumer_tags:
-                        self.rabbitmq_channel.basic_cancel(consumer_tag=tag)
-                    logger.info(f"Stopped consuming from queue {self.queue_name}")
+                # Store consumer tags for later resume
+                self.saved_consumer_tags = consumer_tags
+                
+                # Cancel consumers if we have any
+                if consumer_tags:
+                    for tag in consumer_tags:
+                        try:
+                            self.rabbitmq_channel.basic_cancel(consumer_tag=tag)
+                            logger.info(f"Cancelled consumer {tag}")
+                        except Exception as e:
+                            logger.error(f"Error cancelling consumer {tag}: {e}")
+                            pause_success = False
                 else:
-                    logger.warning("No active consumers to pause")
+                    logger.info("No active consumers to cancel")
+                
+                if pause_success:
+                    logger.info(f"Stopped consuming from queue {self.queue_name}")
             except Exception as e:
                 logger.error(f"Error stopping queue consumption: {e}")
-                # Don't return False here - we're already paused, just couldn't cancel consumers
+                pause_success = False
+        else:
+            logger.error("Cannot pause: RabbitMQ channel is not open or available.")
+            pause_success = False
         
-        logger.info(f"Agent {self.agent_name} ({self.agent_id}) is now paused")
-        return True
+        if pause_success:
+            logger.info(f"Agent {self.agent_name} ({self.agent_id}) is now paused")
+            # Send status update to server immediately
+            asyncio.run(self.update_status("paused"))
+            return True
+        else:
+            # If we failed to properly pause, reset the paused flag
+            self.paused = False
+            logger.error(f"Failed to pause agent {self.agent_name} ({self.agent_id})")
+            return False
         
     def resume(self) -> bool:
         """Resume the agent's message processing by restarting queue consumption."""
-        if not self.paused:
-            logger.info("Agent is not paused")
-            return False
+        # Don't check paused state here - we want to allow resuming even if we think we're not paused
+        # This helps handle cases where our state is out of sync with the server
             
         logger.info(f"Resuming agent {self.agent_name} ({self.agent_id})")
+        
+        # First check if we need to reconnect to RabbitMQ
+        if not self.rabbitmq_channel or not self.rabbitmq_channel.is_open:
+            logger.info("RabbitMQ channel not available, attempting to reconnect...")
+            if not self.connect_rabbitmq():
+                logger.error("Failed to reconnect to RabbitMQ")
+                return False
+            if not self.setup_rabbitmq_queue():
+                logger.error("Failed to setup RabbitMQ queue after reconnection")
+                return False
         
         # First restart consuming from the queue before changing paused state
         resume_success = True
         if self.rabbitmq_channel and self.rabbitmq_channel.is_open:
             try:
-                # Check if we have stored consumer tags 
-                if hasattr(self, 'saved_consumer_tags') and self.saved_consumer_tags:
-                    # Re-setup the queue with our callback
-                    from messaging import process_rabbitmq_message
-                    
-                    # Setup the queue with our callback
-                    self.rabbitmq_channel.queue_declare(queue=self.queue_name, durable=True)
-                    self.rabbitmq_channel.basic_consume(
-                        queue=self.queue_name,
-                        on_message_callback=lambda ch, method, properties, body: process_rabbitmq_message(self, ch, method, properties, body),
-                        auto_ack=False
-                    )
-                    logger.info(f"Resumed consuming from queue {self.queue_name}")
-                else:
-                    logger.warning("No saved consumer tags to resume from. Setting up queue from scratch.")
-                    # If we don't have stored tags, set up from scratch
-                    from agent_init import setup_rabbitmq_queue
-                    if not setup_rabbitmq_queue(self.rabbitmq_channel, self.queue_name, self.process_rabbitmq_message, logger):
-                        logger.error("Failed to resume queue consumption")
-                        resume_success = False
+                # Re-setup the queue with our callback
+                from messaging import process_rabbitmq_message
+                
+                # Setup the queue with our callback
+                self.rabbitmq_channel.queue_declare(queue=self.queue_name, durable=True)
+                self.rabbitmq_channel.basic_consume(
+                    queue=self.queue_name,
+                    on_message_callback=lambda ch, method, properties, body: process_rabbitmq_message(self, ch, method, properties, body),
+                    auto_ack=False
+                )
+                logger.info(f"Resumed consuming from queue {self.queue_name}")
             except Exception as e:
                 logger.error(f"Error resuming queue consumption: {e}")
                 resume_success = False
+        else:
+            logger.error("Cannot resume: RabbitMQ channel is not open or available.")
+            resume_success = False
         
         # Only change paused state if we successfully resumed consumption
         if resume_success:
             # Finally, clear the paused flag
             self.paused = False
             logger.info(f"Agent {self.agent_name} ({self.agent_id}) is now resumed")
+            # Send status update to server immediately
+            asyncio.run(self.update_status("online"))
             return True
         else:
             logger.error(f"Failed to resume agent {self.agent_name} ({self.agent_id})")
@@ -241,6 +281,27 @@ class Agent:
             "running": self.running,
             "paused": self.paused
         }
+
+    async def update_status(self, status: str) -> bool:
+        """Update the agent's status on the server.
+        
+        Args:
+            status: The new status (e.g., 'online', 'paused', 'offline')
+            
+        Returns:
+            bool: True if the status was updated successfully, False otherwise
+        """
+        if not self.is_registered:
+            logger.warning("Cannot update status: Agent is not registered")
+            return False
+            
+        try:
+            server_host = os.getenv("GRPC_HOST", "localhost")
+            server_port = int(os.getenv("GRPC_PORT", "50051"))
+            return await grpc_client.send_status_update(server_host, server_port, status)
+        except Exception as e:
+            logger.error(f"Error updating agent status: {e}")
+            return False
 
 # Create a global reference to the agent instance
 current_agent = None
@@ -271,8 +332,8 @@ def agent_command_callback(command):
             result["error_message"] = "No agent instance available to pause"
             result["exit_code"] = 1
     
-    elif command_type == "resume":
-        logger.info(f"Received RESUME command (id={command.get('command_id')}) from server.")
+    elif command_type == "resume" or command_type == "unpause":
+        logger.info(f"Received {command_type.upper()} command (id={command.get('command_id')}) from server.")
         if current_agent:
             if current_agent.resume():
                 result["output"] = f"Agent {current_agent.agent_name} resumed successfully"
@@ -280,7 +341,7 @@ def agent_command_callback(command):
                 result["output"] = f"Agent {current_agent.agent_name} is not paused"
         else:
             result["success"] = False
-            result["error_message"] = "No agent instance available to resume"
+            result["error_message"] = f"No agent instance available to {command_type}"
             result["exit_code"] = 1
     
     elif command_type == "status":

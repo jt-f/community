@@ -208,26 +208,10 @@ async def command_stream_loop(server_host: str, server_port: int):
         logger.error("Cannot receive commands: Agent is not registered")
         return
     
-    attempt = 0
-    max_backoff = 60  # Maximum backoff in seconds
-    initial_attempts = 5  # Number of attempts before switching to max backoff
+    retry_interval = 30  # Fixed 30-second retry interval
     
     while True:  # Infinite retry loop
         try:
-            # Implement exponential backoff for reconnection
-            if attempt > 0:
-                if attempt <= initial_attempts:
-                    # Use exponential backoff for initial attempts
-                    backoff = min(5 * (2 ** (attempt - 1)), max_backoff)
-                    logger.info(f"Attempting to reconnect to command stream in {backoff} seconds (attempt {attempt})")
-                else:
-                    # After initial attempts, use maximum backoff
-                    backoff = max_backoff
-                    logger.info(f"Attempting to reconnect to command stream in {backoff} seconds (attempt {attempt}, using max backoff)")
-                await asyncio.sleep(backoff)
-            
-            attempt += 1
-            
             # Create a channel to the server
             channel = grpc.aio.insecure_channel(f"{server_host}:{server_port}")
             
@@ -239,9 +223,6 @@ async def command_stream_loop(server_host: str, server_port: int):
             
             # Connect to command stream
             logger.info(f"Connecting to command stream for agent: {agent_id}")
-            
-            # Reset attempt counter on successful connection
-            attempt = 0
             
             # Process commands from the stream
             async for command in stub.ReceiveCommands(request):
@@ -308,11 +289,15 @@ async def command_stream_loop(server_host: str, server_port: int):
             
         except grpc.RpcError as e:
             handle_grpc_error(e)
+            logger.info(f"Connection lost. Will retry in {retry_interval} seconds...")
+            await asyncio.sleep(retry_interval)
         except asyncio.CancelledError:
             logger.info("Command stream task cancelled")
             break
         except Exception as e:
             logger.error(f"Error in command stream: {e}")
+            logger.info(f"Will retry in {retry_interval} seconds...")
+            await asyncio.sleep(retry_interval)
 
 async def process_command(command: Dict, server_host: str, server_port: int):
     """
@@ -466,6 +451,43 @@ async def send_command_result(
         
     except Exception as e:
         logger.error(f"Error sending command result: {e}")
+        return False
+
+async def send_status_update(server_host: str, server_port: int, status: str = "online") -> bool:
+    """
+    Send an immediate status update (e.g., paused, online) to the server.
+    Args:
+        server_host: The gRPC server hostname or IP
+        server_port: The gRPC server port
+        status: The agent's new status (e.g., 'paused', 'online')
+    Returns:
+        True if the update was sent successfully, False otherwise
+    """
+    global agent_id, agent_name
+    if not agent_id:
+        logger.error("Cannot send status update: Agent is not registered")
+        return False
+    try:
+        from generated.agent_registration_service_pb2 import CommandResult
+        from generated.agent_registration_service_pb2_grpc import AgentRegistrationServiceStub
+        channel = grpc.aio.insecure_channel(f"{server_host}:{server_port}")
+        stub = AgentRegistrationServiceStub(channel)
+        # Create a unique command ID for the status update
+        command_id = f"status_update_{int(time.time() * 1000)}"
+        request = CommandResult(
+            command_id=command_id,
+            agent_id=agent_id,
+            success=True,
+            output=f"Status updated to {status}",
+            error_message="",
+            exit_code=0,
+            execution_time_ms=0
+        )
+        logger.info(f"Sending status update: {status}")
+        response = await stub.SendCommandResult(request)
+        return response.received
+    except Exception as e:
+        logger.error(f"Error sending status update: {e}")
         return False
 
 def handle_grpc_error(e: grpc.RpcError):
