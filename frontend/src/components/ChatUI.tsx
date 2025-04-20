@@ -23,7 +23,7 @@ interface ChatUIProps {
   onSystemControl?: {
     isConnected: boolean;
     handlePauseAll: () => void;
-    handleUnpauseAll: () => void;
+    handleresumeAll: () => void;
     handleDeregisterAll: () => void;
     handleReregisterAll: () => void;
     handleResetAllQueues: () => void;
@@ -60,9 +60,9 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
       wsRef.current.send(JSON.stringify({ message_type: MessageType.PAUSE_ALL_AGENTS }));
     }
   };
-  const handleUnpauseAll = () => {
+  const handleresumeAll = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.UNPAUSE_ALL_AGENTS }));
+      wsRef.current.send(JSON.stringify({ message_type: MessageType.RESUME_ALL_AGENTS }));
     }
   };
   const handleDeregisterAll = () => {
@@ -262,7 +262,7 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
     if (onSystemControl) {
       onSystemControl.isConnected = isConnected;
       onSystemControl.handlePauseAll = handlePauseAll;
-      onSystemControl.handleUnpauseAll = handleUnpauseAll;
+      onSystemControl.handleresumeAll = handleresumeAll;
       onSystemControl.handleDeregisterAll = handleDeregisterAll;
       onSystemControl.handleReregisterAll = handleReregisterAll;
       onSystemControl.handleResetAllQueues = handleResetAllQueues;

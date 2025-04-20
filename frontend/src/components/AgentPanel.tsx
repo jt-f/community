@@ -40,7 +40,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
   const handleResumeAllAgents = () => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
-        message_type: MessageType.UNPAUSE_ALL_AGENTS,
+        message_type: MessageType.RESUME_ALL_AGENTS,
         sender_id: clientId
       }));
     }
@@ -78,7 +78,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
     if (!wsRef.current) return;
     
     // If agent is paused, send resume command, otherwise send pause command
-    const commandType = agent.status === 'paused' ? MessageType.UNPAUSE_AGENT : MessageType.PAUSE_AGENT;
+    const commandType = agent.status === 'paused' ? MessageType.RESUME_AGENT : MessageType.PAUSE_AGENT;
     
     const message = {
       message_type: commandType,

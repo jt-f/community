@@ -37,7 +37,7 @@ export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, em
                         {onPauseToggle && (
                             <button onClick={() => onPauseToggle(agent)} className="agent-action-btn">
                                 {!agent.is_online 
-                                    ? 'Unpause' 
+                                    ? 'resume' 
                                     : agent.status === 'paused' 
                                         ? 'Resume' 
                                         : 'Pause'}

@@ -107,12 +107,23 @@ class Agent:
         logger.debug(f"Command result for {command_id}: {result}")
         return result
 
+    async def _send_status_update_on_state_change(self):
+        """Send a gRPC status update to the server with the full agent state."""
+        try:
+            await self.server_manager.send_status_update(
+                self.agent_id,
+                status=self.state.get_state('internal_state'),
+                metrics=self.state.get_state()
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send status update on state change: {e}")
+
     def handle_state_change(self, key, value):
         self.state.set_state(key, value)
-
         logger.info(f"Agent state changed: {key} = {value}")
         logger.info(f"Overall state: {self.state.__repr__()}")
-        # Optionally, trigger status updates or other side effects here
+        # Send gRPC status update to server on every state change
+        asyncio.create_task(self._send_status_update_on_state_change())
 
 async def main():
     parser = argparse.ArgumentParser(description="Run an agent")

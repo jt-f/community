@@ -127,53 +127,50 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
     
     logger.info(f"Agent status update sent to requesting frontend {client_id}")
 
+async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command_type, message_type):
+    """Send a command (pause/resume) to one or more agents and send an ack to the frontend."""
+    from agent_registration_service import send_command_to_agent
+    tasks = [send_command_to_agent(agent_id, command_type, "") for agent_id in agent_ids]
+    if tasks:
+        await asyncio.gather(*tasks)
+        logger.info(f"Sent {command_type.upper()} command to {len(tasks)} agent(s).")
+    else:
+        logger.info(f"No agents to {command_type}.")
+    ack = {
+        "message_type": message_type,
+        "status": ResponseStatus.SUCCESS,
+        "text_payload": f"{command_type.capitalize()} command sent to {len(tasks)} agent(s)."
+    }
+    try:
+        await websocket.send_text(json.dumps(ack))
+    except Exception as e:
+        logger.error(f"Failed to send {message_type} ack to client {client_id}: {e}")
+
 async def _handle_pause_all_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle PAUSE_ALL_AGENTS control message from frontend."""
-    logger.info(f"Received PAUSE_ALL_AGENTS from {client_id}. Sending pause command to all agents via gRPC.")
-    from agent_registration_service import send_command_to_agent
-    tasks = []
-    for agent_id, status in state.agent_statuses.items():
-        if status.is_online:
-            tasks.append(send_command_to_agent(agent_id, "pause", ""))
-    if tasks:
-        await asyncio.gather(*tasks)
-        logger.info(f"Sent PAUSE command to {len(tasks)} agents.")
-    else:
-        logger.info("No online agents to pause.")
-    # Optionally, send a response/ack to the frontend
-    ack = {
-        "message_type": MessageType.PAUSE_ALL_AGENTS,
-        "status": ResponseStatus.SUCCESS,
-        "text_payload": f"Pause command sent to {len(tasks)} agents."
-    }
-    try:
-        await websocket.send_text(json.dumps(ack))
-    except Exception as e:
-        logger.error(f"Failed to send PAUSE_ALL_AGENTS ack to client {client_id}: {e}")
+    agent_ids = [agent_id for agent_id, status in state.agent_statuses.items() if status.is_online]
+    await _send_agent_command_to_agents(agent_ids, websocket, client_id, "pause", MessageType.PAUSE_ALL_AGENTS)
 
-async def _handle_unpause_all_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
-    """Handle UNPAUSE_ALL_AGENTS control message from frontend."""
-    logger.info(f"Received UNPAUSE_ALL_AGENTS from {client_id}. Sending unpause command to all agents via gRPC.")
-    from agent_registration_service import send_command_to_agent
-    tasks = []
-    for agent_id, status in state.agent_statuses.items():
-        if status.is_online:
-            tasks.append(send_command_to_agent(agent_id, "unpause", ""))
-    if tasks:
-        await asyncio.gather(*tasks)
-        logger.info(f"Sent UNPAUSE command to {len(tasks)} agents.")
-    else:
-        logger.info("No online agents to unpause.")
-    # Optionally, send a response/ack to the frontend
-    ack = {
-        "message_type": MessageType.UNPAUSE_ALL_AGENTS,
-        "status": ResponseStatus.SUCCESS,
-        "text_payload": f"Unpause command sent to {len(tasks)} agents."
-    }
-    try:
-        await websocket.send_text(json.dumps(ack))
-    except Exception as e:
-        logger.error(f"Failed to send UNPAUSE_ALL_AGENTS ack to client {client_id}: {e}")
+async def _handle_RESUME_All_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
+    """Handle RESUME_ALL_AGENTS control message from frontend."""
+    agent_ids = [agent_id for agent_id, status in state.agent_statuses.items() if status.is_online]
+    await _send_agent_command_to_agents(agent_ids, websocket, client_id, "resume", MessageType.RESUME_ALL_AGENTS)
+
+async def _handle_pause_agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
+    """Handle PAUSE_AGENT control message for a single agent from frontend."""
+    agent_id = message_data.get('agent_id')
+    if not agent_id:
+        logger.warning(f"PAUSE_AGENT received with no agent_id from {client_id}.")
+        return
+    await _send_agent_command_to_agents([agent_id], websocket, client_id, "pause", MessageType.PAUSE_AGENT)
+
+async def _handle_RESUME_Agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
+    """Handle RESUME_AGENT control message for a single agent from frontend."""
+    agent_id = message_data.get('agent_id')
+    if not agent_id:
+        logger.warning(f"RESUME_AGENT received with no agent_id from {client_id}.")
+        return
+    await _send_agent_command_to_agents([agent_id], websocket, client_id, "resume", MessageType.RESUME_AGENT)
 
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
@@ -249,8 +246,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 await _handle_request_agent_status(websocket, client_id, message_data)
             elif msg_type == MessageType.PAUSE_ALL_AGENTS:
                 await _handle_pause_all_agents(websocket, client_id, message_data)
-            elif msg_type == MessageType.UNPAUSE_ALL_AGENTS:
-                await _handle_unpause_all_agents(websocket, client_id, message_data)
+            elif msg_type == MessageType.RESUME_ALL_AGENTS:
+                await _handle_RESUME_All_agents(websocket, client_id, message_data)
+            elif msg_type == MessageType.PAUSE_AGENT:
+                await _handle_pause_agent(websocket, client_id, message_data)
+            elif msg_type == MessageType.RESUME_AGENT:
+                await _handle_RESUME_Agent(websocket, client_id, message_data)
             else:
                 await _handle_unknown_message(websocket, client_id, message_data)
 

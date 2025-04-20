@@ -466,8 +466,8 @@ async def _handle_control_message(message_data: dict):
         else:
             logger.info("No online agents to pause.")
 
-    # Handle UNPAUSE_ALL_AGENTS
-    elif message_type == MessageType.UNPAUSE_ALL_AGENTS:
+    # Handle RESUME_ALL_AGENTS
+    elif message_type == MessageType.RESUME_ALL_AGENTS:
         from agent_registration_service import send_command_to_agent
         tasks = []
         updated = False
@@ -495,8 +495,8 @@ async def _handle_control_message(message_data: dict):
         else:
             logger.warning(f"Cannot pause agent {agent_id}: Not found or not online.")
 
-    # Handle UNPAUSE_AGENT
-    elif message_type == MessageType.UNPAUSE_AGENT and agent_id:
+    # Handle RESUME_AGENT
+    elif message_type == MessageType.RESUME_AGENT and agent_id:
         from agent_registration_service import send_command_to_agent
         if agent_id in state.agent_statuses and state.agent_statuses[agent_id].status == "paused":
             state.agent_statuses[agent_id].status = "online"
