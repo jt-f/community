@@ -116,21 +116,19 @@ def setup_logging(
     level: int = logging.INFO,
     stream: Optional[logging.StreamHandler] = None
 ) -> logging.Logger:
-    """Set up logging with a consistent format across all modules."""
+    """Set up logging with a consistent format across all modules.
+    Only adds a handler if none exist to prevent duplicate logs."""
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Create and configure handler
-    if stream is None:
-        stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(formatter)
-    
-    # Add handler to logger
-    logger.addHandler(stream)
-    
+
+    # Only add handler if none exist (prevents duplicate logs)
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        if stream is None:
+            stream = logging.StreamHandler(sys.stdout)
+        stream.setFormatter(formatter)
+        logger.addHandler(stream)
+
     return logger

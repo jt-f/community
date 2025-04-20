@@ -46,13 +46,8 @@ def main():
         print(f"No proto files found in: {proto_dir}")
         return 1
     
-    # Install required packages if not already installed
-    try:
-        print("Installing required packages...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "grpcio", "grpcio-tools", "protobuf", "psutil"])
-    except subprocess.CalledProcessError:
-        print("Failed to install required packages.")
-        return 1
+    # Removed pip install section - dependencies should be managed by Poetry
+    # Ensure grpcio-tools is installed via 'poetry install' before running this script
     
     # Generate Python code from proto files
     try:
@@ -122,4 +117,4 @@ def main():
         return 1
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

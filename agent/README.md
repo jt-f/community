@@ -113,6 +113,15 @@ sequenceDiagram
     Note over Agent: (Should call UnregisterAgent via gRPC)
 ```
 
+## Refactored Architecture
+
+The agent now uses two handler classes for separation of concerns:
+
+- `MessageQueueHandler`: Encapsulates all RabbitMQ connection, queue, and message handling logic.
+- `ServerManager`: Encapsulates all gRPC/server registration and status update logic.
+
+The `Agent` class orchestrates these handlers and manages high-level agent logic. This structure follows DRY and SOLID principles and is designed for maintainability in a microservices architecture.
+
 ## How It Works (`agent.py`)
 
 1.  **Initialization**: The agent starts, parses command-line arguments (`--name`, `--id`, `--rabbitmq-host`), and reads environment variables (`GRPC_HOST`, `GRPC_PORT`, `MISTRAL_API_KEY`, etc.).
@@ -134,6 +143,25 @@ sequenceDiagram
     c.  The main loop and consumer thread stop.
 
 *(Note: `example_agent.py` provides a different example focusing on receiving and executing shell/python commands via the gRPC `ReceiveCommands` stream and sending results back via `SendCommandResult`.)*
+
+## Command Handling
+
+Commands from the server (e.g., pause, resume, status) are received via a gRPC stream. The agent handles these commands using the `_handle_server_command` instance method. This method is registered as a callback with the `grpc_client` module during agent initialization, ensuring proper encapsulation and avoiding global state.
+
+## Agent State Management
+
+A simple `AgentState` class is used to track the agent's connection and registration status. This class records:
+
+- RabbitMQ connection status (`rabbitmq_status`): 'connected' or 'not_connected'
+- gRPC connection status (`grpc_status`): 'connected' or 'not_connected'
+- Registration status (`registration_status`): 'registered' or 'not_registered'
+- Internal state (`internal_state`): 'idle', 'working', or 'paused'
+
+This class is used as a stub for future agent state management and will replace previous ad-hoc state tracking.
+
+## LLMClient Abstraction
+
+The agent uses a generic `LLMClient` class for all LLM interactions. This abstraction allows easy switching between different LLM providers and keeps the agent code simple and maintainable. Currently, it handles the specific implementation details for interacting with the Mistral AI API.
 
 ## Customization
 

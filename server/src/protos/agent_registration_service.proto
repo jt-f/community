@@ -14,7 +14,7 @@ service AgentRegistrationService {
   rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse) {}
   
   // Create a stream for agent to receive commands from server
-  rpc ReceiveCommands (CommandStreamRequest) returns (stream Command) {}
+  rpc ReceiveCommands (ReceiveCommandsRequest) returns (stream Command) {}
   
   // Send command results back to server
   rpc SendCommandResult (CommandResult) returns (CommandResultResponse) {}
@@ -61,9 +61,9 @@ message HeartbeatResponse {
   int32 interval = 2;      // Suggested heartbeat interval in seconds
 }
 
-// Request to start receiving commands
-message CommandStreamRequest {
-  string agent_id = 1;
+// Request message for receiving commands
+message ReceiveCommandsRequest {
+  string agent_id = 1;  // ID of the agent requesting commands
 }
 
 // Command to be executed by agent

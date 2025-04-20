@@ -4,6 +4,7 @@ import logging
 import uuid
 
 logger = logging.getLogger(__name__)
+logger.propagate = False # Prevent messages reaching the root logger
 
 def publish_to_broker_input_queue(rabbitmq_channel, message_data):
     """Publish a response message to the broker input queue."""
