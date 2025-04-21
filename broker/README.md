@@ -8,11 +8,11 @@ The broker utilizes **gRPC** for communication with the central server and **Rab
 
 -   **gRPC Communication:**
     -   **Broker Registration:** Upon startup, the broker registers itself with the central server using the `RegisterBroker` gRPC call.
-    -   **Agent Status Updates:** The broker subscribes to real-time agent status updates from the server using the `SubscribeToAgentStatus` gRPC stream. This keeps the broker's internal agent registry up-to-date.
+    -   **Agent Status Updates:** The broker subscribes to real-time agent status updates from the server using the `SubscribeToAgentStatus` gRPC stream. These updates are processed by the `BrokerStateManager` to keep the broker's internal agent state current.
 -   **RabbitMQ Message Flow:**
     -   The broker consumes messages from the `broker_input_queue`. These are typically replies from agents or messages needing routing.
-    -   Based on the message details and its internal agent registry, the broker determines the target agent's queue (`agent_queue_{agent_id}`).
-    -   The broker publishes the message directly to the target agent's queue.
+    -   Based on the message details and the agent state maintained by `BrokerStateManager`, the broker determines the target agent.
+    -   The broker publishes the message to the `server_input_queue` with the appropriate `receiver_id` set for the server to handle final delivery.
 
 ## Prerequisites
 
@@ -124,8 +124,9 @@ sequenceDiagram
 
 ## Components
 
--   **`broker.py`**: Main application entry point. Handles initialization, starts gRPC client and RabbitMQ consumer.
--   **`grpc_client.py`**: Manages gRPC connections for registration and agent status updates. Handles streaming and reconnection logic.
+-   **`broker.py`**: Main application entry point. Handles initialization, instantiates the `BrokerStateManager`, starts the gRPC client, sets up RabbitMQ connections, and manages the main application lifecycle and message routing logic.
+-   **`grpc_client.py`**: Manages gRPC connections for registration and agent status updates. Handles the status update stream, passing received updates to the callback provided by `BrokerStateManager`. Includes reconnection logic.
+-   **`state.py`**: Contains the `BrokerStateManager` class, responsible for managing the in-memory state of known agents (online status, names, etc.) based on updates received via gRPC. Provides thread-safe methods to query agent state.
 -   **`rabbitmq_handler.py`**: Manages RabbitMQ connections, consuming messages from `broker_input_queue`, and publishing messages to specific agent queues.
 -   **`agent_registry.py`**: In-memory store for agent status information received via gRPC.
 -   **`generated/`**: Directory containing Python code generated from `.proto` files.

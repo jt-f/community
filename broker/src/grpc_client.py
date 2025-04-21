@@ -60,40 +60,24 @@ except ImportError as e:
             self.broker_id = broker_id
 
 
-# Global variable to store the agent status callback
-_agent_status_callback = None
-
-def set_agent_status_callback(callback: Callable):
-    """
-    Set the callback function that will be called when agent status updates are received.
-    
-    Args:
-        callback: A function that will be called with the agent status data.
-                 The function should take a dictionary with the agent status data.
-    """
-    global _agent_status_callback
-    _agent_status_callback = callback
-    logger.info("Agent status callback set")
-
-async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect_interval=5) -> None:
+async def connect_to_grpc_server(host: str, port: int, broker_id: str, agent_status_callback: Callable, reconnect_interval=5) -> None:
     """
     Connect to the gRPC server and subscribe to agent status updates.
-    
+
     Args:
         host: The gRPC server hostname or IP.
         port: The gRPC server port.
         broker_id: The broker ID to use when connecting.
+        agent_status_callback: The async callback function to process status updates.
         reconnect_interval: Time in seconds between reconnection attempts.
     """
-    global _agent_status_callback
-    
     if not GRPC_IMPORTS_SUCCESSFUL:
         logger.error("gRPC imports failed. Cannot connect to gRPC server.")
         return
-    
+
     attempt = 0
     max_backoff = 60  # Maximum backoff in seconds
-    
+
     while True:
         try:
             # Implement exponential backoff with jitter
@@ -104,56 +88,52 @@ async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect
                 sleep_time = max(1, backoff + jitter)
                 logger.info(f"Attempt {attempt}: Waiting {sleep_time:.1f}s before reconnecting to gRPC server")
                 await asyncio.sleep(sleep_time)
-            
+
             attempt += 1
-            
+
             # Create a channel to the server
             logger.info(f"Connecting to gRPC server at {host}:{port}")
             channel = grpc.aio.insecure_channel(f"{host}:{port}")
-            
+
             # Create the stub
             stub = AgentStatusServiceStub(channel)
-            
+
             # Create the request
             request = AgentStatusRequest(broker_id=broker_id)
-            
+
             # Subscribe to agent status updates
             logger.info(f"Subscribing to agent status updates as broker {broker_id}")
-            
+
             try:
                 # Reset attempt counter on successful connection
                 attempt = 0
-                
+
                 # Call the streaming RPC method
                 async for response in stub.SubscribeToAgentStatus(request):
                     try:
                         # Process the response
-                        if _agent_status_callback:
+                        if agent_status_callback:
                             # Convert the response to a dictionary format
                             agents_data = []
                             for agent in response.agents:
+                                logger.info(f"Received agent status update: {agent}")
                                 agents_data.append({
                                     "agent_id": agent.agent_id,
                                     "agent_name": agent.agent_name,
-                                    "is_online": agent.is_online,
-                                    "last_seen": agent.last_seen
+                                    "last_seen": agent.last_seen,
+                                    "metrics": agent.metrics
                                 })
-                            
+
                             # Create status update message
                             status_update = {
                                 "message_type": MessageType.AGENT_STATUS_UPDATE,
                                 "agents": agents_data,
                                 "is_full_update": response.is_full_update
                             }
-                            
+                            logger.info(f"Processing agent status update: {status_update}")
                             # Call the callback with the status update
                             try:
-                                if _agent_status_callback:
-                                    if inspect.iscoroutinefunction(_agent_status_callback):
-                                        await _agent_status_callback(status_update)
-                                    else:
-                                        # Call non-async function directly
-                                        _agent_status_callback(status_update)
+                                await agent_status_callback(status_update)
                             except Exception as callback_err:
                                 logger.error(f"Error in agent status callback: {callback_err}")
                         else:
@@ -162,16 +142,16 @@ async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect
                         logger.error(f"Error processing agent status update: {process_err}")
                         # Continue trying to process other updates even if one fails
                         continue
-                
+
                 # If we get here, the stream has ended normally (server closed it)
                 logger.info("gRPC stream closed normally by server. Reconnecting...")
-                        
+
             except grpc.RpcError as e:
                 # RPC-specific errors
                 if hasattr(e, 'code'):
                     code = e.code()
                     details = e.details() if hasattr(e, 'details') else "Unknown details"
-                    
+
                     # Handle specific gRPC status codes
                     if code == grpc.StatusCode.UNAVAILABLE:
                         logger.error(f"gRPC server unavailable: {details}")
@@ -187,15 +167,15 @@ async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect
                         logger.error(f"gRPC error with code {code}: {details}")
                 else:
                     logger.error(f"gRPC error during agent status stream: {e}")
-                    
+
                 # Close the channel and retry
                 try:
                     await channel.close()
                 except Exception as close_err:
                     logger.warning(f"Error closing gRPC channel: {close_err}")
-                
+
                 continue
-                
+
         except ConnectionRefusedError:
             logger.error(f"Connection refused: gRPC server at {host}:{port} is not accepting connections")
         except asyncio.CancelledError:
@@ -209,68 +189,55 @@ async def connect_to_grpc_server(host: str, port: int, broker_id: str, reconnect
 async def request_agent_status(host: str, port: int, broker_id: str) -> Optional[dict]:
     """
     Request a one-time agent status update from the server.
-    
+
     Args:
         host: The gRPC server hostname or IP.
         port: The gRPC server port.
         broker_id: The broker ID to use when connecting.
-        
+
     Returns:
         A dictionary with the agent status data, or None if the request failed.
     """
-    global _agent_status_callback
-    
     if not GRPC_IMPORTS_SUCCESSFUL:
         logger.error("gRPC imports failed. Cannot request agent status.")
         return None
-    
+
     try:
         # Create a channel to the server
-        logger.info(f"Connecting to gRPC server at {host}:{port} for one-time agent status request")
-        channel = grpc.aio.insecure_channel(f"{host}:{port}")
-        
-        # Create the stub
-        stub = AgentStatusServiceStub(channel)
-        
-        # Create the request
-        request = AgentStatusRequest(broker_id=broker_id)
-        
-        # Call the unary RPC method
-        logger.info(f"Requesting agent status as broker {broker_id}")
-        response = await stub.GetAgentStatus(request)
-        
-        # Convert the response to a dictionary
-        agents_data = []
-        for agent in response.agents:
-            agents_data.append({
-                "agent_id": agent.agent_id,
-                "agent_name": agent.agent_name,
-                "is_online": agent.is_online,
-                "last_seen": agent.last_seen
-            })
-        
-        # Create status update message
-        status_update = {
-            "message_type": MessageType.AGENT_STATUS_UPDATE,
-            "agents": agents_data,
-            "is_full_update": response.is_full_update
-        }
-        
-        # Close the channel
-        await channel.close()
-        
-        # Process the status update with the callback if registered
-        if _agent_status_callback:
-            try:
-                if inspect.iscoroutinefunction(_agent_status_callback):
-                    await _agent_status_callback(status_update)
-                else:
-                    _agent_status_callback(status_update)
-                logger.debug("Processed agent status update with callback")
-            except Exception as e:
-                logger.error(f"Error in agent status callback during one-time request: {e}")
-        
-        return status_update
+        logger.debug(f"Connecting to gRPC server at {host}:{port} for one-time agent status request")
+        async with grpc.aio.insecure_channel(f"{host}:{port}") as channel:
+
+            # Create the stub
+            stub = AgentStatusServiceStub(channel)
+
+            # Create the request
+            request = AgentStatusRequest(broker_id=broker_id)
+
+            # Call the unary RPC method
+            logger.info(f"Requesting agent status")
+            response = await stub.GetAgentStatus(request)
+            logger.info(f"Received agent status response: {response}")
+            # Convert the response to a dictionary
+            agents_data = []
+            for agent in response.agents:
+                agents_data.append({
+                    "agent_id": agent.agent_id,
+                    "agent_name": agent.agent_name,
+                    "is_online": agent.is_online,
+                    "last_seen": agent.last_seen
+                })
+
+            # Create status update message
+            status_update = {
+                "message_type": MessageType.AGENT_STATUS_UPDATE,
+                "agents": agents_data,
+                "is_full_update": response.is_full_update
+            }
+
+            return status_update
+    except grpc.RpcError as e:
+        logger.error(f"gRPC error requesting agent status: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error requesting agent status via gRPC: {e}")
         return None

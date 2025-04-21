@@ -10,6 +10,8 @@ from generated.agent_registration_service_pb2 import (
     ReceiveCommandsRequest
 )
 from generated.agent_registration_service_pb2_grpc import AgentRegistrationServiceStub
+from generated.agent_status_service_pb2 import AgentInfo, AgentStatusUpdateRequest
+from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
 from shared_models import setup_logging
 logger = setup_logging(__name__)
 logger.propagate = False # Prevent messages reaching the root logger
@@ -187,7 +189,6 @@ class ServerManager:
     async def send_agent_status_update(self, agent_id, agent_name, last_seen, metrics: dict):
         """Send a full agent status update to the server using the new SendAgentStatus RPC."""
         try:
-            from generated.agent_status_service_pb2 import AgentInfo, AgentStatusUpdateRequest
             agent_info = AgentInfo(
                 agent_id=agent_id,
                 agent_name=agent_name,
@@ -195,8 +196,6 @@ class ServerManager:
                 metrics=metrics
             )
             request = AgentStatusUpdateRequest(agent=agent_info)
-            # Use the new stub
-            from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
             if self.channel is None:
                 self._ensure_connection()
             stub = AgentStatusServiceStub(self.channel)

@@ -66,7 +66,7 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
     if frontend_count > 0:
         for fe_ws in list(state.frontend_connections):
             fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
-            logger.info(f"Broadcasting message {message_data.get('message_id','N/A')} to {fe_client_desc}")
+            logger.debug(f"Broadcasting message {message_data.get('message_id','N/A')} to {fe_client_desc}")
             if not await services._safe_send_websocket(fe_ws, payload_str, fe_client_desc):
                 disconnected_frontend.add(fe_ws)
         if disconnected_frontend:
