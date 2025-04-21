@@ -55,11 +55,10 @@ Ensure the required environment variables (especially `MISTRAL_API_KEY`) are set
 Run the agent, providing a unique name:
 
 ```bash
-# Example using agent.py (Mistral LLM + RabbitMQ)
-poetry run python src/agent.py --name "MistralAgent"
+# Option 1: Running directly with Poetry (for development)
+cd agent
+poetry run ./run.sh --name "MyAgent"
 
-# Example using example_agent.py (Shell/Python execution via gRPC commands)
-# poetry run python src/example_agent.py --name "ExecutorAgent"
 ```
 
 ### Command-line Arguments (`agent.py`)
@@ -69,17 +68,7 @@ poetry run python src/agent.py --name "MistralAgent"
 -   `--rabbitmq-host`: (Optional) Overrides the `RABBITMQ_HOST` environment variable or default RabbitMQ server host.
 -   *(Note: `agent.py` currently uses `GRPC_HOST`/`GRPC_PORT` environment variables for gRPC connection, not command-line args)*
 
-Example with custom options for `agent.py`:
 
-```bash
-export MISTRAL_API_KEY='your_key_here'
-export GRPC_HOST='server.example.com'
-export GRPC_PORT='50051'
-poetry run python src/agent.py \
-    --id agent_mistral_1 \
-    --name "Mistral Agent Alpha" \
-    --rabbitmq-host "rabbitmq.example.com"
-```
 
 ## Information Flow Diagram (`agent.py`)
 
@@ -143,6 +132,28 @@ The `Agent` class orchestrates these handlers and manages high-level agent logic
     c.  The main loop and consumer thread stop.
 
 *(Note: `example_agent.py` provides a different example focusing on receiving and executing shell/python commands via the gRPC `ReceiveCommands` stream and sending results back via `SendCommandResult`.)*
+
+## Agent Status Updates (DRY, Microservice-Appropriate)
+
+The agent now uses the `SendAgentStatus` RPC (in the AgentStatusService) to send its full state to the server whenever its state changes. All state is reported as key/value pairs in the `metrics` map of the `AgentInfo` message. This is more flexible and future-proof than the previous HeartbeatRequest approach, and avoids redundancy (no separate is_online/status fields).
+
+- On every state change, the agent sends a status update with all current state as metrics.
+- The server stores these metrics as a dict keyed by agent_id.
+- This mechanism is DRY, simple, and microservice-appropriate.
+
+Example metrics sent:
+
+```json
+{
+  "internal_state": "idle",
+  "grpc_status": "connected",
+  "registration_status": "registered",
+  "message_queue_status": "connected",
+  ...
+}
+```
+
+See the proto definition for details on the `SendAgentStatus` RPC and the `metrics` map.
 
 ## Command Handling
 

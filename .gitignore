@@ -193,3 +193,8 @@ src/__pycache__/llm_interface.cpython-39.pyc
 
 .env
 .env.api
+
+# Generated gRPC files
+shared/generated/
+agent/generated/
+broker/src/generated/

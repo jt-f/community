@@ -18,6 +18,16 @@ Docker and Docker Compose V2 are used for the core infrastructure. For installat
 
 - Python 3.13.2+ (for running agents)
 - Docker and Docker Compose V2 (for infrastructure)
+- Poetry (for Python dependency management)
+
+## Project Structure
+
+- `shared/` - Contains shared components including proto definitions
+- `agent/` - Agent implementation
+- `broker/` - Message broker implementation
+- `server/` - Server implementation
+- `frontend/` - Web frontend
+- `shared_models/` - Shared Python models
 
 ## Running the System
 
@@ -30,15 +40,28 @@ docker compose up --build
 Run an agent:
 
 ```bash
+# Option 1: Running directly with Poetry
 cd agent
-poetry install
-poetry run python src/agent.py --name "MyAgent"
+./run.sh --name "MyAgent"
+
+
 ```
 
 To stop all services:
 
 ```bash
 docker compose down
+```
+
+## Proto Definitions
+
+The system uses Protocol Buffers for gRPC communication. Proto definitions are stored in `shared/protos/` and are shared across all services. Each service generates its own gRPC code from these shared definitions.
+
+To rebuild gRPC code for a specific service:
+
+```bash
+cd <service_directory>
+./build_protos.sh
 ```
 
 ## Documentation
@@ -218,7 +241,8 @@ poetry run python src/broker.py
 
 5. **Agent(s):**
 ```bash
+# Option 1: Running directly with Poetry
 cd agent
 source ~/.bashrc
-poetry run python src/agent.py --name "AgentName1"
-```
+poetry run ./run.sh --name "MyAgent"
+

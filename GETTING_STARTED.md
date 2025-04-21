@@ -48,84 +48,116 @@ On Linux, you'll need to install Docker Engine and Docker Compose separately:
    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
    ```
 
-2. Verify the installation:
+2. Install Docker Compose:
    ```bash
-   sudo docker run hello-world
+   sudo apt-get install docker-compose-plugin
    ```
 
-3. Configure Docker to run without sudo (optional):
+## Installing Python and Poetry
+
+1. Install Python 3.13.2 using pyenv:
    ```bash
-   sudo groupadd docker
-   sudo usermod -aG docker $USER
-   # Log out and log back in for changes to take effect
+   pyenv install 3.13.2
+   pyenv global 3.13.2
    ```
 
-4. Docker Compose V2 is included as a plugin with Docker Engine. Verify it's working:
+2. Install Poetry:
    ```bash
-   docker compose version
+   curl -sSL https://install.python-poetry.org | python3 -
    ```
 
-For other Linux distributions or more details, see the [official Docker documentation](https://docs.docker.com/engine/install/).
+## Setting Up the Project
 
-## Quick Start
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd community
+   ```
 
-### 1. Clone the Repository (if you haven't already)
+2. Install dependencies for each service:
+   ```bash
+   cd agent && poetry install && cd ..
+   cd broker && poetry install && cd ..
+   cd server && poetry install && cd ..
+   ```
+
+3. Build the gRPC code for each service:
+   ```bash
+   cd agent && ./build_protos.sh && cd ..
+   cd broker && ./build_protos.sh && cd ..
+   cd server && ./build_protos.sh && cd ..
+   ```
+
+## Running the System
+
+1. Start the core infrastructure:
+   ```bash
+   docker compose up --build
+   ```
+
+2. In a new terminal, run an agent:
+   ```bash
+   # Option 1: Running directly with Poetry
+   cd agent
+   poetry run ./run.sh --name "MyAgent"
+   
+   ```
+
+   Note: Agents can be run only directly with Poetry/Python.
+
+3. Access the web interface at http://localhost:5173
+
+## Development Workflow
+
+### Modifying Proto Definitions
+
+1. Edit the proto files in `shared/protos/`
+2. Rebuild gRPC code for affected services:
+   ```bash
+   cd <service_directory>
+   ./build_protos.sh
+   ```
+
+### Running Services Locally
+
+Each service can be run locally using its run script:
 
 ```bash
-git clone https://github.com/yourusername/community.git
-cd community
+cd <service_directory>
+./run.sh [arguments]
 ```
 
-### 2. Start Core Infrastructure
+### Docker Development
 
-The simplest way to get started is to use Docker Compose to start all the core components:
+When developing with Docker:
 
-```bash
-# Build and start all core services
-docker compose up --build
-```
+1. The shared proto files are mounted into each container
+2. gRPC code is generated during the build process
+3. Changes to proto files require rebuilding the affected containers:
+   ```bash
+   docker compose build <service_name>
+   docker compose up -d <service_name>
+   ```
 
-This will:
-- Start RabbitMQ message broker
-- Start the server component
-- Start the message routing broker
-- Start the frontend application
+## Troubleshooting
 
-Once everything is up and running, you can access:
-- The web frontend at: http://localhost:5173
-- RabbitMQ Management UI at: http://localhost:15673 (login: guest/guest)
+If you encounter issues:
 
-### 3. Start an Agent
+1. Check the Docker logs:
+   ```bash
+   docker compose logs
+   ```
 
-Agents are run separately to allow for dynamic configuration and flexibility. Open a new terminal:
+2. Verify gRPC code generation:
+   ```bash
+   cd <service_directory>
+   ./build_protos.sh
+   ```
 
-```bash
-cd agent
-
-# Make sure you're using Python 3.13.2+
-# If using pyenv:
-pyenv install 3.13.2  # if not already installed
-pyenv local 3.13.2
-
-# Install Poetry if not already installed
-# curl -sSL https://install.python-poetry.org | python3 -
-
-# Install dependencies (first time only)
-poetry install
-
-# Run an agent
-poetry run python src/agent.py --name "MyFirstAgent"
-```
-
-You can start multiple agents in different terminals, each with a unique name.
-
-### 4. Using the System
-
-1. Open the web frontend at http://localhost:5173
-2. You should see your agent(s) listed in the agent directory
-3. Click on an agent to start a conversation
-4. Type a message and press Enter to send it to the agent
-5. The agent will process the message and send a response
+3. Check service dependencies:
+   ```bash
+   docker compose ps
+   ```
 
 ## Environment Variables for Agents
 
@@ -138,31 +170,6 @@ echo "MISTRAL_API_KEY=your_api_key_here" > agent/.env
 # Or set the environment variable directly
 export MISTRAL_API_KEY=your_api_key_here
 ```
-
-## Troubleshooting
-
-### Poetry Configuration
-
-If you encounter errors about Poetry configuration being invalid, ensure:
-- Your Poetry is up to date (`poetry self update`)
-- The pyproject.toml file has the correct format, especially for the authors field
-
-### Port Conflicts
-
-If you see errors about ports already in use, you may need to modify the port mappings in compose.yaml or stop other services using those ports.
-
-### Agent Connectivity
-
-If agents can't connect to the server or RabbitMQ:
-- Ensure the core infrastructure is fully started before launching agents
-- Check that your firewall isn't blocking the required ports
-- Verify you're running the agent with the correct environment variables
-
-### Docker Issues
-
-If Docker Compose fails to build or start the services:
-- Try running `docker compose down` and then `docker compose up --build` again
-- Check Docker logs for specific error messages
 
 ## Next Steps
 

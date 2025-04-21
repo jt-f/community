@@ -108,12 +108,13 @@ class Agent:
         return result
 
     async def _send_status_update_on_state_change(self):
-        """Send a gRPC status update to the server with the full agent state."""
+        """Send a gRPC status update to the server with the full agent state using SendAgentStatus."""
         try:
-            await self.server_manager.send_status_update(
+            await self.server_manager.send_agent_status_update(
                 self.agent_id,
-                status=self.state.get_state('internal_state'),
-                metrics=self.state.get_state()
+                self.agent_name,
+                self.state.get_state('last_seen') if 'last_seen' in self.state.get_state() else '',
+                self.state.get_state()
             )
         except Exception as e:
             logger.debug(f"Failed to send status update on state change: {e}")

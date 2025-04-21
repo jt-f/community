@@ -31,6 +31,8 @@ subscription_lock = asyncio.Lock()
 class AgentStatusServicer(AgentStatusServiceServicer):
     """Implementation of the AgentStatusService"""
     
+    agent_metrics_store = {}  # In-memory store for agent metrics, keyed by agent_id
+
     async def SubscribeToAgentStatus(self, request, context):
         """
         Stream agent status updates to the broker.
@@ -96,6 +98,16 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         # Simply return the current status
         return await self._create_status_response(is_full_update=True)
     
+    async def SendAgentStatus(self, request, context):
+        """Handle agent-initiated status updates via SendAgentStatus RPC."""
+        agent = request.agent
+        agent_id = agent.agent_id
+        metrics = dict(agent.metrics)
+        self.agent_metrics_store[agent_id] = metrics
+        logger.info(f"Received status update from agent {agent_id}: {metrics}")
+        from generated.agent_status_service_pb2 import AgentStatusUpdateResponse
+        return AgentStatusUpdateResponse(success=True, message="Status update received.")
+
     async def _create_status_response(self, is_full_update=False):
         """Create an AgentStatusResponse from the current agent status state"""
         response = AgentStatusResponse()

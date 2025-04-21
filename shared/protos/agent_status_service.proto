@@ -9,6 +9,9 @@ service AgentStatusService {
   
   // Request a one-time full agent status update
   rpc GetAgentStatus (AgentStatusRequest) returns (AgentStatusResponse) {}
+
+  // Agent-initiated push of its current status (unsolicited update)
+  rpc SendAgentStatus (AgentStatusUpdateRequest) returns (AgentStatusUpdateResponse) {}
 }
 
 // Request message for agent status
@@ -22,11 +25,21 @@ message AgentStatusResponse {
   bool is_full_update = 2;  // Whether this is a complete agent list or just updates
 }
 
+// Agent-initiated status update request
+message AgentStatusUpdateRequest {
+  AgentInfo agent = 1;
+}
+
+// Simple ack/response for status update
+message AgentStatusUpdateResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // Information about an individual agent
 message AgentInfo {
   string agent_id = 1;
   string agent_name = 2;
-  bool is_online = 3;
-  string last_seen = 4;  // ISO format timestamp
-  string status = 5;     // Agent status: online, paused, offline, etc.
+  string last_seen = 3;  // ISO format timestamp
+  map<string, string> metrics = 4; // All agent state as key/value pairs
 }

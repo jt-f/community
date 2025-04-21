@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import agent_registration_service_pb2 as agent__registration__service__pb2
+from src.generated import agent_registration_service_pb2 as agent__registration__service__pb2
 
 GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__

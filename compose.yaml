@@ -39,6 +39,7 @@ services:
       - GRPC_PORT=50051
     volumes:
       - ./shared_models:/app/shared_models
+      - ./shared/protos:/app/shared/protos
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
       - GRPC_PORT=50051
     volumes:
       - ./shared_models:/app/shared_models
+      - ./shared/protos:/app/shared/protos
     depends_on:
       - server
 

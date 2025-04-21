@@ -33,6 +33,28 @@ This service provides the backend infrastructure for agent communication, acting
 *   **Broker Status Management:** (Currently minimal, potentially tracked via gRPC `AgentStatusService` subscriptions or specific RMQ messages if implemented).
 *   **Graceful Shutdown (`utils.py`, `main.py`):** Handles SIGINT/SIGTERM signals for cleaning up connections (WebSocket, RabbitMQ), stopping the gRPC server, and cancelling background tasks.
 
+## Agent Status Updates (DRY, Microservice-Appropriate)
+
+Agents now use the `SendAgentStatus` RPC (in the AgentStatusService) to send their full state to the server whenever their state changes. All state is reported as key/value pairs in the `metrics` map of the `AgentInfo` message. This is more flexible and future-proof than the previous HeartbeatRequest approach, and avoids redundancy (no separate is_online/status fields).
+
+- On every state change, the agent sends a status update with all current state as metrics.
+- The server stores these metrics as a dict keyed by agent_id.
+- This mechanism is DRY, simple, and microservice-appropriate.
+
+Example metrics received:
+
+```json
+{
+  "internal_state": "idle",
+  "grpc_status": "connected",
+  "registration_status": "registered",
+  "message_queue_status": "connected",
+  ...
+}
+```
+
+See the proto definition for details on the `SendAgentStatus` RPC and the `metrics` map.
+
 ## Project Structure (`src/`)
 
 *   `main.py`: FastAPI application setup, entry point, lifespan management (RabbitMQ connect/disconnect, gRPC server start/stop, background task startup), CORS, Uvicorn runner.
@@ -79,13 +101,20 @@ Key environment variables (see `src/config.py`):
 
 ## Running the Server
 
-Ensure RabbitMQ is running.
+The server must be run using Docker.
 
 ```bash
-poetry run python src/main.py
+# Using Docker Compose
+docker-compose up server
+
+# OR using Docker directly
+docker build -f server/Dockerfile .
+docker run -p 8765:8765 -p 50051:50051 community_server 
 ```
 
-The server will start the FastAPI/Uvicorn server (default: `0.0.0.0:8765`) and the gRPC server (default: `localhost:50051`).
+This will start the FastAPI/Uvicorn server (default: `0.0.0.0:8765`) and the gRPC server (default: `localhost:50051`).
+
+Note: Ensure that Docker is installed on your system and that RabbitMQ is accessible to the container (either running in another container with proper networking or on the host machine).
 
 ## Communication Flows (Simplified)
 

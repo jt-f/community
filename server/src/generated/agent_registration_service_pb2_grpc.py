@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import agent_registration_service_pb2 as agent__registration__service__pb2
+from src.generated import agent_registration_service_pb2 as agent__registration__service__pb2
 
 GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
@@ -52,7 +52,7 @@ class AgentRegistrationServiceStub(object):
                 _registered_method=True)
         self.ReceiveCommands = channel.unary_stream(
                 '/agent_registration.AgentRegistrationService/ReceiveCommands',
-                request_serializer=agent__registration__service__pb2.CommandStreamRequest.SerializeToString,
+                request_serializer=agent__registration__service__pb2.ReceiveCommandsRequest.SerializeToString,
                 response_deserializer=agent__registration__service__pb2.Command.FromString,
                 _registered_method=True)
         self.SendCommandResult = channel.unary_unary(
@@ -121,7 +121,7 @@ def add_AgentRegistrationServiceServicer_to_server(servicer, server):
             ),
             'ReceiveCommands': grpc.unary_stream_rpc_method_handler(
                     servicer.ReceiveCommands,
-                    request_deserializer=agent__registration__service__pb2.CommandStreamRequest.FromString,
+                    request_deserializer=agent__registration__service__pb2.ReceiveCommandsRequest.FromString,
                     response_serializer=agent__registration__service__pb2.Command.SerializeToString,
             ),
             'SendCommandResult': grpc.unary_unary_rpc_method_handler(
@@ -237,7 +237,7 @@ class AgentRegistrationService(object):
             request,
             target,
             '/agent_registration.AgentRegistrationService/ReceiveCommands',
-            agent__registration__service__pb2.CommandStreamRequest.SerializeToString,
+            agent__registration__service__pb2.ReceiveCommandsRequest.SerializeToString,
             agent__registration__service__pb2.Command.FromString,
             options,
             channel_credentials,

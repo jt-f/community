@@ -68,8 +68,31 @@ Ensure the required environment variables are set and gRPC code is generated.
 
 Start the broker service:
 ```bash
+# Option 1: Running directly with Poetry (for development)
 poetry run python src/broker.py
+
+# Option 2: Using Docker Compose
+docker compose up broker
+
+# Option 3: Using Docker directly
+docker build -f broker/Dockerfile -t community_broker .
+docker run -p 50051:50051 community_broker
 ```
+
+## Running with Docker
+
+When running with Docker, you can pass environment variables using the `-e` flag:
+
+```bash
+docker run -p 50051:50051 \
+  -e GRPC_HOST=host.docker.internal \
+  -e GRPC_PORT=50051 \
+  -e RABBITMQ_HOST=host.docker.internal \
+  -e BROKER_NAME=DockerBroker \
+  community_broker
+```
+
+Note: When using Docker, you may need to use `host.docker.internal` instead of `localhost` to connect to services running on the host machine, or ensure proper Docker networking is set up between containers.
 
 ## Information Flow Diagram
 

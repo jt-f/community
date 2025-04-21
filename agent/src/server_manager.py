@@ -134,6 +134,7 @@ class ServerManager:
             metrics=metrics or {}
         )
         try:
+            logger.info(f"Sending heartbeat/status update '{status}', metrics: {metrics}...")
             response = await self.stub.SendHeartbeat(request, timeout=5.0)
             if response.success:
                 logger.debug(f"Heartbeat/Status update '{status}' sent successfully.")
@@ -181,6 +182,29 @@ class ServerManager:
             return False
         except Exception as e:
             logger.error(f"Unexpected error sending command result: {e}")
+            return False
+
+    async def send_agent_status_update(self, agent_id, agent_name, last_seen, metrics: dict):
+        """Send a full agent status update to the server using the new SendAgentStatus RPC."""
+        try:
+            from generated.agent_status_service_pb2 import AgentInfo, AgentStatusUpdateRequest
+            agent_info = AgentInfo(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                last_seen=last_seen,
+                metrics=metrics
+            )
+            request = AgentStatusUpdateRequest(agent=agent_info)
+            # Use the new stub
+            from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
+            if self.channel is None:
+                self._ensure_connection()
+            stub = AgentStatusServiceStub(self.channel)
+            response = await stub.SendAgentStatus(request)
+            logger.info(f"Sent agent status update via SendAgentStatus: {response.message}")
+            return response.success
+        except Exception as e:
+            logger.warning(f"Failed to send agent status update: {e}")
             return False
 
     async def _command_stream_loop(self, agent_id):

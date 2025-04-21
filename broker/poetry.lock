@@ -336,20 +336,6 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
 
 [[package]]
-name = "shared-models"
-version = "0.1.2"
-description = "Shared models for the community project"
-optional = false
-python-versions = ">=3.13"
-groups = ["main"]
-files = []
-develop = true
-
-[package.source]
-type = "directory"
-url = "../shared_models"
-
-[[package]]
 name = "typing-extensions"
 version = "4.13.2"
 description = "Backported and Experimental Type Hints for Python 3.8+"
@@ -379,4 +365,4 @@ typing-extensions = ">=4.12.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13"
-content-hash = "5e5adb4cbde52ffc9cf9928787a437ed328d72ed5f41d68bcdeca04d254f7fb9"
+content-hash = "2f8bdfe716db15e12f684f5edfa7af0d1df0ebbe1fee602f126f88f298637ccf"

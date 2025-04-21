@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import agent_status_service_pb2 as agent__status__service__pb2
+from src.generated import agent_status_service_pb2 as agent__status__service__pb2
 
 GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
@@ -45,6 +45,11 @@ class AgentStatusServiceStub(object):
                 request_serializer=agent__status__service__pb2.AgentStatusRequest.SerializeToString,
                 response_deserializer=agent__status__service__pb2.AgentStatusResponse.FromString,
                 _registered_method=True)
+        self.SendAgentStatus = channel.unary_unary(
+                '/agent_status.AgentStatusService/SendAgentStatus',
+                request_serializer=agent__status__service__pb2.AgentStatusUpdateRequest.SerializeToString,
+                response_deserializer=agent__status__service__pb2.AgentStatusUpdateResponse.FromString,
+                _registered_method=True)
 
 
 class AgentStatusServiceServicer(object):
@@ -65,6 +70,13 @@ class AgentStatusServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SendAgentStatus(self, request, context):
+        """Agent-initiated push of its current status (unsolicited update)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentStatusServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -77,6 +89,11 @@ def add_AgentStatusServiceServicer_to_server(servicer, server):
                     servicer.GetAgentStatus,
                     request_deserializer=agent__status__service__pb2.AgentStatusRequest.FromString,
                     response_serializer=agent__status__service__pb2.AgentStatusResponse.SerializeToString,
+            ),
+            'SendAgentStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendAgentStatus,
+                    request_deserializer=agent__status__service__pb2.AgentStatusUpdateRequest.FromString,
+                    response_serializer=agent__status__service__pb2.AgentStatusUpdateResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -134,6 +151,33 @@ class AgentStatusService(object):
             '/agent_status.AgentStatusService/GetAgentStatus',
             agent__status__service__pb2.AgentStatusRequest.SerializeToString,
             agent__status__service__pb2.AgentStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SendAgentStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/agent_status.AgentStatusService/SendAgentStatus',
+            agent__status__service__pb2.AgentStatusUpdateRequest.SerializeToString,
+            agent__status__service__pb2.AgentStatusUpdateResponse.FromString,
             options,
             channel_credentials,
             insecure,
