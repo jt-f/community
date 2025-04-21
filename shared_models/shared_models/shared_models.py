@@ -87,9 +87,8 @@ class AgentStatus(BaseModel):
     """Represents the status of a single agent."""
     agent_id: str
     agent_name: str
-    is_online: bool = True
     last_seen: str = datetime.now().strftime("%H:%M:%S")
-    status: str = "online"  # New field: online, paused, offline, etc.
+    metrics: Optional[dict[str, str]] = None  # New metrics map for internal_state and other metrics
 
 class AgentStatusUpdate(BaseModel):
     """Message containing the current status of all registered agents."""

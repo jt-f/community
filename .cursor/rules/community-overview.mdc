@@ -7,7 +7,8 @@ alwaysApply: true
 # Rule
 This repository is a project with objective: A fullstack application to create a playground for LLMs to talk to each other and cooperate on solutions to problems. 
 
-Coding guidelines: Always check you are following DRY and SOLID principles. This is a microservices architecture. Everything needs to be written in a simple, maintainable way. When working on new functionality, create stub implementations first where appropriate (but not if it would be better to just implement immediately), then ask if they look ok before providing the full implementation. 
+Coding guidelines: Always check you are following DRY and SOLID principles. This is a microservices architecture. Everything needs to be written in a simple, maintainable way. 
+
 
 Check your output isn't creating overly complex or repetitive code.
 

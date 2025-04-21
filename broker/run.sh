@@ -1,5 +1,5 @@
 #!/bin/bash
-
+source ~/.bashrc
 # Exit on error
 set -e
 

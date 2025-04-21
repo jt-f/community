@@ -14,10 +14,20 @@ export enum MessageType {
   REPLY = 'REPLY',
   SYSTEM = 'SYSTEM',
   ERROR = 'ERROR',
-  AGENT_STATUS_UPDATE = 'AGENT_STATUS_UPDATE',
+  // System message types
+  PING = 'PING',
+  PONG = 'PONG',
+  // Registration types
+  REGISTER_AGENT = 'REGISTER_AGENT',
+  REGISTER_AGENT_RESPONSE = 'REGISTER_AGENT_RESPONSE',
+  REGISTER_BROKER = 'REGISTER_BROKER',
+  REGISTER_BROKER_RESPONSE = 'REGISTER_BROKER_RESPONSE',
   REGISTER_FRONTEND = 'REGISTER_FRONTEND',
   REGISTER_FRONTEND_RESPONSE = 'REGISTER_FRONTEND_RESPONSE',
-  REGISTER_AGENT_RESPONSE = 'REGISTER_AGENT_RESPONSE',
+  // Status related types
+  AGENT_STATUS_UPDATE = 'AGENT_STATUS_UPDATE',
+  REQUEST_AGENT_STATUS = 'REQUEST_AGENT_STATUS',
+  CLIENT_DISCONNECTED = 'CLIENT_DISCONNECTED',
   // --- Custom system control types ---
   PAUSE_AGENT = 'PAUSE_AGENT',
   RESUME_AGENT = 'RESUME_AGENT',
@@ -33,15 +43,17 @@ export enum MessageType {
 export interface AgentStatus {
   agent_id: string;
   agent_name: string;
-  is_online: boolean;
   last_seen: string;
-  status?: string; // Add status field (online, paused, offline)
+  metrics: Record<string, string>; // New metrics map for internal_state and other metrics
 }
 
 export interface AgentStatusUpdateMessage {
   message_type: MessageType.AGENT_STATUS_UPDATE;
   agents: AgentStatus[];
+  is_full_update: boolean;
 }
+
+// Removed AgentWithMetrics interface as it is unnecessary and replaced its usage with AgentStatus.
 
 // Helper function to create a new message
 export function createMessage(

@@ -19,7 +19,7 @@ This directory contains Python data models and enumerations shared across the di
     -   Includes helper class methods (`create`, `from_dict`) and instance methods (`to_dict`).
 -   **`AgentRegistrationMessage`**: Structure for the message sent by an agent *to the server* during registration (now contains primarily `agent_name`, as `agent_id` is assigned by the server).
 -   **`AgentRegistrationResponse`**: Structure for the server's response to an agent's registration attempt, including `status`, assigned `agent_id`, and a `message`.
--   **`AgentStatus`**: Represents the status information for a single agent, including `agent_id`, `agent_name`, `is_online`, and `last_seen` timestamp.
+-   **`AgentStatus`**: Represents the status information for a single agent, including `agent_id`, `agent_name`, and `last_seen` timestamp. The legacy `is_online` and `status` fields have been removed. Use the `metrics` map for extensible state.
 -   **`AgentStatusUpdate`**: Structure for the message broadcast by the server containing a list of `AgentStatus` objects for multiple agents. Includes `message_type` and a list of `AgentStatus` objects.
 
 ### Helper Functions

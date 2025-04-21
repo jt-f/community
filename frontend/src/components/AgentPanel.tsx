@@ -23,6 +23,11 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       if (lastMessage.is_full_update) {
         console.log('AgentPanel: Received full agent status update');
       }
+      
+      // Check if we have the new format or legacy format
+      const hasNewFormat = lastMessage.agents.length > 0 && 'metrics' in lastMessage.agents[0];
+      console.log(`AgentPanel: Processing ${hasNewFormat ? 'new' : 'legacy'} agent status format`);
+      
       updateAgents(lastMessage.agents, lastMessage.is_full_update);
     }
   }, [lastMessage, updateAgents]);

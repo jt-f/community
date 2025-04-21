@@ -4,7 +4,6 @@ import json
 import logging
 import uuid
 
-
 # Local imports
 from shared_models import setup_logging
 from state import AgentState

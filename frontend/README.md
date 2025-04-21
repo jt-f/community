@@ -95,6 +95,32 @@ serve -s dist
 -   Provides connection status (`isConnected`) and a `sendMessage` function via `WebSocketContext` for components to use.
 -   Includes logic for automatic reconnection attempts on disconnection.
 
+## Agent Status Indicator Colors
+
+The agent list now uses color-coded indicator lights for each known `internal_state` value:
+
+- **idle**: green
+- **initializing**: orange
+- **working**: blue
+- **paused**: yellow (with pulse animation)
+- **offline**: red
+- **unknown/other**: white (with border)
+
+This makes it easy to visually distinguish agent states at a glance. See `src/components/AgentList.tsx` for implementation details.
+
+## Agent Subsystem Status Icons
+
+Each agent row now displays a set of status icons (green check or red cross) for the following subsystems:
+
+- **Messaging queue** (message_queue_status)
+- **Server** (grpc_status)
+- **AI** (llm_client_status)
+- **Registered** (registration_status)
+
+A green check means the subsystem is healthy (e.g., 'connected' or 'registered'), and a red cross means it is not. Hovering over an icon shows a tooltip with the subsystem name and its current status value. This makes it easy to see at a glance which parts of each agent are working.
+
+See `src/components/AgentList.tsx` for implementation details.
+
 ## Information Flow (Example: User sends a message)
 
 ```mermaid

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, createContext } from 'react';
+import React, { useRef, useEffect, useState, createContext } from 'react';
 import { AgentPanel } from './AgentPanel';
 import Chat from './Chat';
 import { MessageType } from '../types/message';
@@ -103,13 +103,21 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
       if (message.message_type === MessageType.AGENT_STATUS_UPDATE && message.agents) {
         setAgentNameMap(prevMap => {
           const newMap = { ...prevMap };
-          message.agents.forEach((agent: { agent_id: string; agent_name: string }) => {
-            if (agent.agent_id && agent.agent_name) {
+          message.agents.forEach((agent: any) => {
+            // Check for new format (agent with metrics) or legacy format
+            if (agent.agent_id && agent.metrics?.agent_name) {
+              // New format with metrics
+              newMap[agent.agent_id] = agent.metrics.agent_name;
+            } else if (agent.agent_id && agent.agent_name) {
+              // Legacy format
               newMap[agent.agent_id] = agent.agent_name;
             }
           });
           return newMap;
         });
+        
+        // Log the agent update format for debugging
+        console.log(`Agent update format: ${message.agents.length > 0 && 'metrics' in message.agents[0] ? 'New with metrics' : 'Legacy'}`);
       }
 
       // Set the last message to broadcast to child components
@@ -277,7 +285,7 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
         <div className="chat-container">
           <Chat wsRef={wsRef} isConnected={isConnected} userId={userId} />
         </div>
-        <AgentPanel wsRef={wsRef} isConnected={isConnected} />
+        <AgentPanel wsRef={wsRef} isConnected={isConnected} clientId={userId} />
 
         <style>
           {`

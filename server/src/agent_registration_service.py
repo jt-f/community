@@ -60,7 +60,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         status = AgentStatus(
             agent_id=agent_id,
             agent_name=agent_name or f"Agent-{agent_id[:8]}",
-            is_online=True,
             last_seen=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         )
         
@@ -103,10 +102,10 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         
         logger.info(f"Unregistering agent: {agent_id}")
         
-        # Remove agent from status registry or mark as offline
+        # Remove agent from status registry and update status
         if agent_id in state.agent_statuses:
             status = state.agent_statuses[agent_id]
-            status.is_online = False
+            status.status = "offline"
             status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             state.update_agent_status(agent_id, status)
         
@@ -228,7 +227,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
                 if agent_id in state.agent_statuses:
                     status = state.agent_statuses[agent_id]
                     status.status = new_status
-                    status.is_online = new_status != "offline"
                     status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     await state.update_agent_status(agent_id, status)
                 else:
@@ -261,10 +259,6 @@ async def send_command_to_agent(agent_id: str, command_type: str, content: str =
     # Validate agent exists
     if agent_id not in state.agent_statuses:
         logger.error(f"Cannot send command to non-existent agent: {agent_id}")
-        return False
-        
-    if not state.agent_statuses[agent_id].is_online:
-        logger.error(f"Cannot send command to offline agent: {agent_id}")
         return False
     
     # Generate a unique command ID
@@ -365,4 +359,4 @@ def start_registration_service(server):
     """Add the agent registration service to the given gRPC server"""
     servicer = AgentRegistrationServicer()
     add_AgentRegistrationServiceServicer_to_server(servicer, server)
-    logger.info("Agent registration service added to gRPC server") 
+    logger.info("Agent registration service added to gRPC server")

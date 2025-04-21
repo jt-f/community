@@ -144,23 +144,25 @@ async def _process_server_input_message(message_data: dict):
 
             # Forward to the final agent recipient
             if receiver_id in state.agent_statuses:
-                if state.agent_statuses[receiver_id].is_online:
+                # Use internal_state from metrics to determine if agent is online
+                agent_metrics = getattr(state.agent_statuses[receiver_id], 'metrics', {}) or {}
+                if agent_metrics.get('internal_state', 'offline') == 'online':
                     if publish_to_agent_queue(receiver_id, message_data):
                         logger.info(f"Published routed message {original_message_id} to {receiver_id}'s queue.")
                     else:
                         logger.error(f"Failed to publish routed message {original_message_id} to agent {receiver_id}'s queue.")
                 else:
-                    logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is offline.")
-                    # Notify broker and original sender that agent is offline
+                    logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is not online.")
+                    # Notify broker and original sender that agent is not online
                     error_resp = {
                         "message_type": MessageType.ERROR,
                         "sender_id": "server",
                         "receiver_id": message_data.get("sender_id", "unknown"),
                         "routing_status": "error",
-                        "text_payload": f"Agent {receiver_id} is offline. Message could not be delivered."
+                        "text_payload": f"Agent {receiver_id} is not online. Message could not be delivered."
                     }
                     if publish_to_broker_input_queue(error_resp):
-                        logger.info(f"Sent agent offline error for message {original_message_id} to broker.")
+                        logger.info(f"Sent agent not-online error for message {original_message_id} to broker.")
             elif receiver_id == "Server":
                  # A message explicitly routed to the server? Handle server-specific functionality.
                  logger.info(f"Message {original_message_id} from {sender_id} routed to the Server. Server-side processing.")
@@ -184,11 +186,13 @@ async def _process_server_input_message(message_data: dict):
                 await _broadcast_to_frontends(payload_str, message_type, f"Server (legacy routed)", original_message_id)
                 
                 # Forward to agent if valid
-                if receiver_id in state.agent_statuses and state.agent_statuses[receiver_id].is_online:
-                    if publish_to_agent_queue(receiver_id, message_data):
-                        logger.info(f"Published legacy routed message {original_message_id} to {receiver_id}'s queue.")
-                    else:
-                        logger.error(f"Failed to publish legacy routed message {original_message_id} to agent {receiver_id}'s queue.")
+                if receiver_id in state.agent_statuses:
+                    agent_metrics = getattr(state.agent_statuses[receiver_id], 'metrics', {}) or {}
+                    if agent_metrics.get('internal_state', 'offline') == 'online':
+                        if publish_to_agent_queue(receiver_id, message_data):
+                            logger.info(f"Published legacy routed message {original_message_id} to {receiver_id}'s queue.")
+                        else:
+                            logger.error(f"Failed to publish legacy routed message {original_message_id} to agent {receiver_id}'s queue.")
                 
     except Exception as e:
         logger.error(f"Error processing message from server input queue: {e}", exc_info=True)
@@ -453,7 +457,8 @@ async def _handle_control_message(message_data: dict):
         # Iterate over all online agents and send a pause command
         tasks = []
         for agent_id, status in state.agent_statuses.items():
-            if status.is_online:
+            agent_metrics = getattr(status, 'metrics', {}) or {}
+            if agent_metrics.get('internal_state', 'offline') == 'online':
                 # Set agent status to paused
                 status.status = "paused"
                 # Send a 'pause' command (type can be 'pause', content can be empty or a message)
@@ -487,13 +492,15 @@ async def _handle_control_message(message_data: dict):
     # Handle PAUSE_AGENT
     elif message_type == MessageType.PAUSE_AGENT and agent_id:
         from agent_registration_service import send_command_to_agent
-        if agent_id in state.agent_statuses and state.agent_statuses[agent_id].is_online:
-            state.agent_statuses[agent_id].status = "paused"
-            await send_command_to_agent(agent_id, "pause", "")
-            logger.info(f"Sent PAUSE command to agent {agent_id}.")
-            await agent_manager.broadcast_agent_status(force_full_update=True)
-        else:
-            logger.warning(f"Cannot pause agent {agent_id}: Not found or not online.")
+        if agent_id in state.agent_statuses:
+            agent_metrics = getattr(state.agent_statuses[agent_id], 'metrics', {}) or {}
+            if agent_metrics.get('internal_state', 'offline') == 'online':
+                state.agent_statuses[agent_id].status = "paused"
+                await send_command_to_agent(agent_id, "pause", "")
+                logger.info(f"Sent PAUSE command to agent {agent_id}.")
+                await agent_manager.broadcast_agent_status(force_full_update=True)
+            else:
+                logger.warning(f"Cannot pause agent {agent_id}: Not online.")
 
     # Handle RESUME_AGENT
     elif message_type == MessageType.RESUME_AGENT and agent_id:

@@ -35,7 +35,7 @@ This service provides the backend infrastructure for agent communication, acting
 
 ## Agent Status Updates (DRY, Microservice-Appropriate)
 
-Agents now use the `SendAgentStatus` RPC (in the AgentStatusService) to send their full state to the server whenever their state changes. All state is reported as key/value pairs in the `metrics` map of the `AgentInfo` message. This is more flexible and future-proof than the previous HeartbeatRequest approach, and avoids redundancy (no separate is_online/status fields).
+Agents now use the `SendAgentStatus` RPC (in the AgentStatusService) to send their full state to the server whenever their state changes. All state is reported as key/value pairs in the `metrics` map of the `AgentInfo` message. This is more flexible and future-proof than the previous HeartbeatRequest approach, and avoids redundancy (no separate is_online/status fields, which have been removed).
 
 - On every state change, the agent sends a status update with all current state as metrics.
 - The server stores these metrics as a dict keyed by agent_id.

@@ -15,13 +15,13 @@ def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
     """Check if an agent's status has changed from its previous state."""
     if agent_id not in state.agent_status_history:
         return True  # First time seeing this agent
-    
     old_status = state.agent_status_history[agent_id]
     # Compare relevant fields for change detection
-    return (old_status.is_online != new_status.is_online or 
-            old_status.last_seen != new_status.last_seen or
-            old_status.agent_name != new_status.agent_name # Check name changes too
-           )
+    # Remove is_online from comparison, use metrics/internal_state if needed
+    return (
+        old_status.last_seen != new_status.last_seen or
+        old_status.agent_name != new_status.agent_name
+    )
 
 async def broadcast_agent_status(force_full_update: bool = False, is_full_update: bool = False, target_websocket: WebSocket = None):
     """Broadcast agent status to all clients or a specific frontend client.
@@ -40,45 +40,28 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
     agent_status_list = []
     online_agent_count = 0
     
-    # Convert agent_statuses to a list for transmission
-    for agent_id, status in state.agent_statuses.items():
-        agent_status_list.append({
+    # Convert agent_states to a list for transmission
+    for agent_id, agent_state in state.agent_states.items():
+        # Just include agent_id and metrics for the agent
+        agent_status = {
             "agent_id": agent_id,
-            "agent_name": status.agent_name,
-            "is_online": status.is_online,
-            "last_seen": status.last_seen,
-            "status": status.status  # Include status field
-        })
-        if status.is_online:
+            "metrics": agent_state.get_metrics_dict()  # Include all metrics with agent_name and last_seen
+        }
+        agent_status_list.append(agent_status)
+        
+        # Count online agents based on internal_state
+        internal_state = agent_state.metrics.get("internal_state", "initializing")
+        if internal_state != "offline":
             online_agent_count += 1
     
-    logger.info(f"Online agents: {[s['agent_id'] for s in agent_status_list if s['is_online']]}")
+    # Get online agents based on internal_state
+    online_agents = [
+        s['agent_id'] for s in agent_status_list 
+        if state.agent_states[s['agent_id']].metrics.get("internal_state", "initializing") != "offline"
+    ]
+    logger.info(f"Online agents: {online_agents}")
     
-    # Check if anything changed or full update is forced
-    if not force_full_update and not is_full_update and target_websocket is None:
-        # Check for delta changes - skip when targeting a specific frontend
-        changes_detected = False
-        for agent_id, current_status in state.agent_statuses.items():
-            if agent_id in state.agent_status_history:
-                history = state.agent_status_history[agent_id]
-                if (history.is_online != current_status.is_online or
-                    history.agent_name != current_status.agent_name):
-                    changes_detected = True
-                    logger.info(f"Change detected for agent {agent_id}: "
-                               f"online: {history.is_online} -> {current_status.is_online}, "
-                               f"name: {history.agent_name} -> {current_status.agent_name}")
-                    break
-        
-        if not changes_detected:
-            logger.debug("No agent status changes detected and not forced, skipping broadcast")
-            return
-    
-    # STEP 1: Send update to all brokers via gRPC (primary method)
-    # Only do this for broadcasts, not for targeted frontend updates
-    if target_websocket is None:
-        logger.info(f"Broadcasting agent status via gRPC to all subscribers")
-        await grpc_services.broadcast_agent_status_updates(is_full_update=is_full_update or force_full_update)
-    
+
     # STEP 2: Send update to frontend(s) via WebSockets
     # Prepare status update message for frontends
     status_update = {
@@ -89,53 +72,77 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
     
     try:
         status_update_json = json.dumps(status_update)
-        
-        # If targeting a specific frontend, only send to that one
+        logger.debug(f"Status update JSON: {status_update_json} to specific frontend: {target_websocket}")
+        # Determine whether to send to specific target or broadcast to all
         if target_websocket is not None:
+            # Target a specific frontend
             frontend_id = getattr(target_websocket, 'client_id', 'unknown')
             try:
-                if target_websocket.client_state == WebSocketState.CONNECTED:
+                # Check if WebSocket is connected - use a different approach that works with FastAPI
+                try:
                     logger.info(f"Sending targeted agent status ({online_agent_count} online) to frontend {frontend_id}")
                     await target_websocket.send_text(status_update_json)
                     logger.info(f"Successfully sent targeted agent status to frontend {frontend_id}")
-                else:
-                    logger.warning(f"Cannot send targeted agent status to frontend {frontend_id}: WebSocket not connected")
+                except RuntimeError as conn_error:
+                    if "WebSocket is not connected" in str(conn_error):
+                        logger.warning(f"Cannot send targeted agent status to frontend {frontend_id}: WebSocket not connected")
+                    else:
+                        raise
             except Exception as e:
                 logger.error(f"Error sending targeted agent status to frontend {frontend_id}: {e}")
-        # Otherwise, send to all connected frontends
-        elif state.frontend_connections:
-            logger.info(f"Broadcasting agent status via WebSockets to {len(state.frontend_connections)} frontends")
+        else:
+            # Broadcast to all connected frontends
+            active_connections = state.frontend_connections
+            if not active_connections:
+                logger.info("No frontend WebSockets connected, status update not broadcasted")
+                return
+                
+            # Now we know we have connections to process
+            logger.info(f"Broadcasting agent status ({online_agent_count} online) to {len(active_connections)} frontends")
+            disconnected = []
             
-            # Send agent status to all connected frontends via WebSockets
-            frontend_send_count = 0
-            for websocket in state.frontend_connections:
-                try:
-                    frontend_id = getattr(websocket, 'client_id', 'unknown')
-                    if not websocket.client_state == WebSocketState.CONNECTED:
-                        logger.warning(f"Cannot send agent status to frontend {frontend_id}: WebSocket not connected")
-                        continue
-                        
-                    logger.info(f"Sending agent status ({online_agent_count} online) to frontend {frontend_id}")
-                    await websocket.send_text(status_update_json)
-                    frontend_send_count += 1
-                    logger.info(f"Successfully sent agent status to frontend {frontend_id}")
-                except Exception as e:
-                    frontend_id = getattr(websocket, 'client_id', 'unknown')
-                    logger.error(f"Error sending agent status to frontend {frontend_id}: {e}")
+            # Send to all connected frontends
+            for ws in active_connections:
+                # Guard against invalid objects in the set
+                if not ws:
+                    continue
                     
-            logger.info(f"Sent agent status to {frontend_send_count}/{len(state.frontend_connections)} frontends")
+                frontend_id = getattr(ws, 'client_id', 'unknown')
+                try:
+                    # Check if WebSocket is connected - use a different approach that works with FastAPI
+                    try:
+                        await ws.send_text(status_update_json)
+                    except RuntimeError as conn_error:
+                        if "WebSocket is not connected" in str(conn_error):
+                            logger.warning(f"Frontend {frontend_id} WebSocket not connected, marking for cleanup")
+                            disconnected.append(ws)
+                        else:
+                            raise
+                except Exception as e:
+                    logger.error(f"Error sending to frontend {frontend_id}: {e}")
+                    disconnected.append(ws)
+            
+            # Clean up any disconnected WebSockets
+            for ws in disconnected:
+                if ws in state.frontend_connections:
+                    state.frontend_connections.remove(ws)
+                    frontend_id = getattr(ws, 'client_id', 'unknown')
+                    logger.info(f"Removed disconnected frontend: {frontend_id}")
+            
+            logger.info(f"Successfully broadcasted agent status to {len(active_connections) - len(disconnected)} frontends")
+
     except Exception as e:
         logger.error(f"Error preparing or sending agent status update to frontends: {e}")
     
-    # Update history with current state regardless of broadcast success
-    # Only do this for broadcasts, not for targeted frontend updates
-    if target_websocket is None:
-        for agent_id, status in state.agent_statuses.items():
-            if agent_id in state.agent_status_history:
-                state.agent_status_history[agent_id] = status.model_copy()
+
 
 def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool:
     """Updates an agent's status in the state.
+    
+    Args:
+        agent_id: ID of the agent to update
+        agent_name: Name of the agent
+        is_online: Legacy parameter - translates to internal_state of "online" or "offline"
     
     Returns True if the agent's status changed, False otherwise.
     """
@@ -149,40 +156,53 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
     current_time = datetime.now().isoformat()
     status_changed = False
     
-    # Check if this agent already exists
-    if agent_id in state.agent_statuses:
-        old_status = state.agent_statuses[agent_id]
-        # Create a copy for change detection
-        if agent_id not in state.agent_status_history:
-            state.agent_status_history[agent_id] = old_status.model_copy()
+    # Create metrics for the update
+    metrics = {
+        "last_seen": current_time,
+        "internal_state": "online" if is_online else "offline"
+    }
+    
+    # Check if agent exists
+    if agent_id in state.agent_states:
+        agent_state = state.agent_states[agent_id]
         
-        # If nothing's changing, don't update the last_seen time
-        if (old_status.is_online == is_online and 
-            old_status.agent_name == agent_name):
+        # Skip update if nothing changed
+        current_state = agent_state.metrics.get("internal_state", "initializing")
+        new_state = metrics["internal_state"]
+        
+        if current_state == new_state and agent_state.agent_name == agent_name:
             logger.debug(f"No change in agent {agent_id} status, skipping update.")
             return False
             
-        # Update fields that changed
-        old_status.is_online = is_online
-        if old_status.agent_name != agent_name:
-            old_status.agent_name = agent_name
-        old_status.last_seen = current_time
+        # Update the agent state
+        agent_state.agent_name = agent_name
+        agent_state.last_seen = current_time
         
-        logger.info(f"Updated existing agent: {agent_id}, name={agent_name}, online={is_online}")
+        # Update metrics
+        agent_state.update_metrics(metrics)
+        
+        # Update legacy status for compatibility
+        state.agent_statuses[agent_id] = agent_state.to_agent_status()
+        
+        logger.info(f"Updated existing agent: {agent_id}, name={agent_name}, internal_state={new_state}")
         status_changed = True
     else:
-        # Create a new agent status entry
-        new_status = AgentStatus(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            is_online=is_online,
-            last_seen=current_time
-        )
-        state.agent_statuses[agent_id] = new_status
-        logger.info(f"Created new agent status entry: {agent_id}, name={agent_name}, online={is_online}")
+        # Create a new agent state
+        agent_state = state.AgentState(agent_id, agent_name)
+        agent_state.last_seen = current_time
+        
+        # Set metrics
+        agent_state.update_metrics(metrics)
+        
+        state.agent_states[agent_id] = agent_state
+        
+        # Also create legacy status
+        state.agent_statuses[agent_id] = agent_state.to_agent_status()
+        
+        logger.info(f"Created new agent state: {agent_id}, name={agent_name}, internal_state={metrics['internal_state']}")
         status_changed = True
     
-    # If status changed, broadcast via gRPC immediately
+    # If status changed, broadcast the update
     if status_changed:
         # Schedule full update via gRPC first for immediate response
         asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
@@ -195,10 +215,22 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
 def mark_agent_offline(agent_id: str) -> bool:
     """Marks an agent as offline. Returns True if the status changed."""
     logger.info(f"Marking agent offline: {agent_id}")
-    if agent_id in state.agent_statuses:
-        if state.agent_statuses[agent_id].is_online:
-            state.agent_statuses[agent_id].is_online = False
-            state.agent_statuses[agent_id].last_seen = datetime.now().isoformat()
+    if agent_id in state.agent_states:
+        agent_state = state.agent_states[agent_id]
+        current_state = agent_state.metrics.get("internal_state", "initializing")
+        
+        if current_state != "offline":
+            # Update the agent state
+            agent_state.last_seen = datetime.now().isoformat()
+            
+            # Update metrics
+            agent_state.update_metrics({
+                "internal_state": "offline"
+            })
+            
+            # Update legacy status
+            state.agent_statuses[agent_id] = agent_state.to_agent_status()
+            
             logger.info(f"Agent {agent_id} marked as offline.")
             
             # Broadcast via gRPC immediately for quick response

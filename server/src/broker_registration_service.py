@@ -36,7 +36,6 @@ class BrokerRegistrationServicer(BrokerRegistrationServiceServicer):
         # Update broker status
         async with state.broker_status_lock:
             state.broker_statuses[broker_id] = {
-                "is_online": True,
                 "last_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             }
         
@@ -49,4 +48,4 @@ class BrokerRegistrationServicer(BrokerRegistrationServiceServicer):
 def add_to_server(server):
     """Add the broker registration service to the gRPC server"""
     add_BrokerRegistrationServiceServicer_to_server(BrokerRegistrationServicer(), server)
-    logger.info("Broker registration service added to gRPC server") 
+    logger.info("Broker registration service added to gRPC server")

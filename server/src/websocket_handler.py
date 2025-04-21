@@ -148,12 +148,13 @@ async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command
 
 async def _handle_pause_all_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle PAUSE_ALL_AGENTS control message from frontend."""
-    agent_ids = [agent_id for agent_id, status in state.agent_statuses.items() if status.is_online]
+    # Select all agent_ids (no is_online check, as that field is removed)
+    agent_ids = list(state.agent_statuses.keys())
     await _send_agent_command_to_agents(agent_ids, websocket, client_id, "pause", MessageType.PAUSE_ALL_AGENTS)
 
 async def _handle_RESUME_All_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle RESUME_ALL_AGENTS control message from frontend."""
-    agent_ids = [agent_id for agent_id, status in state.agent_statuses.items() if status.is_online]
+    agent_ids = list(state.agent_statuses.keys())
     await _send_agent_command_to_agents(agent_ids, websocket, client_id, "resume", MessageType.RESUME_ALL_AGENTS)
 
 async def _handle_pause_agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):

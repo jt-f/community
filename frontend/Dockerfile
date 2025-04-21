@@ -2,15 +2,14 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json ./
+# Copy package files with explicit paths
+COPY ./frontend/package.json ./frontend/package-lock.json ./frontend/tsconfig.json ./
 
 # Install dependencies and update package-lock.json
 RUN npm install
 
 # Copy the rest of the application
-COPY . .
-
+COPY ./frontend/ .
 # Build the application
 RUN npm run build
 

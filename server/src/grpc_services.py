@@ -31,8 +31,6 @@ subscription_lock = asyncio.Lock()
 class AgentStatusServicer(AgentStatusServiceServicer):
     """Implementation of the AgentStatusService"""
     
-    agent_metrics_store = {}  # In-memory store for agent metrics, keyed by agent_id
-
     async def SubscribeToAgentStatus(self, request, context):
         """
         Stream agent status updates to the broker.
@@ -99,28 +97,51 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         return await self._create_status_response(is_full_update=True)
     
     async def SendAgentStatus(self, request, context):
-        """Handle agent-initiated status updates via SendAgentStatus RPC."""
+        """
+        Handle agent-initiated status updates via SendAgentStatus RPC.
+        Uses the AgentInfo format with metrics for all agent state.
+        """
         agent = request.agent
         agent_id = agent.agent_id
+        agent_name = agent.agent_name
+        
+        # Extract all metrics from the request
         metrics = dict(agent.metrics)
-        self.agent_metrics_store[agent_id] = metrics
-        logger.info(f"Received status update from agent {agent_id}: {metrics}")
+        logger.info(f"Received status update from agent {agent_id} with {len(metrics)} metrics")
+        
+        try:
+            # Update last_seen if not provided
+            if 'last_seen' not in metrics and agent.last_seen:
+                metrics['last_seen'] = agent.last_seen
+                
+            # Update agent metrics in state
+            await state.update_agent_metrics(agent_id, agent_name, metrics)
+            
+            # Broadcast to frontends
+            import agent_manager
+            asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+        except Exception as e:
+            logger.error(f"Failed to process agent status update: {e}")
+        
         from generated.agent_status_service_pb2 import AgentStatusUpdateResponse
-        return AgentStatusUpdateResponse(success=True, message="Status update received.")
+        return AgentStatusUpdateResponse(success=True, message="Status update received")
 
     async def _create_status_response(self, is_full_update=False):
-        """Create an AgentStatusResponse from the current agent status state"""
+        """Create an AgentStatusResponse from the current agent state"""
         response = AgentStatusResponse()
         response.is_full_update = is_full_update
         
-        # Convert agent_statuses to proto format
-        for agent_id, status in state.agent_statuses.items():
+        # Convert all agent states to AgentInfo format
+        for agent_id, agent_state in state.agent_states.items():
             agent_info = AgentInfo()
             agent_info.agent_id = agent_id
-            agent_info.agent_name = status.agent_name
-            agent_info.is_online = status.is_online
-            agent_info.last_seen = status.last_seen
-            agent_info.status = status.status  # Include status field
+            agent_info.agent_name = agent_state.agent_name
+            agent_info.last_seen = agent_state.last_seen
+            
+            # Add all metrics
+            for key, value in agent_state.get_metrics_dict().items():
+                agent_info.metrics[key] = value
+            
             response.agents.append(agent_info)
         
         return response

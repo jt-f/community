@@ -1,34 +1,54 @@
 import { create } from 'zustand';
-import { AgentStatus } from '../types/message';
+import { AgentStatus, AgentWithMetrics } from '../types/message';
 
 interface AgentStore {
   agents: AgentStatus[];
-  updateAgents: (newAgents: AgentStatus[], isFullUpdate: boolean) => void;
+  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean) => void;
   getAgentById: (agentId: string) => AgentStatus | undefined;
   getOnlineAgents: () => AgentStatus[];
   getOfflineAgents: () => AgentStatus[];
   getAgentCount: () => number;
 }
 
+// Helper function to convert from new metrics format to AgentStatus format
+const convertToAgentStatus = (agentWithMetrics: AgentWithMetrics): AgentStatus => {
+  const { agent_id, metrics } = agentWithMetrics;
+  const internal_state = metrics.internal_state || 'offline';
+  
+  return {
+    agent_id,
+    agent_name: metrics.agent_name || 'Unknown Agent',
+    last_seen: metrics.last_seen || new Date().toISOString(),
+    is_online: internal_state !== 'offline',
+    status: internal_state, // Use internal_state as status field
+    metrics: metrics // Keep the original metrics for reference
+  };
+};
+
 export const useAgentStore = create<AgentStore>((set, get) => ({
   agents: [],
   
-  updateAgents: (newAgents: AgentStatus[], isFullUpdate: boolean) => {
+  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean) => {
     if (isFullUpdate) {
       // For full updates, replace the entire list
-      set({ agents: newAgents });
+      const convertedAgents = newAgents.map(convertToAgentStatus);
+      set({ agents: convertedAgents });
     } else {
       // For delta updates, update or add each agent
       set((state) => {
         const updatedAgents = [...state.agents];
+        
         newAgents.forEach((newAgent) => {
-          const index = updatedAgents.findIndex(a => a.agent_id === newAgent.agent_id);
+          const convertedAgent = convertToAgentStatus(newAgent);
+          const index = updatedAgents.findIndex(a => a.agent_id === convertedAgent.agent_id);
+          
           if (index >= 0) {
-            updatedAgents[index] = newAgent;
+            updatedAgents[index] = convertedAgent;
           } else {
-            updatedAgents.push(newAgent);
+            updatedAgents.push(convertedAgent);
           }
         });
+        
         return { agents: updatedAgents };
       });
     }
