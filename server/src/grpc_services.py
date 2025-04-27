@@ -6,6 +6,7 @@ import grpc
 from concurrent import futures
 import sys
 import os
+import datetime
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -240,6 +241,28 @@ grpc_options = [
 # --- End Keepalive Settings ---
 
 
+# --- Application-level keepalive settings ---
+AGENT_KEEPALIVE_INTERVAL_SECONDS = 60  # How often to check (seconds)
+AGENT_KEEPALIVE_GRACE_SECONDS = 60     # Allowed time since last_seen before marking as unknown
+
+async def agent_keepalive_checker():
+    while True:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for agent_id, agent_state in state.agent_states.items():
+            try:
+                last_seen_str = agent_state.last_seen
+                last_seen = datetime.datetime.fromisoformat(last_seen_str)
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=datetime.timezone.utc)
+                delta = (now - last_seen).total_seconds()
+                if delta > AGENT_KEEPALIVE_GRACE_SECONDS:
+                    if agent_state.metrics.get("internal_state") != "unknown_status":
+                        logger.warning(f"Agent {agent_id} missed keepalive window ({delta:.1f}s). Marking as unknown_status.")
+                        await state.update_agent_metrics(agent_id, agent_state.agent_name, {"internal_state": "unknown_status"})
+            except Exception as e:
+                logger.error(f"Error in keepalive check for agent {agent_id}: {e}")
+        await asyncio.sleep(AGENT_KEEPALIVE_INTERVAL_SECONDS)
+
 def start_grpc_server(port=50051):
     """Start the gRPC server in a separate thread"""
     server = grpc.aio.server(
@@ -253,6 +276,11 @@ def start_grpc_server(port=50051):
     server.add_insecure_port(f'[::]:{port}')     # IPv6
     
     logger.info(f"Starting gRPC server on port {port}")
+
+    # Start the agent keepalive checker as a background task
+    loop = asyncio.get_event_loop()
+    loop.create_task(agent_keepalive_checker())
+
     return server 
 
 def add_services_to_server(server):

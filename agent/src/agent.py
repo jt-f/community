@@ -62,6 +62,17 @@ class Agent:
             raise RuntimeError(f"RabbitMQ connection failed: {e}")
 
         await self.server_manager.register(agent_id=self.agent_id, agent_name=self.agent_name, command_callback=self.handle_server_command)
+        # Start periodic status update loop
+        asyncio.create_task(self._periodic_status_update())
+
+    async def _periodic_status_update(self):
+        """Send unsolicited status updates every 45 seconds to the server."""
+        while True:
+            try:
+                await self._send_status_update_on_state_change()
+            except Exception as e:
+                logger.debug(f"Periodic status update failed: {e}")
+            await asyncio.sleep(45)
 
     async def run(self):
         """Main agent loop. Keeps the agent alive after registration."""
