@@ -39,21 +39,17 @@ class LLMClient:
         if not self.client:
             logger.error("LLMClient is not configured or failed to initialize.")
             return "Error: LLM Client not configured."
-        try:
-            logger.info(f"Generating response for prompt: {prompt}")
-            chat_response = self.client.chat.complete(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                **kwargs
-            )
-            logger.info(f"Response: {chat_response}")
-            if chat_response.choices:
-                return chat_response.choices[0].message.content
-            logger.warning("Mistral API returned no choices.")
-            return "Error: No response from LLM."
-        except Exception as e:
-            logger.error(f"Error calling Mistral API: {e}")
-            return f"Error: Failed to get response from LLM - {e}"
+        logger.info(f"Generating response for prompt: {prompt}")
+        chat_response = self.client.chat.complete(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            **kwargs
+        )
+        logger.info(f"Response: {chat_response}")
+        if chat_response.choices:
+            return chat_response.choices[0].message.content
+        logger.warning("Mistral API returned no choices.")
+        return "Error: No response from LLM."
 
     def cleanup(self):
         """Cleanup any resources if necessary."""

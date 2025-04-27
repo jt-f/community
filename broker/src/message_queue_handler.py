@@ -96,11 +96,11 @@ class MessageQueueHandler:
                 logger.error(f"Error in consumer loop: {e}")
                 break
 
-    def set_consuming(self, consuming: bool):
+    def set_paused(self, paused: bool):
+        """Pause or resume message consumption."""
         with self._lock:
-            self._consuming = consuming
-  
-        logger.info("Paused message consumption." if not self._consuming else "Resumed message consumption.")
+            self._paused = paused
+        logger.info(f"Message consumption {'paused' if paused else 'resumed'}.")
         return True
 
     def publish(self, queue_name, message_data):

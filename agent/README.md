@@ -235,6 +235,10 @@ The agent uses a generic `LLMClient` class for all LLM interactions. This abstra
 
 The agent now delegates message handling to the messaging module for DRY and SOLID compliance. The `handle_message` method in `agent.py` calls `process_message_dict` from `messaging.py`, which encapsulates the message processing and response logic. This ensures a single source of truth for message handling and makes the codebase easier to maintain.
 
+## Exception Handling Simplification
+
+Redundant try/except blocks have been removed from agent modules in favor of the `@log_exceptions` decorator. This decorator now handles all exception logging and propagation for decorated methods, reducing boilerplate and improving maintainability. Only business-logic-specific error handling remains where required.
+
 ## Customization
 
 -   Modify the `generate_response` method in `agent/src/agent.py` to change the core LLM interaction logic.

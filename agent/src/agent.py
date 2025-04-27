@@ -17,6 +17,7 @@ from message_queue_handler import MessageQueueHandler
 from server_manager import ServerManager
 from llm_client import LLMClient
 from messaging import process_message_dict, publish_to_broker_input_queue
+from decorators import log_exceptions
 import agent_config  # Import the new config file
 
 # Configuration: prioritize environment variables, then config file defaults
@@ -26,29 +27,6 @@ AGENT_MAIN_LOOP_SLEEP = int(os.getenv('AGENT_MAIN_LOOP_SLEEP', agent_config.AGEN
 # Configure logging
 logger = setup_logging(__name__)
 logging.getLogger("pika").setLevel(logging.WARNING)
-
-
-def log_exceptions(func):
-    """Decorator to log exceptions in async and sync functions"""
-    @functools.wraps(func)
-    def sync_wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Exception in {func.__name__}: {e}", exc_info=True)
-            raise
-    
-    @functools.wraps(func)
-    async def async_wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Exception in {func.__name__}: {e}", exc_info=True)
-            raise
-    
-    if asyncio.iscoroutinefunction(func):
-        return async_wrapper
-    return sync_wrapper
 
 class Agent:
     """
@@ -81,7 +59,6 @@ class Agent:
         
         logger.info(f"Agent {self.agent_name} initialized with ID: {self.agent_id}")
 
-    @log_exceptions
     async def connect(self) -> None:
         """Connect to message queue and register with server"""
         logger.info(f"Starting agent {self.agent_name} ({self.agent_id})")
@@ -95,20 +72,16 @@ class Agent:
         # Start periodic status updates
         asyncio.create_task(self._periodic_status_update())
 
-    @log_exceptions
     async def _connect_to_message_queue(self) -> None:
         """Connect to RabbitMQ message queue"""
-        try:
-            mq_connected = self.mq_handler.connect(queue_name=self.agent_queue)
-            if not mq_connected:
-                logger.error("Failed to connect/setup RabbitMQ: aborting agent startup.")
-                raise RuntimeError("RabbitMQ connection failed. Check RabbitMQ server and configuration.")
-            logger.info(f"Connected to RabbitMQ queue: {self.agent_queue}")
-        except Exception as e:
-            logger.error(f"RabbitMQ connection error: {e}")
-            raise RuntimeError(f"RabbitMQ connection failed: {e}")
 
-    @log_exceptions
+        mq_connected = self.mq_handler.connect(queue_name=self.agent_queue)
+        if not mq_connected:
+            logger.error("Failed to connect/setup RabbitMQ: aborting agent startup.")
+            raise RuntimeError("RabbitMQ connection failed. Check RabbitMQ server and configuration.")
+        logger.info(f"Connected to RabbitMQ queue: {self.agent_queue}")
+
+
     async def _periodic_status_update(self) -> None:
         """Send unsolicited status updates periodically to the server"""
         while not self._shutdown_requested:
@@ -118,7 +91,6 @@ class Agent:
                 logger.error(f"Periodic status update failed: {e}")
             await asyncio.sleep(AGENT_STATUS_UPDATE_INTERVAL)
 
-    @log_exceptions
     async def run(self) -> None:
         """Main agent loop. Keeps the agent alive after registration."""
         logger.info("Agent main loop started. Agent is running.")
@@ -132,7 +104,6 @@ class Agent:
         except asyncio.CancelledError:
             logger.info("Agent main loop cancelled.")
 
-    @log_exceptions
     async def cleanup_async(self) -> None:
         """Clean up resources before shutdown"""
         logger.info("Starting async cleanup...")
@@ -224,20 +195,16 @@ class Agent:
         status = self.state.get_state()
         return {"output": f"Agent status: {json.dumps(status)}"}
 
-    @log_exceptions
     async def _send_status_update(self) -> None:
         """Send a gRPC status update to the server with the full agent state"""
-        try:
-            await self.server_manager.send_agent_status_update(
-                self.agent_id,
-                self.agent_name,
-                self.state.get_state('last_seen') if 'last_seen' in self.state.get_state() else '',
-                self.state.get_state()
-            )
-        except Exception as e:
-            logger.debug(f"Failed to send status update: {e}")
+        await self.server_manager.send_agent_status_update(
+            self.agent_id,
+            self.agent_name,
+            self.state.get_state('last_seen') if 'last_seen' in self.state.get_state() else '',
+            self.state.get_state()
+        )
 
-    @log_exceptions
+
     def handle_state_change(self, key: str, value: Any) -> None:
         """Update agent state and trigger status update"""
         self.state.set_state(key, value)
@@ -247,7 +214,6 @@ class Agent:
         # Send gRPC status update to server on every state change
         asyncio.create_task(self._send_status_update())
 
-    @log_exceptions
     def generate_response(self, incoming_message_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a response using the LLM and format it for publishing"""
         logger.info(f"Agent generating response for message: {incoming_message_dict}")

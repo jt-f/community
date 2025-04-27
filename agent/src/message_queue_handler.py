@@ -1,5 +1,7 @@
 # Configure pika logging first
 import logging
+
+from decorators import log_exceptions
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 import os
@@ -37,6 +39,7 @@ class MessageQueueHandler:
         if asyncio.iscoroutinefunction(self._message_handler) and not self._event_loop:
             logger.error("Asynchronous message_handler provided without an event loop!")
 
+    @log_exceptions
     def connect(self, queue_name):
         """Connect to RabbitMQ, declare queue, and start consumer thread with a message handler callback."""
         try:
@@ -61,10 +64,8 @@ class MessageQueueHandler:
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error while connecting to RabbitMQ: {e}")
-            return False
 
+    @log_exceptions
     def _consumer_loop(self):
         """Consumer thread loop for processing messages from RabbitMQ."""
         logger.info(f"Starting consumer loop for queue: {self.queue_name}")
@@ -87,8 +88,7 @@ class MessageQueueHandler:
                         response = self._message_handler(message_dict)
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to decode message JSON: {e} - Message Body: {body!r}")
-                    except Exception as e:
-                        logger.error(f"Error processing message or calling handler: {e}", exc_info=True)
+
                 if method:
                     self.channel.basic_ack(delivery_tag=method.delivery_tag)
                     logger.debug(f"Acknowledged message {method.delivery_tag}")
@@ -97,18 +97,12 @@ class MessageQueueHandler:
             except pika.exceptions.StreamLostError as e:
                 logger.error(f"Connection lost in consumer loop: {e}. Attempting to reconnect...")
                 break
-            except Exception as e:
-                logger.error(f"Unexpected error in consumer loop: {e}", exc_info=True)
-                break
         logger.warning(f"Consumer loop for queue {self.queue_name} has exited.")
 
     def _handle_async_callback_result(self, future: asyncio.Future):
         """Callback function to handle the result (or exception) of the async message handler."""
-        try:
-            result = future.result()
-            logger.debug(f"Async message handler completed successfully. Result (if any): {result}")
-        except Exception as e:
-            logger.error(f"Exception occurred in async message handler: {e}", exc_info=True)
+        result = future.result()
+        logger.debug(f"Async message handler completed successfully. Result (if any): {result}")
 
     def set_consuming(self, consuming: bool):
         """Pause or resume message consumption."""

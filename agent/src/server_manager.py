@@ -14,6 +14,7 @@ from generated.agent_registration_service_pb2_grpc import AgentRegistrationServi
 from generated.agent_status_service_pb2 import AgentInfo, AgentStatusUpdateRequest
 from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
 from shared_models import setup_logging
+from decorators import log_exceptions
 logger = setup_logging(__name__)
 logger.propagate = False # Prevent messages reaching the root logger
 
@@ -161,7 +162,7 @@ class ServerManager:
              self._update_grpc_state("failed")
              return False
 
-
+    @log_exceptions
     async def register(self, agent_id, agent_name):
         """Register the agent with the server and optionally start the command stream."""
         if self._killed:
@@ -216,6 +217,7 @@ class ServerManager:
             if self._state_update: self._state_update('registration_status', 'failed')
             return False
 
+    @log_exceptions
     async def unregister(self, agent_id):
         """Unregister the agent from the server."""
         if self._killed:
@@ -243,6 +245,7 @@ class ServerManager:
             logger.error(f"Unexpected error during unregistration: {e}")
             return False
 
+    @log_exceptions
     async def send_status_update(self, agent_id, status: str, metrics: dict = None):
         """Send a status update (heartbeat) to the server."""
         if not self._is_registered or not self.stub or not agent_id:
@@ -274,6 +277,7 @@ class ServerManager:
             logger.error(f"Unexpected error sending heartbeat: {e}")
             return False
 
+    @log_exceptions
     async def send_command_result(self, agent_id, command_id: str, result):
         """Send the result of an executed command back to the server. Accepts dict or CommandResult."""
         if not self._is_registered or not self.stub or not agent_id:
@@ -311,6 +315,7 @@ class ServerManager:
             logger.error(f"Unexpected error sending command result: {e}")
             return False
 
+    @log_exceptions
     async def send_agent_status_update(self, agent_id, agent_name, last_seen, metrics: dict):
         """Send a full agent status update to the server using the new SendAgentStatus RPC."""
         if not self._ensure_connection():
@@ -367,6 +372,7 @@ class ServerManager:
             self._update_grpc_state("failed")
             return False
 
+    @log_exceptions
     async def _command_stream_loop(self, agent_id):
         """Background task to listen for commands from the server."""
         if self._killed:
@@ -482,6 +488,7 @@ class ServerManager:
         self._command_stream_task = asyncio.create_task(self._command_stream_loop(agent_id))
         logger.info("Command stream task created.")
 
+    @log_exceptions
     async def cleanup(self, agent_id):
         """Clean up gRPC resources and mark agent as killed/shutdown."""
         logger.info("Cleaning up ServerManager gRPC resources...")

@@ -2,10 +2,12 @@ import pika
 import json
 from shared_models import setup_logging
 import uuid
+from decorators import log_exceptions
 
 logger = setup_logging(__name__)
 
 
+@log_exceptions
 def publish_to_broker_input_queue(rabbitmq_channel, message_dict):
     """Publish a pre-formatted response message dictionary to the broker input queue."""
     if not rabbitmq_channel:
@@ -24,11 +26,9 @@ def publish_to_broker_input_queue(rabbitmq_channel, message_dict):
     except TypeError as e:
         logger.error(f"Failed to serialize message for publishing: {e} - Message: {message_dict}")
         return False
-    except Exception as e:
-        logger.error(f"Failed to publish to broker_input_queue: {e}")
-        return False
 
 
+@log_exceptions
 def process_message_dict(agent, message_dict):
     """
     Process a message dict (not raw RabbitMQ body) for the agent. This allows direct invocation from agent code.
@@ -45,6 +45,7 @@ def process_message_dict(agent, message_dict):
     return response
 
 
+@log_exceptions
 def process_rabbitmq_message(agent, ch, method, properties, body):
     """Process a message received from RabbitMQ queue."""
     try:

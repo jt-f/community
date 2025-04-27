@@ -71,47 +71,71 @@ class Broker:
     def publish_to_server_input_queue(self, message_data: dict) -> bool:
         return self.mq_handler.publish(self.server_input_queue, message_data)
 
+    async def _handle_routable_message(self, message_data: Dict[str, Any]):
+        """Handles TEXT, REPLY, and SYSTEM messages that might need routing."""
+        message_id = message_data.get("message_id", "Unknown")
+        sender_id = message_data.get("sender_id", "unknown")
+        receiver_id = message_data.get("receiver_id")
+        routing_status = message_data.get("routing_status")
+        text_payload = message_data.get("text_payload", "")
+        message_type = message_data.get("message_type")
+
+        logger.info(f"Incoming {message_type} message {message_id} from {sender_id} : '{text_payload[:50]}' (routing_status={routing_status})")
+
+        target_agent_info = await self.state.get_agent_info(receiver_id) if receiver_id else None
+
+        # If message already has a valid, online receiver, forward directly
+        if receiver_id and routing_status != "error" and target_agent_info and target_agent_info.get("is_online", False):
+            logger.info(f"Message {message_id} already has valid online receiver_id ({receiver_id}), forwarding directly.")
+            message_data["routing_status"] = "routed"
+            self.publish_to_server_input_queue(message_data)
+        else:
+            # Otherwise, attempt to route it
+            logger.info(f"Message {message_id} needs routing (receiver: {receiver_id}, status: {routing_status}, agent_online: {target_agent_info.get('is_online', False) if target_agent_info else 'N/A'}).")
+            await self.route_message(message_data)
+
+    async def _handle_agent_status_update(self, message_data: Dict[str, Any]):
+        """Handles AGENT_STATUS_UPDATE messages (unexpected in this queue)."""
+        sender_id = message_data.get("sender_id", "unknown")
+        logger.warning(f"Received AGENT_STATUS_UPDATE from {sender_id} in broker input queue (unexpected). Processing anyway...")
+        await self.state.update_agents_from_status(message_data)
+
+    async def _handle_error_message(self, message_data: Dict[str, Any]):
+        """Handles ERROR messages by forwarding them to the server."""
+        sender_id = message_data.get("sender_id", "unknown")
+        logger.warning(f"Received ERROR message {message_data.get('message_id', 'N/A')} from {sender_id}. Forwarding to server.")
+        if "routing_status" not in message_data:
+            message_data["routing_status"] = "error"
+        self.publish_to_server_input_queue(message_data)
+
     async def handle_message(self, message_data: Dict[str, Any]):
-        # Convert gRPC message to serializable format if needed
+        """Main message handler, delegates based on message_type."""
+        # Convert gRPC message to serializable format if needed (consider moving this to MQ handler if always needed)
         if hasattr(message_data, 'ListFields'):
-            message_data = {k: v for k, v in message_data.ListFields()}
-        
-        logger.info(f"Broker received new message: {message_data}")
+            logger.debug("Converting gRPC message to dict")
+            message_data = {k.name: v for k, v in message_data.ListFields()}
+
+        logger.info(f"Broker received new message: {message_data.get('message_id', 'N/A')}, type: {message_data.get('message_type', 'unknown')}")
+        # logger.debug(f"Full message data: {message_data}") # Optional: Log full data for debugging
+
         try:
             message_type = message_data.get("message_type", "unknown")
-            sender_id = message_data.get("sender_id", "unknown")
-            receiver_id = message_data.get("receiver_id", "unknown")
-            routing_status = message_data.get("routing_status", "unknown")
-            message_id = message_data.get("message_id", "Unknown")
-            text_payload = message_data.get("text_payload", "Unknown")
 
             if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
-                logger.info(f"Incoming {message_type} message {message_id} from {sender_id} : '{text_payload}' (routing_status={routing_status})")
-                if receiver_id:
-                    target_agent_info = await self.state.get_agent_info(receiver_id)
-                else:
-                    target_agent_info = None
-
-                if receiver_id and routing_status != "error" and target_agent_info and target_agent_info.get("is_online", False):
-                    logger.info(f"Message already has valid online receiver_id ({receiver_id}), forwarding directly.")
-                    message_data["routing_status"] = "routed"
-                    self.publish_to_server_input_queue(message_data)
-                else:
-                    await self.route_message(message_data)
+                await self._handle_routable_message(message_data)
             elif message_type == MessageType.AGENT_STATUS_UPDATE:
-                logger.warning(f"Received AGENT_STATUS_UPDATE from {sender_id} in input queue (unexpected). Processing...")
-                await self.state.update_agents_from_status(message_data)
+                await self._handle_agent_status_update(message_data)
             elif message_type == MessageType.ERROR:
-                logger.warning(f"Received ERROR message from {sender_id}. Forwarding to server.")
-                if "routing_status" not in message_data:
-                    message_data["routing_status"] = "error"
-                self.publish_to_server_input_queue(message_data)
+                await self._handle_error_message(message_data)
             else:
+                sender_id = message_data.get("sender_id", "unknown")
                 logger.warning(f"Received unsupported message type in broker input queue: {message_type} from {sender_id}")
+
         except json.JSONDecodeError:
-            logger.error(f"Invalid JSON in message: {message_data}")
+            # This shouldn't happen if MQ handler decodes, but as a safeguard
+            logger.error(f"Invalid JSON encountered in handle_message: {message_data}")
         except Exception as e:
-            logger.error(f"Error processing incoming message: {e}")
+            logger.error(f"Error processing message {message_data.get('message_id', 'N/A')}: {e}", exc_info=True)
 
     async def route_message(self, message_data):
         # Convert gRPC message to serializable format if needed
