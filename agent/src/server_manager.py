@@ -115,7 +115,7 @@ class ServerManager:
              self.channel = None # Ensure channel is recreated next time
              self.stub = None
 
-    async def check_grpc_readiness(self, timeout: float = 5.0) -> bool:
+    async def check_grpc_readiness(self, timeout: float = 15.0) -> bool:
         """Checks if the gRPC channel is currently READY."""
         if not self.channel:
              self._ensure_connection() # Attempt to create if missing
@@ -179,7 +179,7 @@ class ServerManager:
         )
         try:
             logger.info(f"Attempting to register agent {agent_name} ({agent_id})...")
-            response = await self.stub.RegisterAgent(request, timeout=10.0) # Add timeout
+            response = await self.stub.RegisterAgent(request, timeout=15.0) # Add timeout
             if response.success:
                 self._is_registered = True
                 # Update agent state via callback
@@ -326,7 +326,8 @@ class ServerManager:
 
             # Create stub for the status service specifically
             status_stub = AgentStatusServiceStub(self.channel)
-            response = await status_stub.SendAgentStatus(request, timeout=5.0) # Add timeout
+            logger.info(f"Sending agent status update via SendAgentStatus: {request}")
+            response = await status_stub.SendAgentStatus(request, timeout=15.0) # Add timeout
 
             # If call succeeded, ensure state is marked connected
             self._update_grpc_state("connected")

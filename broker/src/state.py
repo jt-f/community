@@ -98,10 +98,11 @@ class BrokerState:
         async with self._lock:
             online_agents = [
                 agent_id for agent_id, info in self._agents.items()
-                if info.get("metrics", {}).get("internal_state", "offline") not in ["offline", "shutting_down", "error","unknown_status"] 
+                if info.get("metrics", {}).get("internal_state", "offline") not in ["offline", "shutting_down", "error","unknown_status","unavailable"] 
                 and agent_id != exclude_sender_id
             ]
             logger.info(f"Online agents (active): {online_agents}")
+            logger.info(f"All agents: {self._agents}")
             return online_agents
 
     async def get_all_agents(self) -> Dict[str, Dict]:
