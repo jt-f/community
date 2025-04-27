@@ -48,6 +48,24 @@ Configure the agent using environment variables. Consider using a `.env` file wi
 -   **`GRPC_PORT` (Optional)**: gRPC server port. Defaults to `50051`.
 -   **`RABBITMQ_HOST` (Optional)**: RabbitMQ server host. Defaults to `localhost`.
 
+## gRPC Debug Logging
+
+To enable detailed gRPC core debug logs (including keepalive pings/pongs), set the environment variable `GRPC_DEBUG=1` before running the agent. This will activate verbose logging for gRPC internals, including keepalive events, which can be useful for diagnosing connection issues.
+
+Example (Linux/macOS):
+```
+export GRPC_DEBUG=1
+python src/agent.py
+```
+
+Example (Windows CMD):
+```
+set GRPC_DEBUG=1
+python src/agent.py
+```
+
+This will output gRPC core debug logs to the console, including keepalive pings and pongs.
+
 ## Usage
 
 Ensure the required environment variables (especially `MISTRAL_API_KEY`) are set and gRPC code is generated.

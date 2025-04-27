@@ -3,6 +3,9 @@ import json
 import random
 from typing import Dict, Any
 import asyncio
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from shared_models import setup_logging, MessageType
 from state import BrokerState

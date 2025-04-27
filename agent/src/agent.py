@@ -3,6 +3,9 @@ import asyncio
 import json
 import logging
 import uuid
+from dotenv import load_dotenv
+
+load_dotenv() # Load .env file early
 
 # Local imports
 from shared_models import setup_logging, MessageType

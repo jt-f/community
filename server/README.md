@@ -55,6 +55,11 @@ Example metrics received:
 
 See the proto definition for details on the `SendAgentStatus` RPC and the `metrics` map.
 
+## Agent Disconnection Handling
+
+- The server now automatically marks an agent as offline if its gRPC connection is lost (for example, if the agent process is killed or crashes). This ensures that the system accurately reflects agent availability, even if the agent does not explicitly call UnregisterAgent.
+- This is handled in the agent registration service: when the gRPC command stream for an agent ends (for any reason), the server marks the agent as offline and broadcasts this status to brokers and frontends.
+
 ## Project Structure (`src/`)
 
 *   `main.py`: FastAPI application setup, entry point, lifespan management (RabbitMQ connect/disconnect, gRPC server start/stop, background task startup), CORS, Uvicorn runner.
@@ -98,6 +103,24 @@ Key environment variables (see `src/config.py`):
 *   `GRPC_PORT` (default: `50051`)
 *   `PERIODIC_STATUS_INTERVAL` (default: 60 seconds)
 *   *(Potentially others like agent timeouts if managed via gRPC heartbeats)*
+
+## gRPC Debug Logging
+
+To enable detailed gRPC core debug logs (including keepalive pings/pongs), set the environment variable `GRPC_DEBUG=1` before running the server. This will activate verbose logging for gRPC internals, including keepalive events, which can be useful for diagnosing connection issues.
+
+Example (Linux/macOS):
+```
+export GRPC_DEBUG=1
+python src/main.py
+```
+
+Example (Windows CMD):
+```
+set GRPC_DEBUG=1
+python src/main.py
+```
+
+This will output gRPC core debug logs to the console, including keepalive pings and pongs.
 
 ## Running the Server
 

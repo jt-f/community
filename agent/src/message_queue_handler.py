@@ -16,14 +16,6 @@ import asyncio # Ensure asyncio is imported
 logger = setup_logging(__name__)
 logger.propagate = False # Prevent messages reaching the root logger
 
-# Load environment variables from .env if present
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    logging.info("Loaded environment variables from .env file.")
-except ImportError:
-    logging.warning("python-dotenv not installed. .env file will not be loaded.")
-
 class MessageQueueHandler:
     """
     Handles all RabbitMQ connection, queue, and message operations for the agent.

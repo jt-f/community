@@ -12,16 +12,18 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
-# Import generated gRPC code
-from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
-from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
-import broker_registration_service
-
 # Import shared modules
 from shared_models import setup_logging
 import state
 
 logger = setup_logging(__name__)
+
+
+
+# Import generated gRPC code
+from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
+from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
+import broker_registration_service
 
 # Global variables
 # Use a dict to map subscriber_id to subscriber context
@@ -215,9 +217,35 @@ async def broadcast_agent_status_updates(is_full_update=False):
                 logger.info(f"Removing invalid subscriber for broker {broker_id}")
                 subscriber_contexts.pop(subscriber_id, None)
 
+# --- Keepalive Settings ---
+# Ping clients every 60 seconds if no activity
+KEEPALIVE_TIME_MS = 60 * 1000
+# Wait 20 seconds for the ping ack before assuming connection is dead
+KEEPALIVE_TIMEOUT_MS = 20 * 1000
+# Allow pings even if there are no active streams
+KEEPALIVE_PERMIT_WITHOUT_CALLS = 1
+# Maximum number of bad pings allowed before closing connection
+MAX_PINGS_WITHOUT_DATA = 3 # More lenient
+# Minimum time between pings - prevents overly frequent pings
+MIN_PING_INTERVAL_WITHOUT_DATA_MS = 30 * 1000
+
+grpc_options = [
+    ('grpc.keepalive_time_ms', KEEPALIVE_TIME_MS),
+    ('grpc.keepalive_timeout_ms', KEEPALIVE_TIMEOUT_MS),
+    ('grpc.keepalive_permit_without_calls', KEEPALIVE_PERMIT_WITHOUT_CALLS),
+    ('grpc.http2.max_pings_without_data', MAX_PINGS_WITHOUT_DATA),
+    ('grpc.http2.min_ping_interval_without_data_ms', MIN_PING_INTERVAL_WITHOUT_DATA_MS),
+    # ('grpc.http2.max_ping_strikes', 2) # Optional: How many pings can be missed before connection is closed by server
+]
+# --- End Keepalive Settings ---
+
+
 def start_grpc_server(port=50051):
     """Start the gRPC server in a separate thread"""
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=grpc_options  # <-- Pass the options here
+    )
     add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
     broker_registration_service.add_to_server(server)
     # Bind to both IPv4 and IPv6

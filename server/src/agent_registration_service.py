@@ -182,7 +182,9 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         finally:
             # Clean up when the stream ends
             await self._handle_stream_closed(agent_id)
-            logger.info(f"Command stream closed for agent {agent_id}")
+            # Mark agent offline on disconnect
+            agent_manager.mark_agent_offline(agent_id)
+            logger.info(f"Command stream closed for agent {agent_id} (marked offline if not already)")
     
     async def SendCommandResult(self, request, context):
         """

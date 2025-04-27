@@ -1,9 +1,31 @@
-import uvicorn
-import os
-from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file early
 
+import os
+
+# --- gRPC Debug Logging ---
+# Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
+
+from shared_models import setup_logging
+logger = setup_logging(__name__)  # Initialize logger early
+
+# Add debug log to confirm GRPC_DEBUG value after loading .env
+logger.info(f"GRPC_DEBUG environment variable value: {os.getenv('GRPC_DEBUG')}")
+if os.getenv("GRPC_DEBUG") == "1":
+    os.environ["GRPC_VERBOSITY"] = "DEBUG"
+    os.environ["GRPC_TRACE"] = "keepalive,http2_stream_state,http2_ping,http2_flowctl"
+else:
+    logger.info("gRPC debug logging disabled")  
+# --- End gRPC Debug Logging ---
+
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
+import uvicorn  # Import uvicorn for server configuration and execution
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.getLogger("pika").setLevel(logging.WARNING)
+
 
 # Import local modules
 import config
@@ -11,12 +33,12 @@ import websocket_handler
 import services
 import utils
 import rabbitmq_utils
-from shared_models import setup_logging
+
 import agent_manager
 import grpc_services
 import agent_registration_service
 
-logger = setup_logging(__name__)
+
 
 # --- Lifespan Management --- 
 @asynccontextmanager
@@ -116,4 +138,4 @@ if __name__ == "__main__":
     # Run the server
     server.run()
 
-    logger.info("Server process finished.") 
+    logger.info("Server process finished.")
