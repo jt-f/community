@@ -49,4 +49,14 @@ Dockerfile
 
 # Other
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Exclude unnecessary files
+*.tmp
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db

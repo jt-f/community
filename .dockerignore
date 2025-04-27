@@ -39,4 +39,14 @@ docker-compose.yml
 # Other
 README.md
 *.log
-*.md 
+*.md
+
+# Exclude unnecessary files
+*.tmp
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db
