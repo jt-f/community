@@ -3,6 +3,7 @@ import asyncio
 import functools
 import json
 import logging
+import os
 import uuid
 from typing import Dict, Any, Callable, Optional, Awaitable
 from dotenv import load_dotenv
@@ -16,6 +17,11 @@ from message_queue_handler import MessageQueueHandler
 from server_manager import ServerManager
 from llm_client import LLMClient
 from messaging import process_message_dict, publish_to_broker_input_queue
+import agent_config  # Import the new config file
+
+# Configuration: prioritize environment variables, then config file defaults
+AGENT_STATUS_UPDATE_INTERVAL = int(os.getenv('AGENT_STATUS_UPDATE_INTERVAL', agent_config.AGENT_STATUS_UPDATE_INTERVAL))
+AGENT_MAIN_LOOP_SLEEP = int(os.getenv('AGENT_MAIN_LOOP_SLEEP', agent_config.AGENT_MAIN_LOOP_SLEEP))
 
 # Configure logging
 logger = setup_logging(__name__)
@@ -72,7 +78,6 @@ class Agent:
         # Configure agent-specific settings
         self.agent_queue = f"agent_{self.agent_id}_queue"
         self._shutdown_requested = False
-        self._status_update_interval = 45  # seconds
         
         logger.info(f"Agent {self.agent_name} initialized with ID: {self.agent_id}")
 
@@ -90,6 +95,7 @@ class Agent:
         # Start periodic status updates
         asyncio.create_task(self._periodic_status_update())
 
+    @log_exceptions
     async def _connect_to_message_queue(self) -> None:
         """Connect to RabbitMQ message queue"""
         try:
@@ -110,7 +116,7 @@ class Agent:
                 await self._send_status_update()
             except Exception as e:
                 logger.error(f"Periodic status update failed: {e}")
-            await asyncio.sleep(self._status_update_interval)
+            await asyncio.sleep(AGENT_STATUS_UPDATE_INTERVAL)
 
     @log_exceptions
     async def run(self) -> None:
@@ -122,7 +128,7 @@ class Agent:
             
             # Main loop - just keep the agent alive
             while not self._shutdown_requested:
-                await asyncio.sleep(1)
+                await asyncio.sleep(AGENT_MAIN_LOOP_SLEEP)
         except asyncio.CancelledError:
             logger.info("Agent main loop cancelled.")
 
@@ -168,6 +174,7 @@ class Agent:
         
         handler = command_handlers.get(command_type)
         if handler:
+            # All handlers now accept the command parameter for consistency
             handler_result = handler(command)
             result.update(handler_result)
         else:
@@ -193,26 +200,23 @@ class Agent:
         if self.state.get_state('internal_state') != 'paused':
             return {
                 "success": False,
-                "output": f"Agent {self.agent_name} not paused, cannot resume. Current state: {self.state.get_state('internal_state')}"
+                "output": f"Agent {self.agent_name} is not paused.",
+                "error_message": "Cannot resume an agent that is not paused.",
+                "exit_code": 1
             }
-        
         self.mq_handler.set_consuming(True)
         self.handle_state_change('internal_state', 'idle')
         return {"output": f"Agent {self.agent_name} resumed."}
 
     def _handle_shutdown_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Handle shutdown command from server"""
-        logger.info("Received irreversible shutdown command. Cleaning up and exiting agent process.")
+        logger.info(f"Received shutdown command: {command}")
         self._shutdown_requested = True
-        
-        # Schedule cleanup and exit
-        async def shutdown_and_exit():
-            await self.cleanup_async()
-            import sys
-            logger.info("Agent process exiting now (shutdown command).")
-            sys.exit(0)
-        
-        asyncio.create_task(shutdown_and_exit())
+        self.handle_state_change('internal_state', 'shutting_down')
+        # Trigger cleanup and exit
+        asyncio.create_task(self.cleanup_async()).add_done_callback(
+            lambda _: self.loop.stop() if self.loop.is_running() else None
+        )
         return {"output": f"Agent {self.agent_name} shutting down."}
 
     def _handle_status_command(self, command: Dict[str, Any]) -> Dict[str, Any]:

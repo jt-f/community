@@ -12,6 +12,7 @@ from datetime import datetime
 import uuid
 from shared_models import MessageType, setup_logging
 import asyncio # Ensure asyncio is imported
+import agent_config # Import agent configuration
 
 logger = setup_logging(__name__)
 logger.propagate = False # Prevent messages reaching the root logger
@@ -76,8 +77,8 @@ class MessageQueueHandler:
         while True:
             with self._lock:
                 if self._paused:
-                    # If paused, sleep briefly to avoid busy-waiting
-                    time.sleep(0.1) 
+                    # If paused, sleep using the configured duration
+                    time.sleep(agent_config.AGENT_PAUSED_CONSUMER_SLEEP)
                     continue
             
             method = None # Initialize method to None

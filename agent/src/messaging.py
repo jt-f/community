@@ -57,13 +57,7 @@ def process_rabbitmq_message(agent, ch, method, properties, body):
         message_id = message_dict.get("message_id", "unknown")
         sender_id = message_dict.get("sender_id", "unknown")
         logger.info(f"Received message type={message_type}, id={message_id} from {sender_id} via queue")
-        
-        delay = 5
-        logger.info(f"Waiting {delay} seconds before processing...")
-        import time
-        time.sleep(delay)
-        logger.info("Finished waiting, proceeding with processing.")
-        
+
         # Agent.generate_response now handles LLM call AND publishing the response
         response_dict = agent.generate_response(message_dict) 
         
