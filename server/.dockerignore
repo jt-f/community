@@ -1,0 +1,52 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+.python-version
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts
+*.egg-info
+dist
+build
+
+# Logs
+*.log
+
+# Local development
+*.local
+.env.local
+
+# Test files
+tests/
+test/
+*.test.py
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Other
+.DS_Store
+Thumbs.db 

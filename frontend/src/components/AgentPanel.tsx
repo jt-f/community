@@ -82,8 +82,8 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
   const handlePauseAgent = (agent: AgentStatus) => {
     if (!wsRef.current) return;
     
-    // If agent is paused, send resume command, otherwise send pause command
-    const commandType = agent.status === 'paused' ? MessageType.RESUME_AGENT : MessageType.PAUSE_AGENT;
+    // Use internal_state to determine the command type
+    const commandType = agent.internal_state === 'paused' ? MessageType.RESUME_AGENT : MessageType.PAUSE_AGENT;
     
     const message = {
       message_type: commandType,
@@ -99,10 +99,10 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
     }
   };
   
-  const handleDeregisterToggle = (agent) => {
+  const handleDeregisterToggle = (agent: AgentStatus) => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
-        message_type: agent.is_online ? MessageType.DEREGISTER_AGENT : MessageType.REREGISTER_AGENT,
+        message_type: agent.internal_state !== 'offline' ? MessageType.DEREGISTER_AGENT : MessageType.REREGISTER_AGENT,
         agent_id: agent.agent_id
       }));
     }

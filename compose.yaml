@@ -16,6 +16,8 @@ services:
     ports:
       - "5673:5672"
       - "15672:15672"
+    volumes:
+      - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 30s
@@ -58,6 +60,7 @@ services:
       - ./shared/protos:/app/shared/protos
     depends_on:
       - server
+
 
   frontend:
     build: 

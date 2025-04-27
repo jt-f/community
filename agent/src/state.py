@@ -34,11 +34,7 @@ class AgentState:
         return self._state[key]
 
     def __repr__(self):
-        return (
-            f"Agent State:\n"
-            f"  Message Queue: {self._state['message_queue_status']}\n"
-            f"  gRPC Status:   {self._state['grpc_status']}\n"
-            f"  LLM Client:    {self._state['llm_client_status']}\n"
-            f"  Registration:  {self._state['registration_status']}\n"
-            f"  Internal:      {self._state['internal_state']}"
-        )
+        state_lines = ["State:"]
+        for key, value in self._state.items():
+            state_lines.append(f"  {key}: {value}")
+        return "\n".join(state_lines)

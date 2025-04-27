@@ -7,12 +7,42 @@ The broker service acts as a central router for messages within the system. It r
 The broker utilizes **gRPC** for communication with the central server and **RabbitMQ** for message queuing and routing.
 
 -   **gRPC Communication:**
-    -   **Broker Registration:** Upon startup, the broker registers itself with the central server using the `RegisterBroker` gRPC call.
-    -   **Agent Status Updates:** The broker subscribes to real-time agent status updates from the server using the `SubscribeToAgentStatus` gRPC stream. These updates are processed by the `BrokerStateManager` to keep the broker's internal agent state current.
+    -   **Broker Registration:** Upon startup, the broker registers itself with the central server using the `RegisterBroker` gRPC call, handled by the `ServerManager` class.
+    -   **Agent Status Updates:** The broker subscribes to real-time agent status updates from the server using the `SubscribeToAgentStatus` gRPC stream. These updates are processed by the `BrokerState` to keep the broker's internal agent state current. All gRPC logic is encapsulated in `src/server_manager.py` for maintainability and DRY/SOLID compliance.
 -   **RabbitMQ Message Flow:**
     -   The broker consumes messages from the `broker_input_queue`. These are typically replies from agents or messages needing routing.
-    -   Based on the message details and the agent state maintained by `BrokerStateManager`, the broker determines the target agent.
+    -   Based on the message details and the agent state maintained by `BrokerState`, the broker determines the target agent.
     -   The broker publishes the message to the `server_input_queue` with the appropriate `receiver_id` set for the server to handle final delivery.
+
+## Broker Service
+
+The broker service is responsible for routing messages between agents and the server, maintaining agent state, and integrating with gRPC and RabbitMQ. It is now implemented as a `Broker` class in `src/broker.py`.
+
+### Key Features
+- Encapsulates all broker logic and state in a single class (`Broker`).
+- Handles message routing, agent state updates, and gRPC integration.
+- Entry point instantiates and runs the `Broker` class for maintainability and testability.
+
+### Usage
+
+To run the broker service:
+
+```bash
+python src/broker.py
+```
+
+### Code Structure
+- All global state and functions are now methods or attributes of the `Broker` class.
+- The main execution flow is handled by `Broker.run()`.
+
+### Design Notes
+- Follows DRY and SOLID principles for microservices.
+- Avoids unnecessary complexity and repetition.
+- Message queue handler and state manager are injected as class attributes.
+
+---
+
+For more details, see the code and comments in `src/broker.py`.
 
 ## Prerequisites
 
@@ -124,13 +154,49 @@ sequenceDiagram
 
 ## Components
 
--   **`broker.py`**: Main application entry point. Handles initialization, instantiates the `BrokerStateManager`, starts the gRPC client, sets up RabbitMQ connections, and manages the main application lifecycle and message routing logic.
--   **`grpc_client.py`**: Manages gRPC connections for registration and agent status updates. Handles the status update stream, passing received updates to the callback provided by `BrokerStateManager`. Includes reconnection logic.
--   **`state.py`**: Contains the `BrokerStateManager` class, responsible for managing the in-memory state of known agents (online status, names, etc.) based on updates received via gRPC. Provides thread-safe methods to query agent state.
--   **`rabbitmq_handler.py`**: Manages RabbitMQ connections, consuming messages from `broker_input_queue`, and publishing messages to specific agent queues.
--   **`agent_registry.py`**: In-memory store for agent status information received via gRPC.
+-   **`broker.py`**: Main application entry point. Handles initialization, instantiates the `BrokerState`, starts the gRPC client (via `ServerManager`), sets up RabbitMQ connections, and manages the main application lifecycle and message routing logic.
+-   **`server_manager.py`**: Handles all gRPC communication for the broker, including registration and agent status updates. This is now the single source of truth for all gRPC logic in the broker, following DRY and SOLID principles.
+-   **`state.py`**: Contains the `BrokerState` class, responsible for managing the in-memory state of known agents (online status, names, etc.) based on updates received via gRPC. Provides thread-safe methods to query agent state.
+-   **`message_queue_handler.py`**: Manages RabbitMQ connections, consuming messages from `broker_input_queue`, and publishing messages to specific agent queues.
 -   **`generated/`**: Directory containing Python code generated from `.proto` files.
 -   **`src/protos/`**: Copied `.proto` definitions from the server.
+
+## Message Queue Handling (2025 Update)
+
+The broker now uses a dedicated `MessageQueueHandler` class (see `src/message_queue_handler.py`) for all RabbitMQ operations. This handler:
+- Encapsulates connection, queue declaration, message consumption, and publishing logic.
+- Is instantiated in `broker.py` and used for both consuming from `broker_input_queue` and publishing to `server_input_queue`.
+- Follows the same DRY, SOLID, and microservice-friendly approach as the agent's message queue handler.
+
+**Benefits:**
+- Consistent, maintainable message queue logic across microservices.
+- No direct `pika` usage or ad-hoc consumer setup in `broker.py`.
+- Easier to test, extend, and debug.
+
+**If you previously used direct RabbitMQ code in `broker.py`, update your integrations to use the `MessageQueueHandler` interface.**
+
+## Async Message Handler Support (2025 Update)
+
+The `MessageQueueHandler` now supports async (coroutine) message handlers. If you pass an async function as the message handler, it will be scheduled on the main event loop using `asyncio.run_coroutine_threadsafe`. This is required for correct integration with async broker logic (such as `Broker.handle_incoming_message`).
+
+**Usage Example:**
+
+```python
+# In broker.py
+self.mq_handler = MessageQueueHandler(
+    state_update=..., 
+    message_handler=self.handle_incoming_message,  # can be async
+    event_loop=asyncio.get_event_loop()
+)
+```
+
+This prevents coroutine warnings and ensures async message processing works as expected in threaded consumers.
+
+## Design Notes (2025 Update)
+
+- All gRPC logic is now handled in `src/server_manager.py`. The old `grpc_client.py` is no longer used and can be deleted.
+- This change improves maintainability, reduces repetition, and follows microservices best practices (DRY/SOLID).
+- The codebase is now simpler and easier to extend or debug.
 
 ## Shutdown
 

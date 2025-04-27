@@ -143,33 +143,25 @@ async def _process_server_input_message(message_data: dict):
             await _broadcast_to_frontends(payload_str, message_type, f"Server (routed to {receiver_id})", original_message_id)
 
             # Forward to the final agent recipient
-            if receiver_id in state.agent_statuses:
+            if state.agent_statuses[receiver_id].metrics.get("internal_state", "offline") != "offline":
                 # Use internal_state from metrics to determine if agent is online
-                agent_metrics = getattr(state.agent_statuses[receiver_id], 'metrics', {}) or {}
-                if agent_metrics.get('internal_state', 'offline') == 'online':
-                    if publish_to_agent_queue(receiver_id, message_data):
-                        logger.info(f"Published routed message {original_message_id} to {receiver_id}'s queue.")
-                    else:
-                        logger.error(f"Failed to publish routed message {original_message_id} to agent {receiver_id}'s queue.")
+                if publish_to_agent_queue(receiver_id, message_data):
+                    logger.info(f"Published routed message {original_message_id} to {receiver_id}'s queue.")
                 else:
-                    logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is not online.")
-                    # Notify broker and original sender that agent is not online
-                    error_resp = {
-                        "message_type": MessageType.ERROR,
-                        "sender_id": "server",
-                        "receiver_id": message_data.get("sender_id", "unknown"),
-                        "routing_status": "error",
-                        "text_payload": f"Agent {receiver_id} is not online. Message could not be delivered."
-                    }
-                    if publish_to_broker_input_queue(error_resp):
-                        logger.info(f"Sent agent not-online error for message {original_message_id} to broker.")
-            elif receiver_id == "Server":
-                 # A message explicitly routed to the server? Handle server-specific functionality.
-                 logger.info(f"Message {original_message_id} from {sender_id} routed to the Server. Server-side processing.")
+                    logger.error(f"Failed to publish routed message {original_message_id} to agent {receiver_id}'s queue.")
+
             else:
-                # Broker routed to an unknown agent ID
-                logger.warning(f"Routed message {original_message_id} has unknown receiver_id: {receiver_id}. Cannot deliver.")
-                logger.warning(f"Known agents: {list(state.agent_statuses.keys())}")
+                logger.warning(f"Routed message ID intended for agent {receiver_id}, but agent is not online.")
+                # Notify broker and original sender that agent is not online
+                error_resp = {
+                    "message_type": MessageType.ERROR,
+                    "sender_id": "server",
+                    "receiver_id": message_data.get("sender_id", "unknown"),
+                    "routing_status": "error",
+                    "text_payload": f"Agent {receiver_id} is not online. Message could not be delivered."
+                }
+                if publish_to_broker_input_queue(error_resp):
+                    logger.info(f"Sent agent not-online error for message {original_message_id} to broker.")
 
         # --- Case 4: Unrecognized message or routing status ---
         else:

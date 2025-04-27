@@ -10,41 +10,41 @@ export interface ChatMessage {
 }
 
 export enum MessageType {
-  TEXT = 'TEXT',
-  REPLY = 'REPLY',
-  SYSTEM = 'SYSTEM',
-  ERROR = 'ERROR',
-  // System message types
-  PING = 'PING',
-  PONG = 'PONG',
-  // Registration types
-  REGISTER_AGENT = 'REGISTER_AGENT',
-  REGISTER_AGENT_RESPONSE = 'REGISTER_AGENT_RESPONSE',
-  REGISTER_BROKER = 'REGISTER_BROKER',
-  REGISTER_BROKER_RESPONSE = 'REGISTER_BROKER_RESPONSE',
-  REGISTER_FRONTEND = 'REGISTER_FRONTEND',
-  REGISTER_FRONTEND_RESPONSE = 'REGISTER_FRONTEND_RESPONSE',
-  // Status related types
-  AGENT_STATUS_UPDATE = 'AGENT_STATUS_UPDATE',
-  REQUEST_AGENT_STATUS = 'REQUEST_AGENT_STATUS',
-  CLIENT_DISCONNECTED = 'CLIENT_DISCONNECTED',
-  // --- Custom system control types ---
-  PAUSE_AGENT = 'PAUSE_AGENT',
-  RESUME_AGENT = 'RESUME_AGENT',
-  DEREGISTER_AGENT = 'DEREGISTER_AGENT',
-  REREGISTER_AGENT = 'REREGISTER_AGENT',
-  PAUSE_ALL_AGENTS = 'PAUSE_ALL_AGENTS',
-  RESUME_ALL_AGENTS = 'RESUME_ALL_AGENTS',
-  DEREGISTER_ALL_AGENTS = 'DEREGISTER_ALL_AGENTS',
-  REREGISTER_ALL_AGENTS = 'REREGISTER_ALL_AGENTS',
-  RESET_ALL_QUEUES = 'RESET_ALL_QUEUES',
+  TEXT = "TEXT",
+  REPLY = "REPLY",
+  SYSTEM = "SYSTEM",
+  ERROR = "ERROR",
+  AGENT_STATUS_UPDATE = "AGENT_STATUS_UPDATE",
+  PAUSE_AGENT = "PAUSE_AGENT",
+  RESUME_AGENT = "RESUME_AGENT",
+  PAUSE_ALL_AGENTS = "PAUSE_ALL_AGENTS",
+  RESUME_ALL_AGENTS = "RESUME_ALL_AGENTS",
+  DEREGISTER_AGENT = "DEREGISTER_AGENT",
+  REREGISTER_AGENT = "REREGISTER_AGENT",
+  DEREGISTER_ALL_AGENTS = "DEREGISTER_ALL_AGENTS",
+  REREGISTER_ALL_AGENTS = "REREGISTER_ALL_AGENTS",
+  RESET_ALL_QUEUES = "RESET_ALL_QUEUES",
+  REGISTER_FRONTEND = "REGISTER_FRONTEND"
+}
+
+export interface AgentMetrics {
+  agent_name: string;
+  last_seen: string;
+  internal_state: string;
+  [key: string]: any; // Allow for additional metrics
+}
+
+export interface AgentWithMetrics {
+  agent_id: string;
+  metrics: AgentMetrics;
 }
 
 export interface AgentStatus {
   agent_id: string;
   agent_name: string;
   last_seen: string;
-  metrics: Record<string, string>; // New metrics map for internal_state and other metrics
+  internal_state: string;
+  metrics: AgentMetrics;
 }
 
 export interface AgentStatusUpdateMessage {
@@ -52,8 +52,6 @@ export interface AgentStatusUpdateMessage {
   agents: AgentStatus[];
   is_full_update: boolean;
 }
-
-// Removed AgentWithMetrics interface as it is unnecessary and replaced its usage with AgentStatus.
 
 // Helper function to create a new message
 export function createMessage(

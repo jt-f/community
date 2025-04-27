@@ -220,7 +220,9 @@ def start_grpc_server(port=50051):
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
     add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
     broker_registration_service.add_to_server(server)
-    server.add_insecure_port(f'[::]:{port}')
+    # Bind to both IPv4 and IPv6
+    server.add_insecure_port(f'0.0.0.0:{port}')  # IPv4
+    server.add_insecure_port(f'[::]:{port}')     # IPv6
     
     logger.info(f"Starting gRPC server on port {port}")
     return server 

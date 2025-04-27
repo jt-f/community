@@ -5,15 +5,15 @@ import logging
 import uuid
 
 # Local imports
-from shared_models import setup_logging
+from shared_models import setup_logging, MessageType
 from state import AgentState
 from message_queue_handler import MessageQueueHandler
 from server_manager import ServerManager
 from llm_client import LLMClient
+from messaging import process_message_dict, publish_to_broker_input_queue
 
 # Configure logging
 logger = setup_logging(__name__)
-logger.propagate = False # Prevent messages reaching the root logger
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 class Agent:
@@ -26,28 +26,34 @@ class Agent:
 
         self.agent_id = f"agent_{uuid.uuid4().hex[:8]}"
         self.agent_name = agent_name
+        self.loop = asyncio.get_event_loop() # Get the main event loop
 
         self.state = AgentState()
         self.llm_client = LLMClient( state_update=self.handle_state_change)
         self.mq_handler = MessageQueueHandler(
             state_update=self.handle_state_change,
-            message_handler=self.handle_message
+            message_handler=self.handle_message,
+            loop=self.loop # Pass the loop to the handler
         )
         self.server_manager = ServerManager(
             state_update=self.handle_state_change,
             command_callback=self.handle_server_command
         )
+
+        self.agent_queue = f"agent_{self.agent_id}_queue"
         logger.info(f"Agent {self.agent_name} initialized with ID: {self.agent_id}")
 
-    async def setup_agent(self) -> None:
+    async def connect(self) -> None:
         logger.info(f"Starting agent {self.agent_name} ({self.agent_id})")
         
         # Connect to RabbitMQ synchronously and check result
         try:
-            mq_connected = self.mq_handler.connect(queue_name=f"agent_queue_{self.agent_id}")
+            mq_connected = self.mq_handler.connect(queue_name=self.agent_queue)
             if not mq_connected:
                 logger.error("Failed to connect/setup RabbitMQ: aborting agent startup.")
                 raise RuntimeError("RabbitMQ connection failed. Check RabbitMQ server and configuration.")
+            else:
+                logger.info(f"Connected to RabbitMQ queue: {self.agent_queue}")
         except Exception as e:
             logger.error(f"RabbitMQ connection error: {e}")
             raise RuntimeError(f"RabbitMQ connection failed: {e}")
@@ -59,7 +65,7 @@ class Agent:
         logger.info("Agent main loop started. Agent is running.")
         try:
             while True:
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
         except asyncio.CancelledError:
             logger.info("Agent main loop cancelled.")
         except Exception as e:
@@ -74,9 +80,9 @@ class Agent:
         logger.info("Async cleanup complete.")
 
     def handle_message(self, message):
-        logger.info(f"Handling message: {message}")
-        logger.warning("Not yet implemented.")
-        return
+        logger.info(f"Handling message: {message} : sending for processing")
+        # Delegate message processing to messaging.process_message_dict for DRY/SOLID
+        return process_message_dict(self, message)
 
     def handle_server_command(self, command):
         logger.info(f"Handling command via ServerManager: {command}")
@@ -125,13 +131,41 @@ class Agent:
         # Send gRPC status update to server on every state change
         asyncio.create_task(self._send_status_update_on_state_change())
 
+    def generate_response(self, incoming_message_dict):
+        """Generate a response using the LLM and format it for publishing."""
+        logger.info(f"Agent generating response for message: {incoming_message_dict}")
+        
+        llm_response_text = self.llm_client.generate_response(incoming_message_dict.get("text_payload", ""))
+        logger.info(f"Agent received LLM response text: {llm_response_text}")
+
+        # Construct the full response message dictionary
+        response_message_dict = {
+            "message_id": f"msg_{uuid.uuid4().hex[:8]}", # Generate unique ID for the response
+            "sender_id": self.agent_id,
+            "message_type": MessageType.TEXT, # Specific message type
+            "text_payload": llm_response_text,
+            "original_message_id": incoming_message_dict.get("message_id", "unknown"), # Link to original message
+            "routing_status": "pending" # Set routing status
+        }
+        
+        logger.info(f"Constructed response message: {response_message_dict}")
+
+        # Publish the structured response using the correct channel from mq_handler
+        if self.mq_handler and self.mq_handler.channel:
+            publish_to_broker_input_queue(self.mq_handler.channel, response_message_dict)
+            logger.info(f"Published response message {response_message_dict['message_id']} for original message {response_message_dict['original_message_id']}")
+        else:
+            logger.warning(f"Cannot publish response message {response_message_dict['message_id']}: MQ channel not available.")
+
+        return response_message_dict # Return the full structured response
+
 async def main():
     parser = argparse.ArgumentParser(description="Run an agent")
     parser.add_argument("--name", type=str, required=True, help="Human-readable name for this agent")
     args = parser.parse_args()
     agent = Agent(agent_name=args.name)
     try:
-        await agent.setup_agent()
+        await agent.connect()
         await agent.run()
     except asyncio.CancelledError:
         logger.info("Main function cancelled (likely during shutdown).")

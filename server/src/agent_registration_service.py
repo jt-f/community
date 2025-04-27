@@ -245,71 +245,42 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
                 agent_command_streams.pop(agent_id, None)
 
 async def send_command_to_agent(agent_id: str, command_type: str, content: str = "", parameters: Dict[str, str] = None) -> bool:
-    """Send a command to an agent via gRPC.
-    
-    Args:
-        agent_id: The ID of the agent to send the command to
-        command_type: The type of command to send
-        content: Optional content string for the command
-        parameters: Optional parameters for the command
-        
-    Returns:
-        True if the command was sent successfully, False otherwise
-    """
-    # Validate agent exists
-    if agent_id not in state.agent_statuses:
-        logger.error(f"Cannot send command to non-existent agent: {agent_id}")
-        return False
-    
-    # Generate a unique command ID
-    command_id = f"{uuid.uuid4()}"
-    
-    # If parameters is None, use an empty dict
-    if parameters is None:
-        parameters = {}
-    
+    """Send a command to an agent via its command stream."""
     try:
-        logger.info(f"Sending {command_type} command to agent {agent_id}")
-        command = Command(
-            command_id=command_id,
-            type=command_type,
-            content=content,
-            parameters=parameters,
-            is_cancellation=False
-        )
+        # Get command stream for agent
+        command_id = str(uuid.uuid4())
+        command = {
+            "command_id": command_id,
+            "type": command_type,
+            "content": content,
+            "parameters": parameters or {}
+        }
         
-        # Create command data with metadata
-        command_data = {"command": command, "agent_id": agent_id}
+        # Get the command stream for this agent
+        stream = agent_command_streams.get(agent_id)
+        if not stream:
+            logger.warning(f"No command stream found for agent {agent_id}")
+            return False
         
-        # Add to pending commands
-        pending_commands[command_id] = command_data
+        # Send the command
+        await stream.put(command)
+        logger.info(f"Sent command {command_id} to agent {agent_id}")
         
-        # Check if the agent has a command queue
-        if agent_id not in agent_command_streams:
-            command_queue = asyncio.Queue()
-            agent_command_streams[agent_id] = command_queue
-            logger.info(f"Created command queue for agent {agent_id}")
-            
-        # Add to agent's command queue - pass the command directly as we now handle both in ReceiveCommands
-        command_queue = agent_command_streams[agent_id]
-        await command_queue.put(command)  # Send just the command to be consistent with proto
-        logger.info(f"Added {command_type} command {command_id} to agent {agent_id}'s queue")
-
-        # Special handling for pause/resume commands - update agent status immediately
+        # Special handling for pause/resume commands - update agent state immediately
         if command_type == "pause":
-            # Update the agent's status to reflect it's paused
-            if agent_id in state.agent_statuses:
-                state.agent_statuses[agent_id].status = "paused"
-                logger.info(f"Updated agent {agent_id} status to 'paused'")
-                # Broadcast the status update
+            # Update the agent's state to reflect it's paused
+            if agent_id in state.agent_states:
+                state.agent_states[agent_id].update_metrics({"internal_state": "paused"})
+                logger.info(f"Updated agent {agent_id} state to 'paused'")
+                # Broadcast the state update
                 asyncio.create_task(state.broadcast_agent_status_update(is_full_update=True))
                 
         elif command_type == "resume":
-            # Update the agent's status to reflect it's active again
-            if agent_id in state.agent_statuses:
-                state.agent_statuses[agent_id].status = "online"
-                logger.info(f"Updated agent {agent_id} status to 'online'")
-                # Broadcast the status update
+            # Update the agent's state to reflect it's active again
+            if agent_id in state.agent_states:
+                state.agent_states[agent_id].update_metrics({"internal_state": "idle"})
+                logger.info(f"Updated agent {agent_id} state to 'idle'")
+                # Broadcast the state update
                 asyncio.create_task(state.broadcast_agent_status_update(is_full_update=True))
 
         return True

@@ -174,6 +174,10 @@ This class is used as a stub for future agent state management and will replace 
 
 The agent uses a generic `LLMClient` class for all LLM interactions. This abstraction allows easy switching between different LLM providers and keeps the agent code simple and maintainable. Currently, it handles the specific implementation details for interacting with the Mistral AI API.
 
+## Message Handling
+
+The agent now delegates message handling to the messaging module for DRY and SOLID compliance. The `handle_message` method in `agent.py` calls `process_message_dict` from `messaging.py`, which encapsulates the message processing and response logic. This ensures a single source of truth for message handling and makes the codebase easier to maintain.
+
 ## Customization
 
 -   Modify the `generate_response` method in `agent/src/agent.py` to change the core LLM interaction logic.

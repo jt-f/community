@@ -2,7 +2,7 @@ import os
 from mistralai import Mistral
 from shared_models import setup_logging
 logger = setup_logging(__name__)
-logger.propagate = False # Prevent messages reaching the root logger
+logger.propagate = False
 
 class LLMClient:
     """
@@ -39,13 +39,14 @@ class LLMClient:
             return "Error: LLM Client not configured."
 
         try:
-  
+            logger.info(f"Generating response for prompt: {prompt}")
             # Pass any additional kwargs like temperature, max_tokens, etc.
             chat_response = self.client.chat.complete(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 **kwargs
             )
+            logger.info(f"Response: {chat_response}")
             # Assuming the response structure has choices[0].message.content
             if chat_response.choices:
                 return chat_response.choices[0].message.content

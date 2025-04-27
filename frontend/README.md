@@ -70,6 +70,28 @@ npm install -g serve
 serve -s dist
 ```
 
+## Dependency Management
+
+If you change dependencies in package.json, always run:
+```bash
+npm install
+```
+This will update package-lock.json to match your dependencies.
+
+You MUST commit both package.json and package-lock.json after any dependency change.
+
+This is required for Docker builds and CI to work reliably (npm ci will fail if they are out of sync).
+
+If you see errors about missing dependencies or lock file mismatch during Docker build, run npm install and commit the updated lock file.
+
+See also: https://docs.npmjs.com/cli/v10/commands/npm-ci
+
+---
+
+Docker build is optimized for speed and cache usage. If you update dependencies, rebuild the image to refresh the cache.
+
+If you have questions, ask in the project chat or open an issue.
+
 ## Core Components
 
 -   **`src/main.tsx`**: Application entry point, renders `App`.

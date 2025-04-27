@@ -1,23 +1,24 @@
-FROM node:18-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Copy package files with explicit paths
-COPY ./frontend/package.json ./frontend/package-lock.json ./frontend/tsconfig.json ./
+# Install dependencies first (better caching)
+COPY ./frontend/package*.json ./
+COPY ./frontend/tsconfig.json ./
+COPY ./frontend/tsconfig.node.json ./
 
-# Install dependencies and update package-lock.json
-RUN npm install
+# Use npm cache mount and install dependencies
+RUN --mount=type=cache,target=/root/.npm npm ci
 
-# Copy the rest of the application
-COPY ./frontend/ .
+# Copy only the necessary source files
+COPY ./frontend/src ./src
+COPY ./frontend/public ./public
+COPY ./frontend/index.html ./
+COPY ./frontend/vite.config.ts ./
+
 # Build the application
 RUN npm run build
 
-# Install serve to run the production build
-RUN npm install -g serve
-
-# Expose port
 EXPOSE 5173
 
-# Run the application
-CMD ["serve", "-s", "dist", "-l", "5173"] 
+CMD ["npx", "serve", "-s", "dist", "-l", "5173"]

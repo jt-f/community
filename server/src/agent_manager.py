@@ -136,17 +136,17 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
     
 
 
-def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool:
+def update_agent_status(agent_id: str, agent_name: str, internal_state: str = "offline") -> bool:
     """Updates an agent's status in the state.
     
     Args:
         agent_id: ID of the agent to update
         agent_name: Name of the agent
-        is_online: Legacy parameter - translates to internal_state of "online" or "offline"
+        internal_state: Internal state of the agent (e.g. "idle", "working", "paused", "offline")
     
     Returns True if the agent's status changed, False otherwise.
     """
-    logger.info(f"Updating agent status: {agent_id}, name={agent_name}, online={is_online}")
+    logger.info(f"Updating agent status: {agent_id}, name={agent_name}, state={internal_state}")
     
     # Ensure agent ID exists
     if not agent_id:
@@ -159,7 +159,7 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
     # Create metrics for the update
     metrics = {
         "last_seen": current_time,
-        "internal_state": "online" if is_online else "offline"
+        "internal_state": internal_state
     }
     
     # Check if agent exists
@@ -194,12 +194,13 @@ def update_agent_status(agent_id: str, agent_name: str, is_online: bool) -> bool
         # Set metrics
         agent_state.update_metrics(metrics)
         
+        # Add to state
         state.agent_states[agent_id] = agent_state
         
         # Also create legacy status
         state.agent_statuses[agent_id] = agent_state.to_agent_status()
         
-        logger.info(f"Created new agent state: {agent_id}, name={agent_name}, internal_state={metrics['internal_state']}")
+        logger.info(f"Created new agent state: {agent_id}, name={agent_name}, internal_state={internal_state}")
         status_changed = True
     
     # If status changed, broadcast the update
