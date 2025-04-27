@@ -23,12 +23,25 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       if (lastMessage.is_full_update) {
         console.log('AgentPanel: Received full agent status update');
       }
-      
+
       // Check if we have the new format or legacy format
       const hasNewFormat = lastMessage.agents.length > 0 && 'metrics' in lastMessage.agents[0];
       console.log(`AgentPanel: Processing ${hasNewFormat ? 'new' : 'legacy'} agent status format`);
-      
+
       updateAgents(lastMessage.agents, lastMessage.is_full_update);
+    }
+  }, [lastMessage, updateAgents]);
+
+  // Remove agent from panel if a shutdown/deregister event is received
+  useEffect(() => {
+    if (lastMessage && (lastMessage.message_type === MessageType.DEREGISTER_AGENT || lastMessage.message_type === MessageType.DEREGISTER_ALL_AGENTS)) {
+      if (lastMessage.agent_id) {
+        // Remove the agent with the given agent_id
+        updateAgents([], false, lastMessage.agent_id);
+      } else if (lastMessage.message_type === MessageType.DEREGISTER_ALL_AGENTS) {
+        // Remove all agents
+        updateAgents([], true);
+      }
     }
   }, [lastMessage, updateAgents]);
 
@@ -41,7 +54,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       }));
     }
   };
-  
+
   const handleResumeAllAgents = () => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
@@ -50,7 +63,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       }));
     }
   };
-  
+
   const handleDeregisterAllAgents = () => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
@@ -59,38 +72,20 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       }));
     }
   };
-  
-  const handleReregisterAllAgents = () => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({
-        message_type: MessageType.REREGISTER_ALL_AGENTS,
-        sender_id: clientId
-      }));
-    }
-  };
-  
-  const handleResetAllQueues = () => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({
-        message_type: MessageType.RESET_ALL_QUEUES,
-        sender_id: clientId
-      }));
-    }
-  };
 
   // --- Per-agent control handlers ---
   const handlePauseAgent = (agent: AgentStatus) => {
     if (!wsRef.current) return;
-    
+
     // Use internal_state to determine the command type
     const commandType = agent.internal_state === 'paused' ? MessageType.RESUME_AGENT : MessageType.PAUSE_AGENT;
-    
+
     const message = {
       message_type: commandType,
       agent_id: agent.agent_id,
       sender_id: clientId
     };
-    
+
     try {
       wsRef.current.send(JSON.stringify(message));
       console.log(`Sent ${commandType} command for agent ${agent.agent_id}`);
@@ -98,7 +93,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
       console.error("Failed to send pause/resume command:", error);
     }
   };
-  
+
   const handleDeregisterToggle = (agent: AgentStatus) => {
     if (wsRef.current && isConnected) {
       wsRef.current.send(JSON.stringify({
@@ -121,9 +116,9 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ wsRef, clientId, isConne
 
   const handleRefresh = () => {
     if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ 
-        message_type: "REQUEST_AGENT_STATUS", 
-        sender_id: clientId 
+      wsRef.current.send(JSON.stringify({
+        message_type: "REQUEST_AGENT_STATUS",
+        sender_id: clientId
       }));
     }
   };

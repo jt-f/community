@@ -108,6 +108,8 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
             status.status = "offline"
             status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             state.update_agent_status(agent_id, status)
+            # Broadcast a DEREGISTER_AGENT message to all frontends so the UI removes the agent
+            asyncio.create_task(agent_manager.broadcast_agent_deregister(agent_id))
         
         # Remove any active command stream
         async with command_stream_lock:
@@ -247,16 +249,17 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
                 agent_command_streams.pop(agent_id, None)
 
 async def send_command_to_agent(agent_id: str, command_type: str, content: str = "", parameters: Dict[str, str] = None) -> bool:
-    """Send a command to an agent via its command stream."""
+    """Send a command to an agent via its command stream. Supports 'shutdown' for irreversible agent exit."""
     try:
-        # Get command stream for agent
+        # Create a proper Command message
         command_id = str(uuid.uuid4())
-        command = {
-            "command_id": command_id,
-            "type": command_type,
-            "content": content,
-            "parameters": parameters or {}
-        }
+        command = Command(
+            command_id=command_id,
+            type=command_type,
+            content=content,
+            parameters=parameters or {},
+            is_cancellation=False
+        )
         
         # Get the command stream for this agent
         stream = agent_command_streams.get(agent_id)

@@ -2,6 +2,7 @@ This repository is a project with objective: A fullstack application to create a
 
 Coding guidelines: Always check you are following DRY and SOLID principles. This is a microservices architecture. Everything needs to be written in a simple, maintainable way. 
 
+Don't unnecessarily ask for confirmation or clarification. If you think you know what I mean, just do it.
 
 Check your output isn't creating overly complex or repetitive code.
 

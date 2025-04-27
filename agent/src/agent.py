@@ -44,6 +44,7 @@ class Agent:
         )
 
         self.agent_queue = f"agent_{self.agent_id}_queue"
+        self._shutdown_requested = False  # Flag to prevent reconnection after shutdown
         logger.info(f"Agent {self.agent_name} initialized with ID: {self.agent_id}")
 
     async def connect(self) -> None:
@@ -61,7 +62,7 @@ class Agent:
             logger.error(f"RabbitMQ connection error: {e}")
             raise RuntimeError(f"RabbitMQ connection failed: {e}")
 
-        await self.server_manager.register(agent_id=self.agent_id, agent_name=self.agent_name, command_callback=self.handle_server_command)
+        await self.server_manager.register(agent_id=self.agent_id, agent_name=self.agent_name)
         # Start periodic status update loop
         asyncio.create_task(self._periodic_status_update())
 
@@ -78,7 +79,7 @@ class Agent:
         """Main agent loop. Keeps the agent alive after registration."""
         logger.info("Agent main loop started. Agent is running.")
         try:
-            while True:
+            while not self._shutdown_requested:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             logger.info("Agent main loop cancelled.")
@@ -116,6 +117,17 @@ class Agent:
                 self.mq_handler.set_consuming(True)
                 self.handle_state_change('internal_state', 'idle')
                 result["output"] = f"Agent {self.agent_name} resumed."
+        elif command_type == "shutdown":
+            logger.info("Received irreversible shutdown command. Cleaning up and exiting agent process.")
+            self._shutdown_requested = True
+            result["output"] = f"Agent {self.agent_name} shutting down."
+            # Schedule cleanup and exit
+            async def shutdown_and_exit():
+                await self.cleanup_async()
+                import sys
+                logger.info("Agent process exiting now (shutdown command).")
+                sys.exit(0)
+            asyncio.create_task(shutdown_and_exit())
         elif command_type == "status":
             status = self.state.get_state()
             result["output"] = f"Agent status: {json.dumps(status)}"

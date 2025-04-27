@@ -135,6 +135,35 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
         logger.error(f"Error preparing or sending agent status update to frontends: {e}")
     
 
+async def broadcast_agent_deregister(agent_id: str):
+    """Broadcast a DEREGISTER_AGENT message to all frontend clients to remove the agent from the UI."""
+    logger.info(f"Broadcasting DEREGISTER_AGENT for agent {agent_id} to all frontends.")
+    message = {
+        "message_type": MessageType.DEREGISTER_AGENT,
+        "agent_id": agent_id,
+        "send_timestamp": datetime.now().isoformat(),
+    }
+    try:
+        payload = json.dumps(message)
+        active_connections = state.frontend_connections
+        if not active_connections:
+            logger.info("No frontend WebSockets connected, DEREGISTER_AGENT not broadcasted")
+            return
+        disconnected = []
+        for ws in active_connections:
+            if not ws:
+                continue
+            try:
+                await ws.send_text(payload)
+            except Exception as e:
+                logger.error(f"Error sending DEREGISTER_AGENT to frontend: {e}")
+                disconnected.append(ws)
+        for ws in disconnected:
+            if ws in state.frontend_connections:
+                state.frontend_connections.remove(ws)
+        logger.info(f"Successfully broadcasted DEREGISTER_AGENT for {agent_id} to {len(active_connections) - len(disconnected)} frontends")
+    except Exception as e:
+        logger.error(f"Error broadcasting DEREGISTER_AGENT for {agent_id}: {e}")
 
 def update_agent_status(agent_id: str, agent_name: str, internal_state: str = "offline") -> bool:
     """Updates an agent's status in the state.
@@ -218,31 +247,24 @@ def mark_agent_offline(agent_id: str) -> bool:
     logger.info(f"Marking agent offline: {agent_id}")
     if agent_id in state.agent_states:
         agent_state = state.agent_states[agent_id]
-        current_state = agent_state.metrics.get("internal_state", "initializing")
-        
-        if current_state != "offline":
-            # Update the agent state
-            agent_state.last_seen = datetime.now().isoformat()
-            
-            # Update metrics
-            agent_state.update_metrics({
-                "internal_state": "offline"
-            })
-            
-            # Update legacy status
-            state.agent_statuses[agent_id] = agent_state.to_agent_status()
-            
-            logger.info(f"Agent {agent_id} marked as offline.")
-            
-            # Broadcast via gRPC immediately for quick response
-            asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
-            
-            # Also schedule full broadcast for frontends
-            asyncio.create_task(broadcast_agent_status(is_full_update=True, target_websocket=None))
-            
-            return True
-        else:
-            logger.debug(f"Agent {agent_id} already marked as offline.")
+        # Set all metrics/state attributes to offline template
+        offline_metrics = {
+            "internal_state": "offline",
+            "grpc_status": "disconnected",
+            "registration_status": "not_registered",
+            "message_queue_status": "not_connected",
+            "llm_client_status": "not_configured",
+            "last_seen": datetime.now().isoformat()
+        }
+        agent_state.metrics.update(offline_metrics)
+        agent_state.last_seen = offline_metrics["last_seen"]
+        # Update legacy status
+        state.agent_statuses[agent_id] = agent_state.to_agent_status()
+        logger.info(f"Agent {agent_id} marked as offline with all metrics reset.")
+        # Broadcast via gRPC and WebSocket
+        asyncio.create_task(grpc_services.broadcast_agent_status_updates(is_full_update=True))
+        asyncio.create_task(broadcast_agent_status(is_full_update=True, target_websocket=None))
+        return True
     else:
         logger.warning(f"Cannot mark unknown agent {agent_id} as offline.")
     return False

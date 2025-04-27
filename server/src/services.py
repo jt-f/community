@@ -505,6 +505,26 @@ async def _handle_control_message(message_data: dict):
         else:
             logger.warning(f"Cannot resume agent {agent_id}: Not found or not paused.")
 
+    # Handle DEREGISTER_ALL_AGENTS
+    elif message_type == MessageType.DEREGISTER_ALL_AGENTS:
+        from agent_registration_service import send_command_to_agent
+        agent_ids = list(state.agent_statuses.keys())
+        tasks = [send_command_to_agent(agent_id, "shutdown", "") for agent_id in agent_ids]
+        if tasks:
+            await asyncio.gather(*tasks)
+            logger.info(f"Sent SHUTDOWN command to {len(tasks)} agents (irreversible).")
+        else:
+            logger.info("No agents to shutdown.")
+
+    # Handle DEREGISTER_AGENT
+    elif message_type == MessageType.DEREGISTER_AGENT and agent_id:
+        from agent_registration_service import send_command_to_agent
+        if agent_id in state.agent_statuses:
+            await send_command_to_agent(agent_id, "shutdown", "")
+            logger.info(f"Sent SHUTDOWN command to agent {agent_id} (irreversible).")
+        else:
+            logger.warning(f"Cannot shutdown agent {agent_id}: Not found.")
+
     # Handle DEREGISTER_AGENT, REREGISTER_AGENT, etc. (Add logic as needed)
     # ... other control message handling ...
 

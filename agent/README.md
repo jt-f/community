@@ -86,7 +86,40 @@ poetry run ./run.sh --name "MyAgent"
 -   `--rabbitmq-host`: (Optional) Overrides the `RABBITMQ_HOST` environment variable or default RabbitMQ server host.
 -   *(Note: `agent.py` currently uses `GRPC_HOST`/`GRPC_PORT` environment variables for gRPC connection, not command-line args)*
 
+## Command Result Handling
 
+When implementing command callbacks or sending command results to the server, always return a Python dict or a protobuf `CommandResult` object. The agent's gRPC handler (`send_command_result`) will accept either and convert as needed. This prevents type errors and ensures compatibility with gRPC.
+
+Example (recommended):
+```python
+# In your command callback:
+def my_command_handler(command):
+    return {
+        "success": True,
+        "output": "Command completed successfully!",
+        "error_message": "",
+        "exit_code": 0,
+    }
+```
+
+You may also return a `CommandResult` directly if you need advanced control:
+```python
+from generated.agent_registration_service_pb2 import CommandResult
+
+def my_command_handler(command):
+    return CommandResult(
+        command_id=command["command_id"],
+        agent_id="my_agent_id",
+        success=True,
+        output="Command completed successfully!",
+        error_message="",
+        exit_code=0,
+    )
+```
+
+If you return any other type, the agent will log an error and not send the result to the server.
+
+This approach is DRY, robust, and microservice-appropriate. It prevents accidental type errors and makes the contract for command results explicit.
 
 ## Information Flow Diagram (`agent.py`)
 
@@ -150,6 +183,12 @@ The `Agent` class orchestrates these handlers and manages high-level agent logic
     c.  The main loop and consumer thread stop.
 
 *(Note: `example_agent.py` provides a different example focusing on receiving and executing shell/python commands via the gRPC `ReceiveCommands` stream and sending results back via `SendCommandResult`.)*
+
+## Guaranteed Agent Shutdown
+
+- When the agent receives a 'shutdown' command, it sets a shutdown flag, runs cleanup, and then exits the process using sys.exit(0) from the main event loop.
+- This guarantees the agent will not reconnect or restart itself unless managed by an external supervisor.
+- The main loop checks the shutdown flag to prevent reconnection attempts after shutdown is triggered.
 
 ## Agent Status Updates (DRY, Microservice-Appropriate)
 

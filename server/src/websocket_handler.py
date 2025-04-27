@@ -128,7 +128,7 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
     logger.info(f"Agent status update sent to requesting frontend {client_id}")
 
 async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command_type, message_type):
-    """Send a command (pause/resume) to one or more agents and send an ack to the frontend."""
+    """Send a command (pause/resume/shutdown) to one or more agents and send an ack to the frontend."""
     from agent_registration_service import send_command_to_agent
     tasks = [send_command_to_agent(agent_id, command_type, "") for agent_id in agent_ids]
     if tasks:
@@ -172,6 +172,19 @@ async def _handle_RESUME_Agent(websocket: WebSocket, client_id: str, message_dat
         logger.warning(f"RESUME_AGENT received with no agent_id from {client_id}.")
         return
     await _send_agent_command_to_agents([agent_id], websocket, client_id, "resume", MessageType.RESUME_AGENT)
+
+async def _handle_deregister_all_agents(websocket: WebSocket, client_id: str, message_data: dict):
+    """Handle DEREGISTER_ALL_AGENTS control message from frontend."""
+    agent_ids = list(state.agent_statuses.keys())
+    await _send_agent_command_to_agents(agent_ids, websocket, client_id, "shutdown", MessageType.DEREGISTER_ALL_AGENTS)
+
+async def _handle_deregister_agent(websocket: WebSocket, client_id: str, message_data: dict):
+    """Handle DEREGISTER_AGENT control message for a single agent from frontend."""
+    agent_id = message_data.get('agent_id')
+    if not agent_id:
+        logger.warning(f"DEREGISTER_AGENT received with no agent_id from {client_id}.")
+        return
+    await _send_agent_command_to_agents([agent_id], websocket, client_id, "shutdown", MessageType.DEREGISTER_AGENT)
 
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
@@ -253,6 +266,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 await _handle_pause_agent(websocket, client_id, message_data)
             elif msg_type == MessageType.RESUME_AGENT:
                 await _handle_RESUME_Agent(websocket, client_id, message_data)
+            elif msg_type == MessageType.DEREGISTER_ALL_AGENTS:
+                await _handle_deregister_all_agents(websocket, client_id, message_data)
+            elif msg_type == MessageType.DEREGISTER_AGENT:
+                await _handle_deregister_agent(websocket, client_id, message_data)
             else:
                 await _handle_unknown_message(websocket, client_id, message_data)
 

@@ -57,6 +57,7 @@ class ServerManager:
         self._state_update = state_update
         self._is_registered = False
         self._grpc_connection_state = "disconnected" # Add internal state tracking
+        self._killed = False  # Prevent resurrection after kill/unregister
 
     def _update_grpc_state(self, new_state: str):
         """Helper to update internal and external gRPC state."""
@@ -161,8 +162,11 @@ class ServerManager:
              return False
 
 
-    async def register(self, agent_id, agent_name, command_callback=None):
+    async def register(self, agent_id, agent_name):
         """Register the agent with the server and optionally start the command stream."""
+        if self._killed:
+            logger.warning("Agent is killed/shutdown. Registration will not start.")
+            return False
         if not self._ensure_connection():
             self._update_grpc_state("failed") # Ensure state reflects failure
             return False
@@ -188,7 +192,7 @@ class ServerManager:
                     self._state_update('internal_state', 'idle') # Set to idle after successful registration
 
                 logger.info(f"Agent registered successfully with ID: {agent_id}")
-                self._command_callback = command_callback or self._command_callback
+                self._command_callback = self._command_callback
 
                 # Start command stream only if registration is successful
                 self.start_command_stream(agent_id, self._command_callback)
@@ -214,6 +218,9 @@ class ServerManager:
 
     async def unregister(self, agent_id):
         """Unregister the agent from the server."""
+        if self._killed:
+            logger.warning("Agent is killed/shutdown. Unregistration will not proceed.")
+            return False
         if not self._is_registered or not self.stub or not agent_id:
             logger.warning("Cannot unregister: Agent not registered or connection issue.")
             return False
@@ -267,20 +274,27 @@ class ServerManager:
             logger.error(f"Unexpected error sending heartbeat: {e}")
             return False
 
-    async def send_command_result(self, agent_id, command_id: str, result: dict):
-        """Send the result of an executed command back to the server."""
+    async def send_command_result(self, agent_id, command_id: str, result):
+        """Send the result of an executed command back to the server. Accepts dict or CommandResult."""
         if not self._is_registered or not self.stub or not agent_id:
             logger.warning("Cannot send command result: Agent not registered.")
             return False
 
-        request = CommandResult(
-            command_id=command_id,
-            agent_id=agent_id,
-            success=result.get("success", False),
-            output=result.get("output", ""),
-            error_message=result.get("error_message", ""),
-            exit_code=result.get("exit_code", 0),
-        )
+        # Accept either dict or CommandResult for flexibility
+        if isinstance(result, dict):
+            request = CommandResult(
+                command_id=command_id,
+                agent_id=agent_id,
+                success=result.get("success", False),
+                output=result.get("output", ""),
+                error_message=result.get("error_message", ""),
+                exit_code=result.get("exit_code", 0),
+            )
+        elif isinstance(result, CommandResult):
+            request = result
+        else:
+            logger.error(f"send_command_result: result must be dict or CommandResult, got {type(result)}")
+            return False
         try:
             logger.info(f"Sending result for command {command_id}...")
             response = await self.stub.SendCommandResult(request, timeout=10.0)
@@ -316,17 +330,25 @@ class ServerManager:
             if 'last_seen' not in metrics:
                 metrics['last_seen'] = datetime.now().isoformat() # Use current time if missing
 
+            # --- PATCH: Ensure metrics is a dict of str:str ---
+            metrics_str = {str(k): str(v) for k, v in metrics.items()}
+
+            # Defensive: ensure we never pass a dict to a protobuf method
+            if not isinstance(metrics_str, dict):
+                logger.error("Metrics is not a dict, cannot send agent status update.")
+                return False
+
             agent_info = AgentInfo(
                 agent_id=agent_id,
                 agent_name=agent_name,
-                last_seen=metrics['last_seen'], # Use the one from metrics
-                metrics=metrics
+                last_seen=metrics_str['last_seen'], # Use the one from metrics
+                metrics=metrics_str
             )
             request = AgentStatusUpdateRequest(agent=agent_info)
 
             # Create stub for the status service specifically
             status_stub = AgentStatusServiceStub(self.channel)
-            logger.info(f"Sending agent status update via SendAgentStatus: {request}")
+            logger.debug(f"Sending agent status update via SendAgentStatus: {request}")
             response = await status_stub.SendAgentStatus(request, timeout=15.0) # Add timeout
 
             # If call succeeded, ensure state is marked connected
@@ -344,17 +366,19 @@ class ServerManager:
             logger.warning(f"Unexpected error sending agent status update: {e}")
             self._update_grpc_state("failed")
             return False
-    # --- End modification ---
 
     async def _command_stream_loop(self, agent_id):
         """Background task to listen for commands from the server."""
+        if self._killed:
+            logger.error("Command stream cannot start: Agent is killed/shutdown.")
+            return
         if not self._is_registered: # Check registration flag first
             logger.error("Command stream cannot start: Agent not registered.")
             return
 
         logger.info("Starting command stream listener...")
 
-        while self._is_registered: # Loop while agent should be registered
+        while self._is_registered and not self._killed: # Loop while agent should be registered and not killed
             if not self._ensure_connection():
                 logger.warning("Command stream: gRPC connection failed to initialize. Retrying in 15s...")
                 await asyncio.sleep(15)
@@ -378,7 +402,7 @@ class ServerManager:
                 logger.info("Command stream connected.")
                 async for command in stream:
                     # --- Process command (existing logic) ---
-                    logger.info(f"Received command: {command.command_id} ({command.type})")
+                    logger.info(f"Received command {command}")
                     if self._command_callback:
                         try:
                             command_dict = {
@@ -388,6 +412,7 @@ class ServerManager:
                                 "parameters": dict(command.parameters),
                                 "is_cancellation": command.is_cancellation,
                             }
+                            logger.info(f"Received command: {command_dict}")
                             if asyncio.iscoroutinefunction(self._command_callback):
                                 result = await self._command_callback(command_dict)
                             else:
@@ -432,8 +457,8 @@ class ServerManager:
                      logger.info("Cancelled active command stream context due to error or loop exit.")
 
 
-            # Wait before retrying the connection loop if still registered
-            if self._is_registered:
+            # Wait before retrying the connection loop if still registered and not killed
+            if self._is_registered and not self._killed:
                  logger.info("Waiting 10 seconds before attempting to reconnect command stream...")
                  await asyncio.sleep(10)
 
@@ -442,6 +467,9 @@ class ServerManager:
 
     def start_command_stream(self, agent_id, callback):
         """Starts the background command stream listener task."""
+        if self._killed:
+            logger.error("Cannot start command stream: Agent is killed/shutdown.")
+            return
         if not self._is_registered:
              logger.error("Cannot start command stream: Agent not registered.")
              return
@@ -455,9 +483,9 @@ class ServerManager:
         logger.info("Command stream task created.")
 
     async def cleanup(self, agent_id):
-        """Clean up gRPC resources."""
+        """Clean up gRPC resources and mark agent as killed/shutdown."""
         logger.info("Cleaning up ServerManager gRPC resources...")
-
+        self._killed = True  # Prevent resurrection after cleanup
 
         if self._command_stream_task and not self._command_stream_task.done():
             logger.info("Cancelling command stream task...")

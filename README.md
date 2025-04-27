@@ -118,6 +118,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 11. **Response Delivery (Server -> Frontend - WebSocket):** The Server consumes the response from `server_input_queue` and sends it to the correct Frontend client via WebSocket.
 12. **Command Handling (Server <-> Agent - gRPC - Optional):** The Server can send commands (defined in `.proto`) to Agents via a gRPC stream (`ReceiveCommands`). Agents execute commands and send results back via gRPC (`SendCommandResult`). (See `example_agent.py`).
 
+## Irreversible Agent Shutdown (Deregister)
+
+- When a user clicks 'Deregister Agent' or 'Deregister All Agents' in the frontend, the server sends a 'shutdown' command to the agent(s).
+- Upon receiving this command, the agent will clean up and irreversibly exit its process.
+- This is intended for permanent removal of agents from the system and cannot be undone from the UI.
+
 ## Architecture Diagram
 
 ```mermaid

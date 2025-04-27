@@ -25,8 +25,6 @@ interface ChatUIProps {
     handlePauseAll: () => void;
     handleresumeAll: () => void;
     handleDeregisterAll: () => void;
-    handleReregisterAll: () => void;
-    handleResetAllQueues: () => void;
   };
 }
 
@@ -70,16 +68,6 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
       wsRef.current.send(JSON.stringify({ message_type: MessageType.DEREGISTER_ALL_AGENTS }));
     }
   };
-  const handleReregisterAll = () => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.REREGISTER_ALL_AGENTS }));
-    }
-  };
-  const handleResetAllQueues = () => {
-    if (wsRef.current && isConnected) {
-      wsRef.current.send(JSON.stringify({ message_type: MessageType.RESET_ALL_QUEUES }));
-    }
-  };
 
   // WebSocket message handler
   const handleWebSocketMessage = (event: MessageEvent) => {
@@ -115,7 +103,7 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
           });
           return newMap;
         });
-        
+
         // Log the agent update format for debugging
         console.log(`Agent update format: ${message.agents.length > 0 && 'metrics' in message.agents[0] ? 'New with metrics' : 'Legacy'}`);
       }
@@ -272,8 +260,6 @@ export function ChatUI({ userId, onSystemControl }: ChatUIProps) {
       onSystemControl.handlePauseAll = handlePauseAll;
       onSystemControl.handleresumeAll = handleresumeAll;
       onSystemControl.handleDeregisterAll = handleDeregisterAll;
-      onSystemControl.handleReregisterAll = handleReregisterAll;
-      onSystemControl.handleResetAllQueues = handleResetAllQueues;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);

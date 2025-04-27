@@ -55,6 +55,11 @@ Example metrics received:
 
 See the proto definition for details on the `SendAgentStatus` RPC and the `metrics` map.
 
+## Offline Agent State Handling
+
+- When the server marks an agent as offline (due to shutdown or lost connection), it resets all agent metrics/state attributes to a standard offline template.
+- This ensures all 'connected' or 'configured' attributes are set to their offline values, even if the agent cannot update them itself.
+
 ## Agent Disconnection Handling
 
 - The server now automatically marks an agent as offline if its gRPC connection is lost (for example, if the agent process is killed or crashes). This ensures that the system accurately reflects agent availability, even if the agent does not explicitly call UnregisterAgent.

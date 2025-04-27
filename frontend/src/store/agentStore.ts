@@ -3,7 +3,7 @@ import { AgentStatus, AgentWithMetrics } from '../types/message';
 
 interface AgentStore {
   agents: AgentStatus[];
-  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean) => void;
+  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean, removeAgentId?: string) => void;
   getAgentById: (agentId: string) => AgentStatus | undefined;
   getOnlineAgents: () => AgentStatus[];
   getOfflineAgents: () => AgentStatus[];
@@ -26,7 +26,12 @@ const convertToAgentStatus = (agentWithMetrics: AgentWithMetrics): AgentStatus =
 export const useAgentStore = create<AgentStore>((set, get) => ({
   agents: [],
 
-  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean) => {
+  updateAgents: (newAgents: AgentWithMetrics[], isFullUpdate: boolean, removeAgentId?: string) => {
+    if (removeAgentId) {
+      // Remove a specific agent by ID
+      set((state) => ({ agents: state.agents.filter(a => a.agent_id !== removeAgentId) }));
+      return;
+    }
     if (isFullUpdate) {
       // For full updates, replace the entire list
       const convertedAgents = newAgents.map(convertToAgentStatus);
