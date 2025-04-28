@@ -1,13 +1,20 @@
 import os
 import asyncio
 import random
+import logging # Import logging directly
+from typing import Callable, Optional, Dict
+
+# Third-party imports
 import grpc
-from typing import Callable, Optional
+
+# Local application imports
 from shared_models import setup_logging, MessageType
+from decorators import log_exceptions
 
 logger = setup_logging(__name__)
 
-# Import generated gRPC code
+# Import generated gRPC code with error handling
+GRPC_IMPORTS_SUCCESSFUL = False
 try:
     from generated.agent_status_service_pb2 import AgentStatusRequest
     from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
@@ -15,188 +22,264 @@ try:
     from generated.broker_registration_service_pb2_grpc import BrokerRegistrationServiceStub
     GRPC_IMPORTS_SUCCESSFUL = True
 except ImportError as e:
-    logger.warning(f"gRPC generated code not found. Please run generate_grpc.py first. Error: {e}")
+    logger.error(f"Failed to import gRPC generated code. Please run generate_grpc.py. Error: {e}")
 
 
 class ServerManager:
     """
-    Handles all gRPC communication for the broker: registration, agent status requests, and agent status subscription.
-    Keeps the broker.py clean and focused on message routing/state.
+    Manages gRPC communication for the Broker, including registration and agent status updates.
     """
-    def __init__(self, broker_id, state_update=None, command_callback=None):
+    def __init__(self, broker_id: str, state_update: Optional[Callable] = None, command_callback: Optional[Callable] = None):
+        """Initializes the ServerManager.
+
+        Args:
+            broker_id: The unique ID for this broker instance.
+            state_update: Optional callback function to report state changes (e.g., registration status).
+            command_callback: Optional callback function to process received agent status updates.
+        """
         self.broker_id = broker_id
         self.state_update = state_update
         self.command_callback = command_callback
-        self.logger = setup_logging(__name__)
+        # Use the already configured logger
+        # self.logger = setup_logging(__name__) # Redundant if logger is already set up
         self.grpc_host = os.getenv("GRPC_HOST", "localhost")
         self.grpc_port = int(os.getenv("GRPC_PORT", "50051"))
-        self._grpc_task = None
+        self._grpc_task: Optional[asyncio.Task] = None
+        self._stop_event = asyncio.Event() # Event to signal stopping
 
-    async def register(self):
+    @log_exceptions
+    async def register(self) -> bool:
+        """Registers the broker with the gRPC server with retries and backoff."""
         if not GRPC_IMPORTS_SUCCESSFUL:
-            self.logger.error("gRPC imports failed. Cannot register broker.")
+            logger.error("gRPC imports failed. Cannot register broker.")
             if self.state_update:
                 self.state_update('registration_status', 'failed')
             return False
 
         max_retries = 5
-        retry_delay = 5
+        retry_delay = 5.0 # Use float for delays
         for attempt in range(max_retries):
             try:
-                channel = grpc.aio.insecure_channel(f"{self.grpc_host}:{self.grpc_port}")
-                stub = BrokerRegistrationServiceStub(channel)
-                request = BrokerRegistrationRequest(
-                    broker_id=self.broker_id,
-                    broker_name="BrokerService"
-                )
-                response = await stub.RegisterBroker(request)
-                await channel.close()
-                if response.success:
-                    self.logger.info(f"Broker registered successfully with ID: {self.broker_id}")
-                    self.start_agent_status_subscription()
-                    if self.state_update:
-                        self.state_update('registration_status', 'registered')
-                    return True
-                else:
-                    self.logger.error(f"Broker registration failed: {response.message}")
-                    if self.state_update:
-                        self.state_update('registration_status', 'failed')
-                    return False
+                async with grpc.aio.insecure_channel(f"{self.grpc_host}:{self.grpc_port}") as channel:
+                    stub = BrokerRegistrationServiceStub(channel)
+                    request = BrokerRegistrationRequest(
+                        broker_id=self.broker_id,
+                        broker_name=f"BrokerService_{self.broker_id[:4]}" # More descriptive name
+                    )
+                    logger.info(f"Attempting to register broker {self.broker_id} (Attempt {attempt + 1}/{max_retries})")
+                    response: BrokerRegistrationResponse = await stub.RegisterBroker(request, timeout=10) # Add timeout
 
-            except grpc.RpcError as e:
-                if attempt < max_retries - 1:
-                    self.logger.warning(f"Attempt {attempt + 1}/{max_retries} failed to register broker: {e}. Retrying in {retry_delay} seconds...")
+                    if response.success:
+                        logger.info(f"Broker {self.broker_id} registered successfully.")
+                        # Start subscription only after successful registration
+                        self.start_agent_status_subscription()
+                        if self.state_update:
+                            self.state_update('registration_status', 'registered')
+                        return True
+                    else:
+                        logger.error(f"Broker registration failed: {response.message}")
+                        # No retry on explicit failure response from server
+                        if self.state_update:
+                            self.state_update('registration_status', 'failed')
+                        return False
+
+            except grpc.aio.AioRpcError as e:
+                status_code = e.code()
+                details = e.details()
+                logger.warning(f"gRPC error during registration (Attempt {attempt + 1}/{max_retries}): {status_code} - {details}")
+                if status_code in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED) and attempt < max_retries - 1:
+                    logger.info(f"Retrying registration in {retry_delay:.1f} seconds...")
                     await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
+                    retry_delay = min(retry_delay * 2, 60) # Exponential backoff capped at 60s
                 else:
-                    self.logger.error(f"Error registering broker after {max_retries} attempts: {e}")
+                    logger.error(f"Failed to register broker after {max_retries} attempts due to gRPC error: {status_code}")
                     if self.state_update:
                         self.state_update('registration_status', 'failed')
                     return False
             except Exception as e:
-                self.logger.error(f"Unexpected error registering broker: {e}")
+                logger.error(f"Unexpected error during broker registration: {e}", exc_info=True)
                 if self.state_update:
                     self.state_update('registration_status', 'failed')
+                # Stop retrying on unexpected errors
                 return False
+        # Should not be reached if loop completes, but added for safety
+        return False
 
-    async def request_agent_status(self):
+    @log_exceptions
+    async def request_agent_status(self) -> Optional[Dict]:
+        """Requests a one-time snapshot of agent statuses from the server."""
         if not GRPC_IMPORTS_SUCCESSFUL:
-            self.logger.error("gRPC imports failed. Cannot request agent status.")
+            logger.error("gRPC imports failed. Cannot request agent status.")
             return None
+        if not self.command_callback:
+            logger.warning("No command_callback set, cannot process agent status response.")
+            return None
+
         try:
             async with grpc.aio.insecure_channel(f"{self.grpc_host}:{self.grpc_port}") as channel:
                 stub = AgentStatusServiceStub(channel)
                 request = AgentStatusRequest(broker_id=self.broker_id)
-                response = await stub.GetAgentStatus(request)
+                logger.info(f"Requesting agent status snapshot for broker {self.broker_id}")
+                response = await stub.GetAgentStatus(request, timeout=10) # Add timeout
+
                 agents_data = []
                 for agent in response.agents:
                     agent_data = {
                         "agent_id": agent.agent_id,
                         "agent_name": agent.agent_name,
-                        "last_seen": agent.last_seen,
-                        "metrics": dict(agent.metrics)
+                        "last_seen": agent.last_seen, # Consider converting to datetime object
+                        "metrics": dict(agent.metrics) # Convert map to dict
                     }
                     agents_data.append(agent_data)
+
                 status_update = {
                     "message_type": MessageType.AGENT_STATUS_UPDATE,
                     "agents": agents_data,
                     "is_full_update": response.is_full_update
                 }
 
+                logger.info(f"Received agent status snapshot. Processing {len(agents_data)} agents.")
                 await self.command_callback(status_update)
                 return status_update
+        except grpc.aio.AioRpcError as e:
+            logger.error(f"gRPC error requesting agent status: {e.code()} - {e.details()}")
+            return None
         except Exception as e:
-            self.logger.error(f"Error requesting agent status via gRPC: {e}")
+            logger.error(f"Unexpected error requesting agent status: {e}", exc_info=True)
             return None
 
-    def start_agent_status_subscription(self):
+    def start_agent_status_subscription(self) -> Optional[asyncio.Task]:
+        """Starts the background task for subscribing to agent status updates."""
+        if not GRPC_IMPORTS_SUCCESSFUL:
+             logger.error("gRPC imports failed. Cannot start agent status subscription.")
+             return None
         if self._grpc_task is not None and not self._grpc_task.done():
-            self.logger.warning("Agent status subscription already running.")
+            logger.warning("Agent status subscription task is already running.")
             return self._grpc_task
+
+        self._stop_event.clear() # Ensure stop event is clear before starting
         self._grpc_task = asyncio.create_task(self._agent_status_stream_loop())
-        self.logger.info("Started agent status subscription task.")
+        logger.info("Started agent status subscription background task.")
         return self._grpc_task
 
-    async def _agent_status_stream_loop(self, reconnect_interval=5):
-        if not GRPC_IMPORTS_SUCCESSFUL:
-            self.logger.error("gRPC imports failed. Cannot connect to gRPC server.")
+    @log_exceptions
+    async def _agent_status_stream_loop(self, initial_reconnect_delay=5.0):
+        """Background loop to maintain the gRPC stream for agent status updates."""
+        if not GRPC_IMPORTS_SUCCESSFUL or not self.command_callback:
+            logger.error("Cannot start agent status stream: gRPC imports failed or no command_callback set.")
             return
-        attempt = 0
-        max_backoff = 60
-        while True:
+
+        reconnect_delay = initial_reconnect_delay
+        max_backoff = 60.0
+
+        while not self._stop_event.is_set():
+            channel = None # Define channel outside try block for finally clause
             try:
-                if attempt > 0:
-                    backoff = min(reconnect_interval * (2 ** (attempt - 1)), max_backoff)
-                    jitter = backoff * 0.2 * (random.random() * 2 - 1)
-                    sleep_time = max(1, backoff + jitter)
-                    self.logger.info(f"Attempt {attempt}: Waiting {sleep_time:.1f}s before reconnecting to gRPC server")
-                    await asyncio.sleep(sleep_time)
-                attempt += 1
                 channel = grpc.aio.insecure_channel(f"{self.grpc_host}:{self.grpc_port}")
                 stub = AgentStatusServiceStub(channel)
                 request = AgentStatusRequest(broker_id=self.broker_id)
-                self.logger.info(f"Subscribing to agent status updates as broker {self.broker_id}")
-                attempt = 0
+                logger.info(f"Subscribing to agent status updates for broker {self.broker_id}...")
+
                 async for response in stub.SubscribeToAgentStatus(request):
-                    try:
+                    if self._stop_event.is_set(): # Check stop event during iteration
+                        logger.info("Stop event set, breaking from agent status stream.")
+                        break
 
-                        agents_data = []
-                        for agent in response.agents:
-                            self.logger.info(f"Received agent status update: {agent}")
-                            agents_data.append({
-                                "agent_id": agent.agent_id,
-                                "agent_name": agent.agent_name,
-                                "last_seen": agent.last_seen,
-                                "metrics": agent.metrics
-                            })
-                        status_update = {
-                            "message_type": MessageType.AGENT_STATUS_UPDATE,
-                            "agents": agents_data,
-                            "is_full_update": response.is_full_update
-                        }
-                        self.logger.info(f"Processing agent status update: {status_update}")
-                        await self.command_callback(status_update)
-                    except Exception as process_err:
-                        self.logger.error(f"Error processing agent status update: {process_err}")
-                        continue
-                self.logger.info("gRPC stream closed normally by server. Reconnecting...")
-            except grpc.RpcError as e:
-                if hasattr(e, 'code'):
-                    code = e.code()
-                    details = e.details() if hasattr(e, 'details') else "Unknown details"
-                    if code == grpc.StatusCode.UNAVAILABLE:
-                        self.logger.error(f"gRPC server unavailable: {details}")
-                    elif code == grpc.StatusCode.CANCELLED:
-                        self.logger.warning(f"gRPC stream cancelled: {details}")
-                    elif code == grpc.StatusCode.DEADLINE_EXCEEDED:
-                        self.logger.error(f"gRPC deadline exceeded: {details}")
-                    elif code == grpc.StatusCode.UNIMPLEMENTED:
-                        self.logger.error(f"gRPC method not implemented: {details}")
-                    elif code == grpc.StatusCode.INTERNAL:
-                        self.logger.error(f"gRPC internal server error: {details}")
-                    else:
-                        self.logger.error(f"gRPC error with code {code}: {details}")
+                    agents_data = []
+                    for agent in response.agents:
+                        # logger.debug(f"Received agent status update via stream: {agent}") # Debug level
+                        agents_data.append({
+                            "agent_id": agent.agent_id,
+                            "agent_name": agent.agent_name,
+                            "last_seen": agent.last_seen,
+                            "metrics": dict(agent.metrics) # Convert map to dict
+                        })
+
+                    status_update = {
+                        "message_type": MessageType.AGENT_STATUS_UPDATE,
+                        "agents": agents_data,
+                        "is_full_update": response.is_full_update
+                    }
+                    logger.info(f"Processing streamed agent status update ({len(agents_data)} agents, full={response.is_full_update}).")
+                    await self.command_callback(status_update)
+
+                # If loop finishes without break, server closed stream gracefully
+                if not self._stop_event.is_set():
+                    logger.info("gRPC stream closed by server. Attempting to reconnect...")
+                    reconnect_delay = initial_reconnect_delay # Reset delay on graceful close
+
+            except grpc.aio.AioRpcError as e:
+                status_code = e.code()
+                details = e.details()
+                logger.error(f"gRPC error in agent status stream: {status_code} - {details}")
+                if status_code == grpc.StatusCode.CANCELLED and self._stop_event.is_set():
+                    logger.info("Stream cancelled as part of shutdown.")
+                    break # Exit loop if cancelled due to stop event
+                # Apply backoff for other retryable errors
+                if status_code in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.INTERNAL, grpc.StatusCode.DEADLINE_EXCEEDED):
+                     logger.info(f"Stream error, will attempt reconnect after {reconnect_delay:.1f} seconds.")
+                     reconnect_delay = min(reconnect_delay * 2, max_backoff)
                 else:
-                    self.logger.error(f"gRPC error during agent status stream: {e}")
-                try:
-                    await channel.close()
-                except Exception as close_err:
-                    self.logger.warning(f"Error closing gRPC channel: {close_err}")
-                continue
-            except asyncio.CancelledError:
-                self.logger.info("gRPC client task cancelled")
-                break
-            except Exception as e:
-                self.logger.error(f"Error connecting to gRPC server: {e}")
-        self.logger.info("gRPC client stopped")
+                     # Non-retryable gRPC error, log and potentially stop trying
+                     logger.error(f"Non-retryable gRPC error {status_code}. Stopping stream attempts.")
+                     break # Exit loop for non-retryable errors
 
-    async def stop(self):
-        if self._grpc_task and not self._grpc_task.done():
-            self._grpc_task.cancel()
-            try:
-                await self._grpc_task
             except asyncio.CancelledError:
-                self.logger.info("gRPC agent status subscription task cancelled.")
+                logger.info("Agent status stream task cancelled externally.")
+                break # Exit loop if task is cancelled
             except Exception as e:
-                self.logger.error(f"Error during gRPC task cancellation: {e}")
-        self._grpc_task = None
+                logger.error(f"Unexpected error in agent status stream loop: {e}", exc_info=True)
+                # Apply backoff for unexpected errors before retrying
+                logger.info(f"Unexpected error, will attempt reconnect after {reconnect_delay:.1f} seconds.")
+                reconnect_delay = min(reconnect_delay * 2, max_backoff)
+            finally:
+                if channel:
+                    await channel.close()
+                    logger.debug("gRPC channel closed in stream loop finally block.")
+
+            # Wait before retrying, unless stopping
+            if not self._stop_event.is_set():
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=reconnect_delay)
+                    # If wait completes, stop event was set during sleep
+                    logger.info("Stop event set during reconnect delay. Exiting stream loop.")
+                    break
+                except asyncio.TimeoutError:
+                    # Timeout occurred, continue to next retry attempt
+                    pass
+
+        logger.info("Agent status subscription loop finished.")
+
+    @log_exceptions
+    async def stop(self):
+        """Stops the gRPC agent status subscription task gracefully."""
+        logger.info("Stopping ServerManager and gRPC subscription...")
+        self._stop_event.set() # Signal the loop to stop
+
+        if self._grpc_task and not self._grpc_task.done():
+            logger.info("Waiting for gRPC agent status subscription task to finish...")
+            try:
+                # Wait for the task to finish, with a timeout
+                await asyncio.wait_for(self._grpc_task, timeout=10.0)
+                logger.info("gRPC agent status subscription task finished gracefully.")
+            except asyncio.TimeoutError:
+                logger.warning("gRPC task did not finish within timeout during stop. Attempting cancellation.")
+                self._grpc_task.cancel()
+                try:
+                    await self._grpc_task # Await cancellation
+                except asyncio.CancelledError:
+                    logger.info("gRPC task successfully cancelled after timeout.")
+                except Exception as e:
+                     logger.error(f"Error during gRPC task cancellation: {e}", exc_info=True)
+            except asyncio.CancelledError:
+                 # This might happen if stop() itself is cancelled
+                 logger.warning("ServerManager stop() was cancelled while waiting for gRPC task.")
+            except Exception as e:
+                logger.error(f"Error waiting for gRPC task during stop: {e}", exc_info=True)
+        elif self._grpc_task and self._grpc_task.done():
+             logger.info("gRPC agent status subscription task was already done.")
+        else:
+             logger.info("No active gRPC agent status subscription task to stop.")
+
+        self._grpc_task = None # Clear the task reference
+        logger.info("ServerManager stop sequence complete.")

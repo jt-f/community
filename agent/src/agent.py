@@ -7,6 +7,7 @@ import os
 import uuid
 from typing import Dict, Any, Callable, Optional, Awaitable
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv() # Load .env file early
 
@@ -39,17 +40,19 @@ class Agent:
         self.agent_id = f"agent_{uuid.uuid4().hex[:8]}"
         self.agent_name = agent_name
         self.loop = asyncio.get_event_loop()
+        self._status_update_queue = asyncio.Queue()
+        self._status_update_task = asyncio.create_task(self._process_status_updates())
 
         # Initialize state and components
         self.state = AgentState()
-        self.llm_client = LLMClient(state_update=self.handle_state_change)
+        self.llm_client = LLMClient(state_update=self.set_agent_state)
         self.mq_handler = MessageQueueHandler(
-            state_update=self.handle_state_change,
+            state_update=self.set_agent_state,
             message_handler=self.handle_message,
             loop=self.loop
         )
         self.server_manager = ServerManager(
-            state_update=self.handle_state_change,
+            state_update=self.set_agent_state,
             command_callback=self.handle_server_command
         )
 
@@ -74,21 +77,18 @@ class Agent:
 
     async def _connect_to_message_queue(self) -> None:
         """Connect to RabbitMQ message queue"""
-
+        # Connect synchronously since MessageQueueHandler.connect is not async
         mq_connected = self.mq_handler.connect(queue_name=self.agent_queue)
         if not mq_connected:
-            logger.error("Failed to connect/setup RabbitMQ: aborting agent startup.")
-            raise RuntimeError("RabbitMQ connection failed. Check RabbitMQ server and configuration.")
+            error_message = "Failed to connect/setup RabbitMQ: aborting agent startup."
+            logger.error(error_message)
+            raise RuntimeError(error_message + " Check RabbitMQ server and configuration.")
         logger.info(f"Connected to RabbitMQ queue: {self.agent_queue}")
-
 
     async def _periodic_status_update(self) -> None:
         """Send unsolicited status updates periodically to the server"""
         while not self._shutdown_requested:
-            try:
-                await self._send_status_update()
-            except Exception as e:
-                logger.error(f"Periodic status update failed: {e}")
+            await self._send_status_update()
             await asyncio.sleep(AGENT_STATUS_UPDATE_INTERVAL)
 
     async def run(self) -> None:
@@ -96,7 +96,7 @@ class Agent:
         logger.info("Agent main loop started. Agent is running.")
         try:
             # Set initial state to idle after successful startup
-            self.handle_state_change('internal_state', 'idle')
+            self.set_agent_state('internal_state', 'idle')
             
             # Main loop - just keep the agent alive
             while not self._shutdown_requested:
@@ -107,7 +107,7 @@ class Agent:
     async def cleanup_async(self) -> None:
         """Clean up resources before shutdown"""
         logger.info("Starting async cleanup...")
-        self.handle_state_change('internal_state', 'shutting_down')
+        self.set_agent_state('internal_state', 'shutting_down')
         await self.server_manager.cleanup(self.agent_id)
         self.mq_handler.cleanup()
         self.llm_client.cleanup()
@@ -163,7 +163,7 @@ class Agent:
     def _handle_pause_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Handle pause command from server"""
         self.mq_handler.set_consuming(False)
-        self.handle_state_change('internal_state', 'paused')
+        self.set_agent_state('internal_state', 'paused')
         return {"output": f"Agent {self.agent_name} paused."}
 
     def _handle_resume_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
@@ -176,14 +176,14 @@ class Agent:
                 "exit_code": 1
             }
         self.mq_handler.set_consuming(True)
-        self.handle_state_change('internal_state', 'idle')
+        self.set_agent_state('internal_state', 'idle')
         return {"output": f"Agent {self.agent_name} resumed."}
 
     def _handle_shutdown_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """Handle shutdown command from server"""
         logger.info(f"Received shutdown command: {command}")
         self._shutdown_requested = True
-        self.handle_state_change('internal_state', 'shutting_down')
+        self.set_agent_state('internal_state', 'shutting_down')
         # Trigger cleanup and exit
         asyncio.create_task(self.cleanup_async()).add_done_callback(
             lambda _: self.loop.stop() if self.loop.is_running() else None
@@ -197,22 +197,51 @@ class Agent:
 
     async def _send_status_update(self) -> None:
         """Send a gRPC status update to the server with the full agent state"""
+        # Get the current state
+        current_state = self.state.get_state()
+        
+        # Extract last_seen from state or use current time
+        last_seen = current_state.get('last_seen', '') if 'last_seen' in current_state else datetime.now().isoformat()
+        
+        # Create metrics dictionary without last_seen
+        metrics = {k: v for k, v in current_state.items() if k != 'last_seen'}
+        
+        # Call send_agent_status_update with the correct signature
         await self.server_manager.send_agent_status_update(
-            self.agent_id,
-            self.agent_name,
-            self.state.get_state('last_seen') if 'last_seen' in self.state.get_state() else '',
-            self.state.get_state()
+            agent_id=self.agent_id,
+            agent_name=self.agent_name,
+            last_seen=last_seen,
+            metrics=metrics
         )
 
-
-    def handle_state_change(self, key: str, value: Any) -> None:
+    def set_agent_state(self, key: str, value: Any) -> None:
         """Update agent state and trigger status update"""
         self.state.set_state(key, value)
-        logger.info(f"Agent state changed: {key} = {value}")
-        logger.debug(f"Overall state: {self.state.__repr__()}")
-        
-        # Send gRPC status update to server on every state change
-        asyncio.create_task(self._send_status_update())
+        try:
+            self._status_update_queue.put_nowait((key, value))
+        except KeyError as e:
+            logger.error(f"Failed to update status queue: {e}")
+            
+    async def _process_status_updates(self) -> None:
+        """Process state changes from the queue and send status updates."""
+        while not self._shutdown_requested:
+            key, value = await self._status_update_queue.get()
+            try:
+                await self._send_status_update()
+            except Exception as e:
+                logger.error(f"Exception in status update task: {e}")
+            finally:
+                self._status_update_queue.task_done()
+        self._safe_create_task(self._send_status_update())
+
+    def _safe_create_task(self, coro: Awaitable) -> None:
+        """Create an asyncio task with exception handling"""
+        async def wrapper():
+            try:
+                await coro
+            except Exception as e:
+                logger.error(f"Exception in task: {e}")
+        asyncio.create_task(wrapper())
 
     def generate_response(self, incoming_message_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a response using the LLM and format it for publishing"""
@@ -252,14 +281,10 @@ async def main() -> None:
     args = parser.parse_args()
     
     agent = Agent(agent_name=args.name)
-    try:
-        await agent.connect()
-        await agent.run()
-    except asyncio.CancelledError:
-        logger.info("Main function cancelled (likely during shutdown).")
-    finally:
-        await agent.cleanup_async()
-        logger.info("Agent shutdown sequence complete.")
+    await agent.connect()
+    await agent.run()
+    await agent.cleanup_async()
+    logger.info("Agent shutdown sequence complete.")
 
 if __name__ == "__main__":
     try:
@@ -267,5 +292,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Agent process terminated by user.")
     except Exception as e:
-        logger.critical(f"Fatal error in agent process: {e}", exc_info=True)
-        exit(1)
+        logger.error(f"Unexpected error in Broker: {e}")
