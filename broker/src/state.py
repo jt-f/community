@@ -55,30 +55,41 @@ class BrokerState:
             # Log summary after updates
             await self._log_agent_summary()
 
+    def _process_agent_data(self, agent_data: Dict, existing_agent: Optional[Dict] = None) -> Optional[Dict]:
+        """Processes raw agent data, determines online status, and returns a structured agent state dict."""
+        agent_id = agent_data.get("agent_id")
+        if not agent_id:
+            logger.warning(f"Skipping agent data with missing agent_id: {agent_data}")
+            return None
+
+        metrics = agent_data.get("metrics", {})
+        is_online = self._determine_online_status(metrics)
+        agent_name = agent_data.get("agent_name", f"Agent_{agent_id[:4]}")
+        last_seen = agent_data.get("last_seen", datetime.now().isoformat())
+
+        # Preserve registration time if agent existed before, otherwise set current time
+        registration_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if existing_agent:
+            registration_time = existing_agent.get("registration_time", registration_time)
+
+        return {
+            "agent_id": agent_id,
+            "name": agent_name,
+            "is_online": is_online,
+            "last_seen": last_seen,
+            "metrics": metrics,
+            "registration_time": registration_time
+        }
+
     async def _handle_full_update(self, agents_data: List[Dict]):
         """Rebuilds the entire agent state from a full update list. Assumes lock is held."""
         new_agents_state: Dict[str, Dict[str, Any]] = {}
         for agent_data in agents_data:
-            agent_id = agent_data.get("agent_id")
-            if not agent_id:
-                logger.warning(f"Skipping agent data with missing agent_id in full update: {agent_data}")
-                continue
-
-            metrics = agent_data.get("metrics", {})
-            is_online = self._determine_online_status(metrics)
-            agent_name = agent_data.get("agent_name", f"Agent_{agent_id[:4]}")
-            last_seen = agent_data.get("last_seen", datetime.now().isoformat())
-
-            new_agents_state[agent_id] = {
-                "agent_id": agent_id,
-                "name": agent_name,
-                "is_online": is_online,
-                "last_seen": last_seen,
-                "metrics": metrics,
-                # Preserve registration time if agent existed before
-                "registration_time": self._agents.get(agent_id, {}).get("registration_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            }
-            logger.debug(f"Full update: Processed agent {agent_id}")
+            processed_data = self._process_agent_data(agent_data, self._agents.get(agent_data.get("agent_id")))
+            if processed_data:
+                agent_id = processed_data["agent_id"]
+                new_agents_state[agent_id] = processed_data
+                logger.debug(f"Full update: Processed agent {agent_id}")
 
         old_ids = set(self._agents.keys())
         new_ids = set(new_agents_state.keys())
@@ -94,32 +105,24 @@ class BrokerState:
         new_count = 0
         for agent_data in agents_data:
             agent_id = agent_data.get("agent_id")
-            if not agent_id:
-                logger.warning(f"Skipping agent data with missing agent_id in partial update: {agent_data}")
-                continue
-
             existing_agent = self._agents.get(agent_id)
-            is_new = existing_agent is None
+            processed_data = self._process_agent_data(agent_data, existing_agent)
 
-            metrics = agent_data.get("metrics", {})
-            is_online_now = self._determine_online_status(metrics)
-            agent_name = agent_data.get("agent_name", f"Agent_{agent_id[:4]}")
-            last_seen = agent_data.get("last_seen", datetime.now().isoformat())
+            if not processed_data:
+                continue # Skip if agent_id was missing
+
+            agent_id = processed_data["agent_id"] # Re-get agent_id after processing
+            is_new = existing_agent is None
+            is_online_now = processed_data["is_online"]
+            agent_name = processed_data["name"]
 
             if is_new:
                 new_count += 1
-                self._agents[agent_id] = {
-                    "agent_id": agent_id,
-                    "name": agent_name,
-                    "is_online": is_online_now,
-                    "last_seen": last_seen,
-                    "metrics": metrics,
-                    "registration_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
+                self._agents[agent_id] = processed_data
                 logger.info(f"Partial Update: Registered new agent: {agent_id} (Name: {agent_name}, Online: {is_online_now})")
             else:
                 updated_count += 1
-                # Log significant changes
+                # Log significant changes before updating
                 was_online = existing_agent.get("is_online", False)
                 if was_online != is_online_now:
                     logger.info(f"Partial Update: Agent {agent_id} online status change: {was_online} -> {is_online_now}")
@@ -128,13 +131,8 @@ class BrokerState:
                 if old_name != agent_name:
                     logger.info(f"Partial Update: Agent {agent_id} name change: '{old_name}' -> '{agent_name}'")
 
-                # Update existing agent info
-                existing_agent.update({
-                    "name": agent_name,
-                    "is_online": is_online_now,
-                    "last_seen": last_seen,
-                    "metrics": metrics
-                })
+                # Update existing agent info using the fully processed data
+                existing_agent.update(processed_data)
                 logger.debug(f"Partial Update: Updated existing agent: {agent_id}")
         logger.info(f"Partial update processed: {new_count} new, {updated_count} updated agents.")
 
@@ -153,7 +151,6 @@ class BrokerState:
                 if self._determine_online_status(info.get("metrics", {}))
                 and agent_id != exclude_sender_id
             ]
-            # logger.debug(f"Online agents (excluding {exclude_sender_id}): {online_agents}")
             return online_agents
 
     async def get_all_agents(self) -> Dict[str, Dict[str, Any]]:

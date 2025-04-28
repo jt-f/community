@@ -103,12 +103,10 @@ class MessageQueueHandler:
                         except json.JSONDecodeError as e:
                             logger.error(f"Failed to decode message JSON: {e} - Body: {body!r}")
                             # Decide how to handle bad messages (e.g., Nack, requeue, log)
-                            # self.channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                             continue # Skip ack for this message
                         except Exception as e:
                             logger.error(f"Error processing message: {e}")
                             # Decide how to handle processing errors
-                            # self.channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                             continue # Skip ack for this message
 
                     # Acknowledge the message after successful processing

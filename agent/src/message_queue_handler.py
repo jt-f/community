@@ -85,7 +85,6 @@ class MessageQueueHandler:
                     try:
                         message_dict = json.loads(body.decode('utf-8'))
                         logger.debug(f"Decoded message dict: {message_dict}")
-                        logger.info("Running sync handler directly...")
                         response = self._message_handler(message_dict)
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to decode message JSON: {e} - Message Body: {body!r}")

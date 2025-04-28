@@ -41,7 +41,6 @@ class ServerManager:
         self.state_update = state_update
         self.command_callback = command_callback
         # Use the already configured logger
-        # self.logger = setup_logging(__name__) # Redundant if logger is already set up
         self.grpc_host = os.getenv("GRPC_HOST", "localhost")
         self.grpc_port = int(os.getenv("GRPC_PORT", "50051"))
         self._grpc_task: Optional[asyncio.Task] = None
@@ -122,23 +121,9 @@ class ServerManager:
                 logger.info(f"Requesting agent status snapshot for broker {self.broker_id}")
                 response = await stub.GetAgentStatus(request, timeout=10) # Add timeout
 
-                agents_data = []
-                for agent in response.agents:
-                    agent_data = {
-                        "agent_id": agent.agent_id,
-                        "agent_name": agent.agent_name,
-                        "last_seen": agent.last_seen, # Consider converting to datetime object
-                        "metrics": dict(agent.metrics) # Convert map to dict
-                    }
-                    agents_data.append(agent_data)
+                status_update = self._process_agent_status_response(response)
 
-                status_update = {
-                    "message_type": MessageType.AGENT_STATUS_UPDATE,
-                    "agents": agents_data,
-                    "is_full_update": response.is_full_update
-                }
-
-                logger.info(f"Received agent status snapshot. Processing {len(agents_data)} agents.")
+                logger.info(f"Received agent status snapshot. Processing {len(status_update['agents'])} agents.")
                 await self.command_callback(status_update)
                 return status_update
         except grpc.aio.AioRpcError as e:
@@ -147,6 +132,23 @@ class ServerManager:
         except Exception as e:
             logger.error(f"Unexpected error requesting agent status: {e}", exc_info=True)
             return None
+
+    def _process_agent_status_response(self, response) -> Dict:
+        """Processes the gRPC agent status response into a dictionary for the callback."""
+        agents_data = []
+        for agent in response.agents:
+            agents_data.append({
+                "agent_id": agent.agent_id,
+                "agent_name": agent.agent_name,
+                "last_seen": agent.last_seen,
+                "metrics": dict(agent.metrics) # Convert map to dict
+            })
+
+        return {
+            "message_type": MessageType.AGENT_STATUS_UPDATE,
+            "agents": agents_data,
+            "is_full_update": response.is_full_update
+        }
 
     def start_agent_status_subscription(self) -> Optional[asyncio.Task]:
         """Starts the background task for subscribing to agent status updates."""
@@ -185,22 +187,8 @@ class ServerManager:
                         logger.info("Stop event set, breaking from agent status stream.")
                         break
 
-                    agents_data = []
-                    for agent in response.agents:
-                        # logger.debug(f"Received agent status update via stream: {agent}") # Debug level
-                        agents_data.append({
-                            "agent_id": agent.agent_id,
-                            "agent_name": agent.agent_name,
-                            "last_seen": agent.last_seen,
-                            "metrics": dict(agent.metrics) # Convert map to dict
-                        })
-
-                    status_update = {
-                        "message_type": MessageType.AGENT_STATUS_UPDATE,
-                        "agents": agents_data,
-                        "is_full_update": response.is_full_update
-                    }
-                    logger.info(f"Processing streamed agent status update ({len(agents_data)} agents, full={response.is_full_update}).")
+                    status_update = self._process_agent_status_response(response)
+                    logger.info(f"Processing streamed agent status update ({len(status_update['agents'])} agents, full={response.is_full_update}).")
                     await self.command_callback(status_update)
 
                 # If loop finishes without break, server closed stream gracefully

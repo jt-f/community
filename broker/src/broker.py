@@ -143,7 +143,6 @@ class Broker:
         message_id = message_data.get('message_id', 'N/A')
         message_type = message_data.get('message_type', 'unknown')
         logger.info(f"Broker received message: {message_id}, type: {message_type}")
-        # logger.debug(f"Full message data: {message_data}") # Uncomment for detailed debugging
 
         try:
             if message_type in [MessageType.TEXT, MessageType.REPLY, MessageType.SYSTEM]:
@@ -199,18 +198,23 @@ class Broker:
                 agent_name = sender_info.get("name", sender_id) if sender_info else sender_id
                 error_text = f"Only you ({agent_name}) are online right now."
 
-            # Send an error message back to the original sender via the server queue
-            error_response = {
-                "message_id": message_id, # Reference original message
-                "message_type": MessageType.ERROR,
-                "sender_id": self.broker_id, # Error originates from broker
-                "receiver_id": sender_id, # Send error back to original sender
-                "routing_status": "error",
-                "error_details": error_text,
-                "text_payload": f"Failed to route your message: {error_text}"
-            }
-            logger.info(f"Sending routing error back to {sender_id} for message {message_id}")
-            self.publish_to_server_input_queue(error_response)
+            # Send an error message back to the original sender
+            await self._send_routing_error(message_id, sender_id, error_text)
+
+    @log_exceptions
+    async def _send_routing_error(self, original_message_id: str, sender_id: str, error_text: str):
+        """Sends an error message back to the sender when routing fails."""
+        error_response = {
+            "message_id": original_message_id, # Reference original message
+            "message_type": MessageType.ERROR,
+            "sender_id": self.broker_id, # Error originates from broker
+            "receiver_id": sender_id, # Send error back to original sender
+            "routing_status": "error",
+            "error_details": error_text,
+            "text_payload": f"Failed to route your message: {error_text}"
+        }
+        logger.info(f"Sending routing error back to {sender_id} for message {original_message_id}")
+        self.publish_to_server_input_queue(error_response)
 
     @log_exceptions
     def handle_state_change(self, component: str, status: Any):
