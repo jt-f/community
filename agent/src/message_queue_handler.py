@@ -31,7 +31,7 @@ class MessageQueueHandler:
         self.channel = None
         self.consumer_tag = None
         self.queue_name = None
-        self._paused = False
+        self._paused = False  # Single flag for pause state
         self._lock = threading.Lock()
         self._message_handler = message_handler
         self._state_update = state_update
@@ -53,7 +53,7 @@ class MessageQueueHandler:
             self.channel = self.connection.channel()
             self.queue_name = queue_name
             self.channel.queue_declare(queue=self.queue_name, durable=True)
-            self._paused = False
+            self._paused = False  # Initialize pause state
             self._consumer_thread = threading.Thread(target=self._consumer_loop)
             self._consumer_thread.daemon = True
             self._consumer_thread.start()
@@ -72,6 +72,7 @@ class MessageQueueHandler:
         while True:
             with self._lock:
                 if self._paused:
+                    logger.debug("Consumer is paused, sleeping...")
                     time.sleep(agent_config.AGENT_PAUSED_CONSUMER_SLEEP)
                     continue
             method = None
@@ -108,7 +109,8 @@ class MessageQueueHandler:
         """Pause or resume message consumption."""
         with self._lock:
             self._consuming = consuming
-        logger.info("Paused message consumption." if not self._consuming else "Resumed message consumption.")
+            self._paused = not consuming  # Invert the consuming flag to match pause state
+        logger.info("Paused message consumption." if not consuming else "Resumed message consumption.")
         return True
 
     def cleanup(self):
