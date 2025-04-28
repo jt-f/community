@@ -176,7 +176,7 @@ class BrokerState:
         logger.info(f"Agent State Summary: Total={total_count}, Online={online_count}, Offline={offline_count}")
         # logger.debug(f"Full agent state: {self._agents}") # Optional: Log full state at debug level
 
-    async def set_broker_state(self, key: str, value: Any):
+    async def set_state(self, key: str, value: Any):
         """Updates a specific key in the broker's internal operational state. Thread-safe."""
         async with self._lock:
             if key in self._broker_state:

@@ -217,7 +217,7 @@ class Broker:
         """Callback to handle state changes from components (MQ, ServerManager)."""
         logger.info(f"State change reported: Component='{component}', Status='{status}'")
         # Update internal state or take actions based on component status
-        self.state.set_state(component, status)
+        asyncio.create_task(self.state.set_state(component, status))
         # Example: If MQ disconnects, maybe try to reconnect or alert
         if component == 'message_queue_status' and status == 'disconnected':
             logger.warning("Message queue disconnected. Further action may be needed.")
