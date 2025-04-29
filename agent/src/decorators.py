@@ -1,3 +1,4 @@
+"""Custom decorators for logging and exception handling."""
 import asyncio
 import functools
 import logging

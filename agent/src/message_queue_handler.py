@@ -1,3 +1,4 @@
+"""Handles RabbitMQ connection, queue management, and message consumption for the agent."""
 # Configure pika logging first
 import logging
 
@@ -11,7 +12,9 @@ import json
 import time
 from datetime import datetime
 import uuid
+from typing import Callable, Optional, Dict, Any # Add necessary types
 from shared_models import MessageType, setup_logging
+from state import AgentState # Import the refactored AgentState
 import asyncio  # Ensure asyncio is imported
 import agent_config  # Import agent configuration
 
@@ -21,10 +24,11 @@ logger.propagate = False  # Prevent messages reaching the root logger
 class MessageQueueHandler:
     """
     Handles all RabbitMQ connection, queue, and message operations for the agent.
-    Reads host/port from environment or config internally. Only needs a logger.
+    Reads host/port from environment or config internally.
     Message processing is handled by a user-provided callback.
+    Uses the AgentState object for state updates.
     """
-    def __init__(self, state_update=None, message_handler=None, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(self, state_updater: Optional[AgentState] = None, message_handler: Optional[Callable] = None, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
         self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
         self.connection = None
@@ -34,7 +38,7 @@ class MessageQueueHandler:
         self._paused = False  # Single flag for pause state
         self._lock = threading.Lock()
         self._message_handler = message_handler
-        self._state_update = state_update
+        self._state_updater = state_updater # Store the state object
         self._event_loop = loop
         if asyncio.iscoroutinefunction(self._message_handler) and not self._event_loop:
             logger.error("Asynchronous message_handler provided without an event loop!")
@@ -58,11 +62,14 @@ class MessageQueueHandler:
             self._consumer_thread.daemon = True
             self._consumer_thread.start()
             logger.info("Connected to RabbitMQ, declared queue, and started consumer thread.")
-            if self._state_update:
-                self._state_update('message_queue_status', 'connected')
+            if self._state_updater:
+                self._state_updater.set_mq_status('connected') # Use state object setter
             return True
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
+            if self._state_updater:
+                self._state_updater.set_mq_status('error')
+                self._state_updater.set_last_error(f"MQ Connection Error: {e}")
             return False
 
     @log_exceptions
@@ -85,7 +92,7 @@ class MessageQueueHandler:
                     try:
                         message_dict = json.loads(body.decode('utf-8'))
                         logger.debug(f"Decoded message dict: {message_dict}")
-                        response = self._message_handler(message_dict)
+                        self._message_handler(message_dict)
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to decode message JSON: {e} - Message Body: {body!r}")
 
@@ -95,22 +102,14 @@ class MessageQueueHandler:
             except StopIteration:
                 continue
             except pika.exceptions.StreamLostError as e:
-                logger.error(f"Connection lost in consumer loop: {e}. Attempting to reconnect...")
-                break
+                logger.error(f"Connection lost in consumer loop: {e}. Consumer loop exiting.")
+                if self._state_updater:
+                    self._state_updater.set_mq_status('disconnected')
+                    self._state_updater.set_last_error(f"MQ Stream Lost: {e}")
+                # Consider adding reconnection logic here or signaling the main agent thread
+                break # Exit the loop on stream loss
         logger.warning(f"Consumer loop for queue {self.queue_name} has exited.")
 
-    def _handle_async_callback_result(self, future: asyncio.Future):
-        """Callback function to handle the result (or exception) of the async message handler."""
-        result = future.result()
-        logger.debug(f"Async message handler completed successfully. Result (if any): {result}")
-
-    def set_consuming(self, consuming: bool):
-        """Pause or resume message consumption."""
-        with self._lock:
-            self._consuming = consuming
-            self._paused = not consuming  # Invert the consuming flag to match pause state
-        logger.info("Paused message consumption." if not consuming else "Resumed message consumption.")
-        return True
 
     def cleanup(self):
         """Cleanly shut down consumer thread and close RabbitMQ resources."""
@@ -130,6 +129,6 @@ class MessageQueueHandler:
                 logger.info("RabbitMQ connection closed.")
         except Exception as e:
             logger.debug(f"Error closing RabbitMQ connection: {e}")
-        if self._state_update:
-            self._state_update('message_queue_status', 'disconnected')
+        if self._state_updater:
+            self._state_updater.set_mq_status('disconnected') # Use state object setter
         logger.info("RabbitMQ resources cleaned up.")

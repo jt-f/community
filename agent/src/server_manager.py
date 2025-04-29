@@ -1,3 +1,4 @@
+"""Manages gRPC communication with the central server for agent registration, status updates, and command handling."""
 import asyncio
 from datetime import datetime
 import grpc
@@ -13,7 +14,9 @@ from generated.agent_registration_service_pb2 import (
 from generated.agent_registration_service_pb2_grpc import AgentRegistrationServiceStub
 from generated.agent_status_service_pb2 import AgentInfo, AgentStatusUpdateRequest
 from generated.agent_status_service_pb2_grpc import AgentStatusServiceStub
+from typing import Callable, Dict, Any, Optional # Add necessary types
 from shared_models import setup_logging
+from state import AgentState # Import the refactored AgentState
 from decorators import log_exceptions
 logger = setup_logging(__name__)
 logger.propagate = False # Prevent messages reaching the root logger
@@ -46,16 +49,16 @@ class ServerManager:
     """
     Handles all gRPC communication with the central server, including registration,
     status updates, command streaming, and command results.
-    Now stateless regarding agent_id: all methods require agent_id as an argument.
+    Uses the AgentState object for state updates.
     """
-    def __init__(self,  state_update=None, command_callback=None):
+    def __init__(self, state_updater: Optional[AgentState] = None, command_callback: Optional[Callable] = None):
         self.server_host = os.getenv("GRPC_HOST", "localhost")
         self.server_port = int(os.getenv("GRPC_PORT", "50051"))
         self.channel = None
         self.stub = None
         self._command_stream_task = None
         self._command_callback = command_callback
-        self._state_update = state_update
+        self._state_updater = state_updater # Store the state object
         self._is_registered = False
         self._grpc_connection_state = "disconnected" # Add internal state tracking
         self._killed = False  # Prevent resurrection after kill/unregister
@@ -65,18 +68,10 @@ class ServerManager:
         if self._grpc_connection_state != new_state:
             logger.info(f"gRPC connection state changing from '{self._grpc_connection_state}' to '{new_state}'")
             self._grpc_connection_state = new_state
-            if self._state_update:
-                # Update the broader agent state via callback
-                self._state_update('grpc_status', new_state)
-                # Also update internal_state if connection is lost/restored
-                if new_state == "unavailable":
-                     self._state_update('internal_state', 'unavailable')
-                elif new_state == "connected":
-                     # If we just reconnected, go back to idle (or let registration handle it)
-                     # Avoid overriding 'working' or other states if connection just flickered
-                     # Check current internal state before overriding
-                     # This part might need refinement based on desired agent behavior on reconnect
-                     pass # Let other state updates handle internal_state after connection is back
+            if self._state_updater:
+                # Use the state object's specific setter
+                changed = self._state_updater.set_grpc_status(new_state)
+                # Let the AgentState class handle internal state logic based on grpc status
 
     def _ensure_connection(self):
         """Creates the gRPC channel and stub if they don't exist."""
@@ -96,7 +91,7 @@ class ServerManager:
                 logger.error(f"Failed to create gRPC channel: {e}")
                 self.channel = None
                 self.stub = None
-                self._update_grpc_state("failed")
+                self._update_grpc_state("failed") # Update state via helper
                 return False
         # If channel exists, assume it's trying to connect or is connected based on state changes
         return True
@@ -118,53 +113,41 @@ class ServerManager:
              self.stub = None
 
     async def check_grpc_readiness(self, timeout: float = 15.0) -> bool:
-        """Checks if the gRPC channel is currently READY."""
-        if not self.channel:
-             self._ensure_connection() # Attempt to create if missing
-             if not self.channel:
-                 return False # Failed to create
+        """Checks if the gRPC channel is READY, attempting to connect if necessary."""
+        if not self._ensure_connection(): # Ensure channel exists or is created
+            return False # Failed to create channel
 
-        connectivity_state = self.channel.get_state(try_to_connect=False) # Don't trigger connection here
-        logger.debug(f"Checking gRPC readiness, current state: {connectivity_state}")
+        current_state = self.channel.get_state(try_to_connect=True) # Try connecting if IDLE
+        logger.debug(f"Checking gRPC readiness, current state: {current_state}")
 
-        if connectivity_state == grpc.ChannelConnectivity.READY:
-            self._update_grpc_state("connected") # Ensure state is accurate
+        if current_state == grpc.ChannelConnectivity.READY:
+            self._update_grpc_state("connected")
             return True
-        elif connectivity_state == grpc.ChannelConnectivity.IDLE:
-             # Try to connect if idle
-             logger.info("gRPC channel is IDLE, attempting to connect...")
-             connectivity_state = self.channel.get_state(try_to_connect=True)
-             # Give it a moment to change state
-             await asyncio.sleep(0.1)
-             connectivity_state = self.channel.get_state(try_to_connect=False)
-             if connectivity_state == grpc.ChannelConnectivity.READY:
-                 self._update_grpc_state("connected")
-                 return True
 
-        # If not ready or idle->ready, wait for connection up to timeout
         try:
-            await asyncio.wait_for(self.channel.wait_for_state_change(connectivity_state), timeout=timeout)
-            new_state = self.channel.get_state(try_to_connect=False)
-            logger.info(f"gRPC state changed to {new_state} after waiting.")
-            if new_state == grpc.ChannelConnectivity.READY:
-                self._update_grpc_state("connected")
-                return True
-            else:
-                 # Update state based on the new state after waiting
-                 self._on_channel_state_change(new_state) # Manually call handler
-                 return False
+            # Wait for the state to change from the current state (e.g., CONNECTING or TRANSIENT_FAILURE)
+            await asyncio.wait_for(self.channel.wait_for_state_change(current_state), timeout=timeout)
+            new_state = self.channel.get_state(try_to_connect=False) # Check the state after the change
+            logger.info(f"gRPC state changed to {new_state}")
+            self._on_channel_state_change(new_state) # Update internal state based on the new state
+
+            return new_state == grpc.ChannelConnectivity.READY
+
         except asyncio.TimeoutError:
-            logger.warning(f"gRPC channel did not become ready within {timeout}s timeout. Current state: {self.channel.get_state(try_to_connect=False)}")
-            self._update_grpc_state("unavailable") # Assume unavailable on timeout
+            final_state = self.channel.get_state(try_to_connect=False)
+            logger.warning(f"gRPC channel did not become ready within {timeout}s timeout. Final state: {final_state}")
+            self._on_channel_state_change(final_state) # Update state based on final state after timeout
             return False
         except Exception as e:
              logger.error(f"Error waiting for gRPC channel readiness: {e}")
-             self._update_grpc_state("failed")
+             self._update_grpc_state("failed") # Set state to failed on unexpected error
              return False
 
     @log_exceptions
     async def register(self, agent_id, agent_name):
         """Register the agent with the server and optionally start the command stream."""
+        logger.info(f"Attempting to register agent {agent_name} ({agent_id})...")
+
         if self._killed:
             logger.warning("Agent is killed/shutdown. Registration will not start.")
             return False
@@ -183,17 +166,19 @@ class ServerManager:
             agent_name=agent_name,
         )
         try:
-            logger.info(f"Attempting to register agent {agent_name} ({agent_id})...")
+
             response = await self.stub.RegisterAgent(request, timeout=15.0) # Add timeout
             if response.success:
                 self._is_registered = True
-                # Update agent state via callback
-                if self._state_update:
-                    self._state_update('registration_status', 'registered')
-                    self._state_update('internal_state', 'idle') # Set to idle after successful registration
+                # Update agent state using the state object
+                if self._state_updater:
+                    self._state_updater.set_registration_status('registered')
+                    # Let the AgentState class handle internal state logic
+                    # self._state_updater.set_internal_state('idle') # Redundant if AgentState handles it
+                    self._state_updater.set_grpc_status('registered') # Explicitly set grpc status too
 
                 logger.info(f"Agent registered successfully with ID: {agent_id}")
-                self._command_callback = self._command_callback
+                # self._command_callback is already set in __init__
 
                 # Start command stream only if registration is successful
                 self.start_command_stream(agent_id, self._command_callback)
@@ -201,20 +186,28 @@ class ServerManager:
                 return True
             else:
                 logger.error(f"Agent registration failed: {response.message}")
-                if self._state_update: self._state_update('registration_status', 'failed')
+                if self._state_updater:
+                    self._state_updater.set_registration_status('error')
+                    self._state_updater.set_last_error(f"Registration failed: {response.message}")
+                    self._state_updater.set_grpc_status('failed') # Reflect failure in grpc status
                 return False
         except grpc.aio.AioRpcError as e:
-            logger.error(f"gRPC error during registration: {e.details()} (Code: {e.code()})")
-            if e.code() == grpc.StatusCode.UNAVAILABLE:
-                 self._update_grpc_state("unavailable")
-            else:
-                 self._update_grpc_state("failed") # Other gRPC error
-            if self._state_update: self._state_update('registration_status', 'failed')
+            logger.error(f"gRPC error during registration: {e.details()} (code: {e.code()})")
+            if self._state_updater:
+                self._state_updater.set_registration_status('error')
+                self._state_updater.set_last_error(f"gRPC error during registration: {e.details()}")
+                # Update gRPC status using the state object
+                if e.code() == grpc.StatusCode.UNAVAILABLE:
+                    self._state_updater.set_grpc_status('unavailable')
+                else:
+                    self._state_updater.set_grpc_status('error')
             return False
-        except Exception as e: # Includes asyncio.TimeoutError from request timeout
+        except Exception as e:
             logger.error(f"Unexpected error during registration: {e}")
-            self._update_grpc_state("failed")
-            if self._state_update: self._state_update('registration_status', 'failed')
+            if self._state_updater:
+                self._state_updater.set_registration_status('error')
+                self._state_updater.set_last_error(f"Unexpected registration error: {e}")
+                self._state_updater.set_grpc_status('error')
             return False
 
     @log_exceptions
@@ -229,21 +222,36 @@ class ServerManager:
 
         request = AgentUnregistrationRequest(agent_id=agent_id)
         try:
-            logger.info(f"Attempting to unregister agent {agent_id}...")
-            response = await self.stub.UnregisterAgent(request)
+            logger.info(f"Unregistering agent {agent_id}...")
+            response = await self.stub.UnregisterAgent(request, timeout=10.0)
             if response.success:
-                logger.info("Agent unregistered successfully.")
-                self._is_registered = False
-                return True
+                logger.info(f"Agent {agent_id} unregistered successfully.")
+                if self._state_updater:
+                    self._state_updater.set_registration_status('unregistered')
+                    # Optionally update grpc status if needed, e.g., 'idle' or keep as 'connected'
+                self._is_registered = False # Keep this internal flag update
+                return True # Return True on success
             else:
-                logger.error(f"Agent unregistration failed: {response.message}")
-                return False
+                logger.warning(f"Agent unregistration failed: {response.message}")
+                # Optionally update state to reflect failed unregistration attempt
+                # if self._state_updater:
+                #     self._state_updater.set_last_error(f"Unregistration failed: {response.message}")
+                return False # Return False on failure
         except grpc.aio.AioRpcError as e:
-            logger.error(f"gRPC error during unregistration: {e.details()} (Code: {e.code()})")
-            return False
+            logger.error(f"gRPC error during unregistration: {e.details()} (code: {e.code()})")
+            # Update state if connection is lost
+            if e.code() == grpc.StatusCode.UNAVAILABLE and self._state_updater:
+                 self._state_updater.set_grpc_status('unavailable')
+            elif self._state_updater: # Log other gRPC errors
+                 self._state_updater.set_last_error(f"gRPC error during unregistration: {e.details()}")
+                 self._state_updater.set_grpc_status('error')
+            return False # Return False on gRPC error
         except Exception as e:
             logger.error(f"Unexpected error during unregistration: {e}")
-            return False
+            if self._state_updater:
+                self._state_updater.set_last_error(f"Unexpected unregistration error: {e}")
+                self._state_updater.set_grpc_status('error')
+            return False # Return False on other exceptions
 
     @log_exceptions
     async def send_status_update(self, agent_id, status: str, metrics: dict = None):
@@ -507,12 +515,15 @@ class ServerManager:
 
         await self.unregister(agent_id)
         self._is_registered = False
-        self._state_update('registration_status', 'not_registered')
+        if self._state_updater:
+            self._state_updater.set_registration_status('unregistered')
+            # Note: grpc_status is handled separately when channel closes
 
         if self.channel:
             logger.info("Closing gRPC channel.")
             await self.channel.close()
-            self._state_update('grpc_status', 'disconnected')
+            if self._state_updater:
+                self._state_updater.set_grpc_status('shutdown') # Reflect final state
             self.channel = None
             self.stub = None
 
