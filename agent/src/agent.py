@@ -51,6 +51,7 @@ class Agent:
             self.state.set_internal_state('error')
             return
 
+
         # Register with the server
         if not await self.server_manager.register(self.agent_id, self.agent_name):
             logger.error("Failed to register with the server. Agent may have limited functionality.")
