@@ -44,13 +44,13 @@ class Agent:
     async def run(self):
         """Main execution loop for the agent."""
         logger.info(f"Agent {self.agent_name} starting run loop.")
+
         self.setup_signal_handlers()
 
         # Connect to RabbitMQ
         if not self.mq_handler.connect(queue_name=self.agent_id):
             self.state.set_internal_state('error')
             return
-
 
         # Register with the server
         if not await self.server_manager.register(self.agent_id, self.agent_name):
@@ -62,7 +62,6 @@ class Agent:
         try:
             while not self._shutdown_requested:
                 # Main agent logic loop
-
                 await self.send_status_update_heartbeat()
 
                 current_state = self.state.get_state('internal_state')
@@ -155,6 +154,7 @@ class Agent:
             self.loop.add_signal_handler(
                 s, lambda s=s: asyncio.create_task(self.shutdown(s))
             )
+        logger.info(f"Signal handlers set up for signals: {signals}")
 
     @log_exceptions
     async def shutdown(self, sig: Optional[signal.Signals] = None):
@@ -214,8 +214,8 @@ class Agent:
 
 async def main(agent_name: Optional[str] = 'Name_not_provided'):
     """Entry point for running the agent."""
-
     agent = Agent(agent_name=agent_name)
+
     try:
         await agent.run()
     except KeyboardInterrupt:
