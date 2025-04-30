@@ -111,23 +111,41 @@ class AgentStatusUpdate(BaseModel):
         )
 
 def setup_logging(
-    name: str,
     level: int = logging.INFO,
-    stream: Optional[logging.StreamHandler] = None
-) -> logging.Logger:
-    """Set up logging with a consistent format across all modules.
-    Only adds a handler if none exist to prevent duplicate logs."""
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
+) -> None: # Doesn't need to return a logger
+    """Set up root logging with a consistent format and level.
+    Adds a console handler only if one doesn't already exist.
+    """
+    log_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    root_logger = logging.getLogger() # Get the root logger
+    root_logger.setLevel(level) # Set the overall minimum level
 
-    # Only add handler if none exist (prevents duplicate logs)
-    if not logger.handlers:
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        if stream is None:
-            stream = logging.StreamHandler(sys.stdout)
-        stream.setFormatter(formatter)
-        logger.addHandler(stream)
+    # Check if a console handler already exists on the root logger
+    has_console_handler = any(
+        isinstance(h, logging.StreamHandler) and h.stream in (sys.stdout, sys.stderr)
+        for h in root_logger.handlers
+    )
 
-    return logger
+    if not has_console_handler:
+        console_handler = logging.StreamHandler(sys.stdout)
+        # Explicitly set the HANDLER's level to match the root logger's level
+        # This prevents the handler filtering messages the logger allows
+        console_handler.setLevel(level)
+        console_handler.setFormatter(log_formatter)
+        root_logger.addHandler(console_handler)
+        # Optional: Log a message indicating handler was added
+        # root_logger.debug(f"Root console handler added with level {logging.getLevelName(level)}")
+    else:
+        # Optional: Check if existing handler level is too high
+        for h in root_logger.handlers:
+            if isinstance(h, logging.StreamHandler) and h.stream in (sys.stdout, sys.stderr):
+                if h.level > level:
+                    # Log a warning if the existing handler might filter messages
+                    root_logger.warning(f"Existing console handler level ({logging.getLevelName(h.level)}) is higher than requested ({logging.getLevelName(level)}). Some logs may not appear on console.")
+                    # Optionally force the level down (use with caution):
+                    # h.setLevel(level)
+                break # Assume only one console handler
+
+    # No need to return the logger, modules will use logging.getLogger(__name__)

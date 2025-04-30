@@ -3,6 +3,10 @@ import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from shared_models import setup_logging
+logger = setup_logging(__name__)
+logger.propagate = False # Prevent messages reaching the root logger
+
 class AgentState:
     """
     Manages the agent's state in a thread-safe manner.
@@ -17,8 +21,8 @@ class AgentState:
             "internal_state": "initializing", # e.g., initializing, idle, busy, paused, shutting_down, error
             "registration_status": "unregistered", # e.g., unregistered, registering, registered, error
             "grpc_status": "disconnected", # e.g., disconnected, connecting, connected, registered, unavailable, error, shutdown
-            "mq_status": "disconnected", # e.g., disconnected, connecting, connected, error
-            "llm_status": "not_configured", # e.g., not_configured, configured, error
+            "message_queue_status": "disconnected", # e.g., disconnected, connecting, connected, error
+            "llm_client_status": "not_configured", # e.g., not_configured, configured, error
             "last_error": None,
             "last_updated": datetime.now().isoformat(),
             "metrics": {}
@@ -31,35 +35,43 @@ class AgentState:
 
     def _update_internal_state(self):
         """Internal method to determine the overall agent state based on component statuses."""
-        # This logic determines the primary 'internal_state'
-        # Priority: error > shutting_down > paused > initializing > busy > idle
+        # State Priority (Highest to Lowest): shutting_down > paused > error > initializing > busy > idle
         current_internal = self._state.get("internal_state")
 
-        # Don't override critical states like shutting_down or paused unless explicitly changed
+        # 1. Preserve critical manual states
         if current_internal in ["shutting_down", "paused"]:
-            return False # No change needed based on component status
+            return False # These states are set explicitly and shouldn't be overridden by component status
 
-        # Check for error states in components
-        if any(status in ["error", "failed"] for status in [self._state.get("registration_status"), self._state.get("grpc_status"), self._state.get("mq_status"), self._state.get("llm_status")]) or self._state.get("last_error"):
+        # 2. Check for error states in components
+        has_error = any(status in ["error", "failed", "unavailable"] for status in [
+            self._state.get("registration_status"),
+            self._state.get("grpc_status"),
+            self._state.get("message_queue_status"),
+            self._state.get("llm_client_status")
+        ]) or self._state.get("last_error")
+
+        if has_error:
             if current_internal != "error":
                 self._state["internal_state"] = "error"
                 return True
             return False # Already in error state
 
-        # Check if still initializing (based on registration)
-        if self._state.get("registration_status") in ["unregistered", "registering"]:
+        # 3. Check if initializing (based on registration)
+        is_initializing = self._state.get("registration_status") in ["unregistered", "registering"]
+        if is_initializing:
             if current_internal != "initializing":
                 self._state["internal_state"] = "initializing"
                 return True
             return False # Already initializing
 
-        # If registered and components are okay, assume idle (busy state needs explicit setting)
-        if self._state.get("registration_status") == "registered":
-            if current_internal not in ["idle", "busy"]: # Don't override busy
+        # 4. If registered and not busy, default to idle
+        is_registered = self._state.get("registration_status") == "registered"
+        if is_registered and current_internal != "busy": # Don't override busy state
+            if current_internal != "idle":
                 self._state["internal_state"] = "idle"
                 return True
 
-        return False # No change based on this logic
+        return False # No state change based on this logic
 
     def get_state(self, key: Optional[str] = None) -> Any:
         """Get the entire state dictionary or a specific value by key."""
@@ -77,7 +89,7 @@ class AgentState:
                 self._update_timestamp()
                 changed = True
                 # Update internal state if a component status changed
-                if key in ["registration_status", "grpc_status", "mq_status", "llm_status", "last_error"]:
+                if key in ["registration_status", "grpc_status", "message_queue_status", "llm_client_status", "last_error"]:
                     internal_changed = self._update_internal_state()
                     changed = changed or internal_changed # Report change if either value or internal state changed
             elif key not in self._state:
@@ -85,6 +97,7 @@ class AgentState:
                  self._state[key] = value
                  self._update_timestamp()
                  changed = True
+        logger.debug(f"Full state: {self.get_full_status_for_update()}")
         return changed
 
     # --- Specific State Setters --- 
@@ -102,13 +115,13 @@ class AgentState:
         """Set the gRPC connection status."""
         return self.set_state("grpc_status", status)
 
-    def set_mq_status(self, status: str) -> bool:
+    def set_message_queue_status(self, status: str) -> bool:
         """Set the Message Queue connection status."""
-        return self.set_state("mq_status", status)
+        return self.set_state("message_queue_status", status)
 
-    def set_llm_status(self, status: str) -> bool:
+    def set_llm_client_status(self, status: str) -> bool:
         """Set the LLM client status."""
-        return self.set_state("llm_status", status)
+        return self.set_state("llm_client_status", status)
 
     def set_last_error(self, error_message: Optional[str]) -> bool:
         """Set the last error message. Setting to None clears the error."""
@@ -141,3 +154,11 @@ class AgentState:
             metrics = status_update.pop('metrics', {})
             status_update.update(metrics)
             return status_update
+
+    def get_agent_id(self) -> str:
+        """Get the agent ID."""
+        return self._state.get("agent_id")
+
+    def get_agent_name(self) -> str:
+        """Get the agent name."""
+        return self._state.get("agent_name")

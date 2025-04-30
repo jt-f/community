@@ -12,8 +12,9 @@ import asyncio
 import pika
 
 # Local application imports
-from shared_models import MessageType, setup_logging
+from shared_models import setup_logging, MessageType
 from decorators import log_exceptions
+import broker_config # Import broker configuration
 
 logging.getLogger("pika").setLevel(logging.WARNING)
 
@@ -28,8 +29,8 @@ class MessageQueueHandler:
     Message processing is handled by a user-provided callback.
     """
     def __init__(self, state_update=None, message_handler=None):
-        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
-        self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
+        self.rabbitmq_host = broker_config.RABBITMQ_HOST # Use config value
+        self.rabbitmq_port = broker_config.RABBITMQ_PORT # Use config value
         self.connection = None
         self.channel = None
         self.consumer_tag = None

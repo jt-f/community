@@ -17,7 +17,8 @@ from decorators import log_exceptions
 load_dotenv()
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging()  # Initialize logger early
+logger = logging.getLogger(__name__)
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 
@@ -199,10 +200,10 @@ class Broker:
                 error_text = f"Only you ({agent_name}) are online right now."
 
             # Send an error message back to the original sender
-            await self._send_routing_error(message_id, sender_id, error_text)
+            await self._send_routing_error(message_id, sender_id, error_text, original_text)
 
     @log_exceptions
-    async def _send_routing_error(self, original_message_id: str, sender_id: str, error_text: str):
+    async def _send_routing_error(self, original_message_id: str, sender_id: str, error_text: str, original_text: str):
         """Sends an error message back to the sender when routing fails."""
         error_response = {
             "message_id": original_message_id, # Reference original message
@@ -211,7 +212,7 @@ class Broker:
             "receiver_id": sender_id, # Send error back to original sender
             "routing_status": "error",
             "error_details": error_text,
-            "text_payload": f"Failed to route your message: {error_text}"
+            "text_payload": original_text
         }
         logger.info(f"Sending routing error back to {sender_id} for message {original_message_id}")
         self.publish_to_server_input_queue(error_response)

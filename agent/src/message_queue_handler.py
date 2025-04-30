@@ -14,9 +14,9 @@ from datetime import datetime
 import uuid
 from typing import Callable, Optional, Dict, Any # Add necessary types
 from shared_models import MessageType, setup_logging
-from state import AgentState # Import the refactored AgentState
-import asyncio  # Ensure asyncio is imported
-import agent_config  # Import agent configuration
+from state import AgentState
+import asyncio
+import agent_config
 
 logger = setup_logging(__name__)
 logger.propagate = False  # Prevent messages reaching the root logger
@@ -28,9 +28,10 @@ class MessageQueueHandler:
     Message processing is handled by a user-provided callback.
     Uses the AgentState object for state updates.
     """
-    def __init__(self, state_updater: Optional[AgentState] = None, message_handler: Optional[Callable] = None, loop: Optional[asyncio.AbstractEventLoop] = None):
-        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
-        self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", "5672"))
+    def __init__(self, message_handler: Callable, state_updater: AgentState, loop: asyncio.AbstractEventLoop):
+        """Initialize the MessageQueueHandler."""
+        self.rabbitmq_host = agent_config.RABBITMQ_HOST # Use config value
+        self.rabbitmq_port = agent_config.RABBITMQ_PORT # Use config value
         self.connection = None
         self.channel = None
         self.consumer_tag = None
@@ -51,8 +52,8 @@ class MessageQueueHandler:
             self.connection = pika.BlockingConnection(pika.ConnectionParameters(
                 host=self.rabbitmq_host,
                 port=self.rabbitmq_port,
-                connection_attempts=3,
-                retry_delay=5
+                connection_attempts=agent_config.RABBITMQ_CONNECTION_ATTEMPTS,
+                retry_delay=agent_config.RABBITMQ_RETRY_DELAY
             ))
             self.channel = self.connection.channel()
             self.queue_name = queue_name
@@ -63,12 +64,12 @@ class MessageQueueHandler:
             self._consumer_thread.start()
             logger.info("Connected to RabbitMQ, declared queue, and started consumer thread.")
             if self._state_updater:
-                self._state_updater.set_mq_status('connected') # Use state object setter
+                self._state_updater.set_message_queue_status('connected') # Use state object setter
             return True
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
             if self._state_updater:
-                self._state_updater.set_mq_status('error')
+                self._state_updater.set_message_queue_status('error')
                 self._state_updater.set_last_error(f"MQ Connection Error: {e}")
             return False
 
@@ -84,7 +85,7 @@ class MessageQueueHandler:
                     continue
             method = None
             try:
-                method, properties, body = self.channel.consume(self.queue_name, inactivity_timeout=1).__next__()
+                method, properties, body = self.channel.consume(self.queue_name, inactivity_timeout=agent_config.RABBITMQ_CONSUME_INACTIVITY_TIMEOUT).__next__()
                 if method is None:
                     continue
                 logger.debug(f"Received message: {body[:100]}...")
@@ -104,7 +105,7 @@ class MessageQueueHandler:
             except pika.exceptions.StreamLostError as e:
                 logger.error(f"Connection lost in consumer loop: {e}. Consumer loop exiting.")
                 if self._state_updater:
-                    self._state_updater.set_mq_status('disconnected')
+                    self._state_updater.set_message_queue_status('disconnected')
                     self._state_updater.set_last_error(f"MQ Stream Lost: {e}")
                 # Consider adding reconnection logic here or signaling the main agent thread
                 break # Exit the loop on stream loss
@@ -115,7 +116,7 @@ class MessageQueueHandler:
         """Cleanly shut down consumer thread and close RabbitMQ resources."""
         self._paused = True
         if hasattr(self, '_consumer_thread') and self._consumer_thread.is_alive():
-            self._consumer_thread.join(timeout=5)
+            self._consumer_thread.join(timeout=agent_config.MQ_CLEANUP_JOIN_TIMEOUT)
             logger.info("Consumer thread joined.")
         try:
             if self.channel and getattr(self.channel, 'is_open', False):
@@ -130,5 +131,5 @@ class MessageQueueHandler:
         except Exception as e:
             logger.debug(f"Error closing RabbitMQ connection: {e}")
         if self._state_updater:
-            self._state_updater.set_mq_status('disconnected') # Use state object setter
+            self._state_updater.set_message_queue_status('disconnected') # Use state object setter
         logger.info("RabbitMQ resources cleaned up.")

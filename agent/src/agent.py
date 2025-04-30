@@ -2,9 +2,11 @@ import asyncio
 import os
 import signal
 import sys
-import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+import logging
+load_dotenv()
 
 # Local imports
 import agent_config
@@ -13,12 +15,13 @@ from command_handler import CommandHandler
 from decorators import log_exceptions
 from llm_client import LLMClient
 from message_queue_handler import MessageQueueHandler
-from messaging import process_message_dict
+from messaging import process_message
 from server_manager import ServerManager
 from shared_models import setup_logging
 from state import AgentState
 
-logger = setup_logging(__name__)
+setup_logging()  # Initialize logger early
+logger = logging.getLogger(__name__)
 
 
 class Agent:
@@ -53,27 +56,32 @@ class Agent:
             return
 
         # Register with the server
-        if not await self.server_manager.register(self.agent_id, self.agent_name):
-            logger.error("Failed to register with the server. Agent may have limited functionality.")
+        registered = await self.server_manager.register(self.agent_id, self.agent_name)
+        if not registered:
+            logger.error("Failed to register with the server. Agent will exit.")
+            self.state.set_internal_state('error')
+            # Attempt cleanup even if registration failed, might close partial connections
+            await self.cleanup_async()
             return
+            
+        logger.info("Agent registered successfully.")
+        self.state.set_registration_status("registered")
+        
+        # Start background tasks like the periodic status updater after successful registration
+        await self.server_manager.start_status_updater() # Start the status update loop (Renamed)
 
-        # Start the command stream listener (if registration was successful)
-        # Note: server_manager.register now starts the stream internally on success
         try:
             while not self._shutdown_requested:
-                # Main agent logic loop
-                await self.send_status_update_heartbeat()
 
                 current_state = self.state.get_state('internal_state')
                 if current_state == 'error':
                     logger.warning("Agent is in error state. Pausing activity.")
-                    # Consider more robust error handling or recovery logic here
                     await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP * 2) # Longer sleep in error state
                 elif current_state == 'paused':
                     logger.info("Agent is paused. Skipping active tasks.")
                     await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP)
                 else:
-                    # Normal operation placeholder
+                    logger.debug(f"Agent state: {current_state}")
                     pass
 
                 await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP)
@@ -91,13 +99,9 @@ class Agent:
     @log_exceptions
     def handle_server_command_wrapper(self, command: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Wraps the CommandHandler's method to fit the ServerManager callback signature."""
-        # This wrapper ensures the command handler has access to the agent instance
-        # and handles potential async nature if needed in the future.
+        logger.info(f"Handling server command: {command}")
 
-        # Directly call the synchronous handler method
-        result = self.command_handler.handle_server_command(command)
-        logger.debug(f"Command handler result: {result}")
-        return result
+        return self.command_handler.handle_server_command(command)
 
     @log_exceptions
     def handle_message_wrapper(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -110,12 +114,12 @@ class Agent:
         try:
             response = process_message(
                 self.llm_client,
-                self.mq_handler.channel, # Pass the channel for publishing
+                self.mq_handler.channel,
                 self.agent_id,
                 message
             )
             self.state.set_internal_state('idle')
-            logger.info(f"Message processed. Response: {response:!r}")
+
             return response
 
         except Exception as e:
@@ -127,24 +131,6 @@ class Agent:
                 "error": str(e),
                 "agent_id": self.agent_id
             }
-
-    @log_exceptions
-    async def send_status_update_heartbeat(self):
-        """Send periodic heartbeat status updates to the server."""
-        now = datetime.now()
-        if (now - self._last_status_update_time).total_seconds() >= agent_config.AGENT_STATUS_UPDATE_INTERVAL:
-            logger.debug("Sending status update heartbeat...")
-            full_status = self.state.get_full_status_for_update()
-
-            if await self.server_manager.send_agent_status_update(
-                agent_id=self.agent_id,
-                agent_name=self.agent_name,
-                last_seen=full_status.get('last_updated'), 
-                metrics=full_status 
-            ):
-                self._last_status_update_time = now
-            else:
-                logger.warning("Failed to send status update.")
 
     @log_exceptions
     def setup_signal_handlers(self):
@@ -233,11 +219,11 @@ async def main(agent_name: Optional[str] = 'Name_not_provided'):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Start the agent with optional name override.")
-    parser.add_argument("--agent-name", type=str, help="Override the agent name (takes precedence over environment variable)")
+    parser.add_argument("--name", type=str, help="Override the agent name (takes precedence over environment variable)")
     args = parser.parse_args()
 
-    if args.agent_name:
-        agent_name = args.agent_name
+    if args.name:
+        agent_name = args.name
     else:
         agent_name = os.getenv("DEFAULT_AGENT_NAME", "Unknown_Agent")
     try:

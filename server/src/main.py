@@ -7,11 +7,23 @@ import os
 # Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
 
 from shared_models import setup_logging
-logger = setup_logging(__name__)  # Initialize logger early
+setup_logging()  # Initialize logger early
+logger = logging.getLogger(__name__)
+# Import local modules
+import config
+import websocket_handler
+import services
+import utils
+import rabbitmq_utils
+
+import agent_manager
+import grpc_services
+import agent_registration_service
+
 
 # Add debug log to confirm GRPC_DEBUG value after loading .env
-logger.info(f"GRPC_DEBUG environment variable value: {os.getenv('GRPC_DEBUG')}")
-if os.getenv("GRPC_DEBUG") == "1":
+logger.info(f"GRPC_DEBUG environment variable value: {config.GRPC_DEBUG}") # Use config value
+if config.GRPC_DEBUG: # Use config value
     os.environ["GRPC_VERBOSITY"] = "DEBUG"
     os.environ["GRPC_TRACE"] = "keepalive,http2_stream_state,http2_ping,http2_flowctl"
 else:
@@ -39,7 +51,6 @@ import grpc_services
 import agent_registration_service
 
 
-
 # --- Lifespan Management --- 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,7 +60,7 @@ async def lifespan(app: FastAPI):
     rabbitmq_utils.get_rabbitmq_connection()
     
     # Start gRPC server
-    grpc_port = int(os.getenv('GRPC_PORT', '50051'))
+    grpc_port = config.GRPC_PORT # Use config value
     grpc_server = grpc_services.start_grpc_server(grpc_port)
     
     # Add agent registration service to the gRPC server
@@ -110,20 +121,20 @@ async def read_root():
     return {
         "message": "Agent Communication Server is running.",
         "services": {
-            "websocket": f"ws://{os.getenv('HOST', '0.0.0.0')}:{os.getenv('PORT', '8765')}/ws",
-            "grpc": f"{os.getenv('GRPC_HOST', '0.0.0.0')}:{os.getenv('GRPC_PORT', '50051')}"
+            "websocket": config.WEBSOCKET_URL, # Use config value
+            "grpc": f"{config.GRPC_HOST}:{config.GRPC_PORT}" # Use config values
         }
     }
 
 # --- Main Execution --- 
 if __name__ == "__main__":
-    logger.info(f"Starting Agent Communication Server on port {os.getenv('PORT', '8765')}...")
-    logger.info(f"gRPC server will run on port {os.getenv('GRPC_PORT', '50051')}")
+    logger.info(f"Starting Agent Communication Server on port {config.PORT}...") # Use config value
+    logger.info(f"gRPC server will run on port {config.GRPC_PORT}") # Use config value
     logger.info("Press Ctrl+C to stop the server.")
     
     # Get host and port from environment or use defaults
-    server_host = os.getenv('HOST', "0.0.0.0")
-    server_port = int(os.getenv('PORT', 8765))
+    server_host = config.HOST # Use config value
+    server_port = config.PORT # Use config value
 
     # Configure uvicorn
     uvicorn_config = uvicorn.Config(

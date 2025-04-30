@@ -10,6 +10,7 @@ import grpc
 # Local application imports
 from shared_models import setup_logging, MessageType
 from decorators import log_exceptions
+import broker_config # Import broker configuration
 
 logger = setup_logging(__name__)
 
@@ -41,8 +42,8 @@ class ServerManager:
         self.state_update = state_update
         self.command_callback = command_callback
         # Use the already configured logger
-        self.grpc_host = os.getenv("GRPC_HOST", "localhost")
-        self.grpc_port = int(os.getenv("GRPC_PORT", "50051"))
+        self.grpc_host = broker_config.GRPC_HOST # Use config value
+        self.grpc_port = broker_config.GRPC_PORT # Use config value
         self._grpc_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event() # Event to signal stopping
 

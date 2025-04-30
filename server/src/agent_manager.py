@@ -69,7 +69,7 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
         "agents": agent_status_list,
         "is_full_update": is_full_update or force_full_update
     }
-    
+
     try:
         status_update_json = json.dumps(status_update)
         logger.debug(f"Status update JSON: {status_update_json} to specific frontend: {target_websocket}")

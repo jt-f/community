@@ -531,8 +531,9 @@ async def _handle_control_message(message_data: dict):
 # --- Service Management --- 
 
 async def start_services():
-    """Creates and starts all background services."""
+    """Starts all background services."""
     logger.info("Starting background services...")
+
     # Ensure RabbitMQ connection is attempted before starting consumers
     if not rabbitmq_utils.get_rabbitmq_connection():
         logger.warning("Failed to establish initial RabbitMQ connection. Services depending on it might fail to start properly.")

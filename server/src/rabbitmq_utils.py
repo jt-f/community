@@ -129,7 +129,7 @@ def setup_agent_queue(queue_name: str) -> bool:
 
 def publish_to_agent_queue(agent_id: str, message_data: dict) -> bool:
     """Publish a message directly to an agent's queue."""
-    queue_name = f"agent_{agent_id}_queue"
+    queue_name = f"{agent_id}"
     result = publish_to_queue(queue_name, message_data)
     if result:
         logger.info(f"Published message to agent {agent_id} queue")
