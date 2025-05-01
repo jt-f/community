@@ -10,7 +10,9 @@ from decorators import log_exceptions
 if TYPE_CHECKING:
     from agent import Agent  # Import Agent type hint for circular dependency
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 
 class CommandHandler:

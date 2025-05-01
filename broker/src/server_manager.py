@@ -12,7 +12,10 @@ from shared_models import setup_logging, MessageType
 from decorators import log_exceptions
 import broker_config # Import broker configuration
 
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent messages reaching the root logger
+
 
 # Import generated gRPC code with error handling
 GRPC_IMPORTS_SUCCESSFUL = False

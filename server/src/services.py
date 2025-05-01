@@ -12,7 +12,7 @@ import config
 import state
 import rabbitmq_utils
 import agent_manager
-
+import logging
 # Import the necessary publish functions explicitly
 from rabbitmq_utils import publish_to_agent_queue, publish_to_broker_input_queue
 
@@ -22,7 +22,9 @@ shutdown_event = asyncio.Event()
 # Create lock for thread-safe access to agent connections
 agent_connections_lock = asyncio.Lock()
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 # --- Helper Functions ---
 

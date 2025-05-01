@@ -6,7 +6,9 @@ import logging
 
 from shared_models import setup_logging
 
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent messages reaching the root logger
 
 
 def log_exceptions(func):

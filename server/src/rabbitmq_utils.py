@@ -10,7 +10,9 @@ import config
 import state
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
+
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 def get_rabbitmq_connection() -> Optional[pika.BlockingConnection]:

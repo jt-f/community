@@ -1,8 +1,12 @@
 """Default configuration values for the broker."""
 import os
+import logging
 from shared_models import setup_logging
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent messages reaching the root logger
 
-logger = setup_logging(__name__)
 
 ################
 # gRPC Settings

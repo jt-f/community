@@ -18,7 +18,9 @@ from state import AgentState
 import asyncio
 import agent_config
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 logger.propagate = False  # Prevent messages reaching the root logger
 
 class MessageQueueHandler:

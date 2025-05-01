@@ -7,9 +7,11 @@ from fastapi.websockets import WebSocket, WebSocketState
 from shared_models import AgentStatus, MessageType, setup_logging
 import state
 import grpc_services
+import logging
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
     """Check if an agent's status has changed from its previous state."""

@@ -4,6 +4,7 @@ gRPC server implementation for broker registration service
 import time
 import sys
 import os
+import logging
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,7 +19,9 @@ from generated.broker_registration_service_pb2_grpc import BrokerRegistrationSer
 from shared_models import setup_logging
 import state
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 class BrokerRegistrationServicer(BrokerRegistrationServiceServicer):
     """Implementation of the BrokerRegistrationService"""

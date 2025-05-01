@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()  # Load .env file early
 
 import os
-
+import logging
 # --- gRPC Debug Logging ---
 # Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
 

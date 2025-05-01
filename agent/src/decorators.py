@@ -4,8 +4,9 @@ import functools
 import logging
 
 from shared_models import setup_logging
-
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
 
 def log_exceptions(func):
     """

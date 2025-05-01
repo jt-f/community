@@ -2,7 +2,7 @@ import json
 import uuid
 from typing import Dict, Any
 import asyncio
-
+import logging
 from fastapi import WebSocket, WebSocketDisconnect
 
 # Import shared models, config, state, and utils
@@ -12,7 +12,9 @@ import rabbitmq_utils
 import agent_manager
 import services
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 # Store client names
 client_names: Dict[str, str] = {}

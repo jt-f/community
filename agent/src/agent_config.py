@@ -3,8 +3,11 @@ from typing import Optional, Tuple
 from shared_models import setup_logging
 import uuid
 import os
+import logging
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 ###DEFAULTS###
 # Interval in seconds for sending status updates to the server

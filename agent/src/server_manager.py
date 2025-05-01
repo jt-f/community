@@ -19,8 +19,11 @@ from shared_models import setup_logging
 from state import AgentState 
 from decorators import log_exceptions
 import agent_config 
+import logging
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 logger.propagate = False
 
 if agent_config.GRPC_DEBUG:

@@ -7,7 +7,7 @@ from concurrent import futures
 import sys
 import os
 import datetime
-
+import logging
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -17,8 +17,8 @@ sys.path.insert(0, parent_dir)
 from shared_models import setup_logging
 import state
 
-logger = setup_logging(__name__)
-
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 # Import generated gRPC code

@@ -5,7 +5,9 @@ from typing import Dict, List, Optional, Any
 
 from shared_models import setup_logging, MessageType
 
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
+logger.propagate = False  # Prevent messages reaching the root logger
 
 
 class BrokerState:

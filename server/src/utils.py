@@ -1,6 +1,7 @@
 import signal
 import sys
 import asyncio
+import logging
 
 # Import state management and service functions
 from shared_models import setup_logging
@@ -8,7 +9,8 @@ import state
 import services
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 async def shutdown_server():
     """Initiates the server shutdown sequence."""

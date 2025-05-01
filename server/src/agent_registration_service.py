@@ -8,6 +8,7 @@ import sys
 import os
 import re
 from typing import Dict, Optional
+import logging
 
 # Add the parent directory to sys.path so we can import the generated modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +29,9 @@ from shared_models import setup_logging, AgentStatus
 import state
 import agent_manager
 
-logger = setup_logging(__name__)
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 # Global variables
 # Map of agent_id to stream context

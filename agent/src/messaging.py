@@ -5,9 +5,11 @@ from shared_models import setup_logging
 import uuid
 from decorators import log_exceptions
 from typing import Dict, Any
+import logging
 
-logger = setup_logging(__name__)
-
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 @log_exceptions
 def publish_to_broker_input_queue(rabbitmq_channel, message_dict):

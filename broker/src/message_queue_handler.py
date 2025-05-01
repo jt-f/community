@@ -5,7 +5,7 @@ import threading
 import json
 import time
 from datetime import datetime
-import uuid
+import logging
 import asyncio
 
 # Third-party imports
@@ -18,7 +18,8 @@ import broker_config # Import broker configuration
 
 logging.getLogger("pika").setLevel(logging.WARNING)
 
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__)
 logger.propagate = False  # Prevent messages reaching the root logger
 
 

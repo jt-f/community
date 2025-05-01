@@ -7,9 +7,11 @@ from datetime import datetime
 # Import shared models
 from shared_models import AgentStatus, setup_logging
 import agent_manager
+import logging
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 class AgentState:
     """

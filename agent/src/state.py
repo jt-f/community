@@ -2,9 +2,12 @@
 import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
-
+import logging
 from shared_models import setup_logging
-logger = setup_logging(__name__)
+
+# Configure logging
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 logger.propagate = False # Prevent messages reaching the root logger
 
 class AgentState:

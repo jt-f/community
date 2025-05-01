@@ -1,8 +1,10 @@
 import os
 from shared_models import setup_logging
+import logging # Import logging
 
 # Configure logging
-logger = setup_logging(__name__)
+setup_logging() # Call setup_logging without arguments
+logger = logging.getLogger(__name__) # Get logger for this module
 
 # --- Environment Variable Loading ---
 # Load environment variables with defaults
