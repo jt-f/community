@@ -6,8 +6,8 @@ import logging
 import datetime
 
 # Local imports (assuming config holds keepalive settings)
-from .. import config
-from .. import state # Needed for agent_keepalive_checker
+import config
+import state  # Needed for agent_keepalive_checker
 
 logger = logging.getLogger(__name__)
 

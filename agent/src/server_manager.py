@@ -389,15 +389,14 @@ class ServerManager:
         # 2. Close gRPC channel
         if self.channel:
             logger.info("Closing gRPC channel...")
-            # Unsubscribe callback first to avoid race conditions during shutdown
-            self.channel.unsubscribe(self._on_channel_state_change)
+            # Close the channel directly
             await self.channel.close(grace=grace_period / 2)
             logger.info("gRPC channel closed.")
-            self.channel = None # Clear the channel reference
+            self.channel = None  # Clear the channel reference
             self._update_grpc_state("shutdown")
         else:
             logger.info("No active gRPC channel to close.")
-            self._update_grpc_state("shutdown") # Ensure state reflects shutdown
+            self._update_grpc_state("shutdown")  # Ensure state reflects shutdown
 
         logger.info("gRPC Server Manager shut down complete.")
 
@@ -438,4 +437,58 @@ class ServerManager:
         await self.shutdown(grace_period)
         
         logger.info(f"Cleanup for agent {agent_id} finished.")
+
+    async def start_command_stream(self):
+        """Starts listening for commands from the server."""
+        if not self._command_callback:
+            logger.error("Cannot start command stream: No command callback provided.")
+            return
+
+        if not await self.check_grpc_readiness(timeout=5.0):
+            logger.error("Cannot start command stream: gRPC channel not ready.")
+            return
+
+        if self._command_stream_task and not self._command_stream_task.done():
+            logger.warning("Command stream task already running.")
+            return
+
+        logger.info("Starting command stream task...")
+        self._command_stream_task = asyncio.create_task(self._command_stream_loop())
+
+    async def _command_stream_loop(self):
+        """Continuously listens for commands from the server."""
+        while True:
+            try:
+                if not self.stub or not self._is_registered:
+                    logger.warning("Command stream loop stopping: Not registered or stub not available.")
+                    break
+
+                request = ReceiveCommandsRequest(agent_id=self._state_updater.get_agent_id())
+                async for command in self.stub.ReceiveCommands(request):
+                    if not command:
+                        continue
+
+                    try:
+                        # Convert command to dictionary format
+                        command_dict = {
+                            "type": command.type,
+                            "command_id": command.command_id,
+                            "payload": command.payload
+                        }
+                        # Process command through callback
+                        await self._command_callback(command_dict)
+                    except Exception as e:
+                        logger.error(f"Error processing command: {e}", exc_info=True)
+
+            except grpc.aio.AioRpcError as e:
+                if e.code() == grpc.StatusCode.CANCELLED:
+                    logger.info("Command stream cancelled.")
+                    break
+                logger.error(f"gRPC error in command stream: {e.code()} - {e.details()}")
+                await asyncio.sleep(5)  # Wait before retrying
+            except Exception as e:
+                logger.error(f"Unexpected error in command stream: {e}", exc_info=True)
+                await asyncio.sleep(5)  # Wait before retrying
+
+        logger.info("Command stream loop stopped.")
 

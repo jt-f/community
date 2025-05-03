@@ -165,3 +165,13 @@ class AgentState:
     def get_agent_name(self) -> str:
         """Get the agent name."""
         return self._state.get("agent_name")
+
+    def update_internal_state_based_on_components(self) -> bool:
+        """
+        Public method to update the internal state based on component statuses.
+        This is a wrapper around the internal _update_internal_state method.
+        
+        Returns:
+            bool: True if the state was changed, False otherwise
+        """
+        return self._update_internal_state()

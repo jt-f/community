@@ -67,7 +67,7 @@ class LLMClient:
         try:
             # Ensure self.client is not None before calling methods
             if self.client:
-                chat_response = self.client.chat.completions.create(
+                chat_response = self.client.chat.complete(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     **kwargs
