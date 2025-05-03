@@ -6,6 +6,9 @@ from datetime import datetime
 
 # Import shared models
 from shared_models import AgentStatus, setup_logging
+
+
+from grpc_services.agent_status_service import broadcast_agent_status_updates
 import agent_manager
 import logging
 
@@ -155,8 +158,7 @@ async def update_agent_metrics(agent_id: str, agent_name: str, metrics: Dict[str
 
 async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
     """Broadcast agent status updates to all subscribers via gRPC."""
-    # Import here to avoid circular imports
-    from agent_status_service import broadcast_agent_status_updates
+
     
     try:
         # Call the broadcast function from the gRPC service

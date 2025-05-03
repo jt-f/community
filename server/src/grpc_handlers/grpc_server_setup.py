@@ -30,7 +30,7 @@ AGENT_KEEPALIVE_GRACE_SECONDS = config.AGENT_KEEPALIVE_GRACE_SECONDS
 async def agent_keepalive_checker():
     """Periodically checks agent last_seen times and marks inactive agents."""
     while True:
-        await asyncio.sleep(AGENT_KEEPALIVE_INTERVAL_SECONDS) # Check interval first
+        await asyncio.sleep(config.AGENT_KEEPALIVE_INTERVAL_SECONDS) # Check interval first
         now = datetime.datetime.now(datetime.timezone.utc)
         agents_to_update = []
         try:
@@ -83,7 +83,7 @@ def create_grpc_server(port):
     """Creates and configures the gRPC server instance without starting it."""
     logger.info(f"Creating gRPC server instance")
     server = grpc.aio.server(
-        futures.ThreadPoolExecutor(max_workers=config.GRPC_MAX_WORKERS), # Use config
+        futures.ThreadPoolExecutor(max_workers=grpc_config.GRPC_MAX_WORKERS), # Use config
         options=grpc_options
     )
 

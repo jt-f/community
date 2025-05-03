@@ -13,9 +13,6 @@ GRPC_MAX_PINGS_WITHOUT_DATA = int(os.getenv('GRPC_MAX_PINGS_WITHOUT_DATA', 3))
 GRPC_MIN_PING_INTERVAL_WITHOUT_DATA_MS = int(os.getenv('GRPC_MIN_PING_INTERVAL_WITHOUT_DATA_MS', 30 * 1000))  # 30 seconds
 GRPC_MAX_WORKERS = int(os.getenv('GRPC_MAX_WORKERS', 10))  # Max workers for the gRPC thread pool
 
-# Application-level Agent Keepalive
-AGENT_KEEPALIVE_INTERVAL_SECONDS = int(os.getenv('AGENT_KEEPALIVE_INTERVAL_SECONDS', 60))  # How often to check
-AGENT_KEEPALIVE_GRACE_SECONDS = int(os.getenv('AGENT_KEEPALIVE_GRACE_SECONDS', 120))  # Allowed time since last_seen (e.g., 2*interval)
 
 # --- gRPC Debug Logging ---
 # Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
