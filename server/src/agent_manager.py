@@ -6,7 +6,7 @@ from fastapi.websockets import WebSocket
 # Import shared models, config, state, and utils
 from shared_models import MessageType, setup_logging
 import state
-import agent_status_service
+from grpc_services import agent_status_service
 import logging
 
 # Configure logging

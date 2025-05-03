@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def add_all_services_to_server(server):
     """Instantiates and adds all gRPC servicers to the server instance."""
-    logger.info("Adding gRPC services to the server...")
+    logger.info("Adding gRPC services to the server")
 
     # Instantiate servicers 
     agent_status_servicer = AgentStatusServicer()
@@ -24,10 +24,7 @@ def add_all_services_to_server(server):
 
     # Add servicers to the server
     add_AgentStatusServiceServicer_to_server(agent_status_servicer, server)
-    logger.debug("Added AgentStatusServiceServicer.")
     add_AgentRegistrationServiceServicer_to_server(agent_reg_servicer, server)
-    logger.debug("Added AgentRegistrationServiceServicer.")
     add_BrokerRegistrationServiceServicer_to_server(broker_reg_servicer, server)
-    logger.debug("Added BrokerRegistrationServiceServicer.")
 
-    logger.info("All gRPC services added to server.")
+    logger.info("All gRPC services added to server")

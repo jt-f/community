@@ -16,17 +16,13 @@ Result = TypeVar('Result')
 AsyncResult = TypeVar('AsyncResult', bound=Coroutine[Any, Any, Any])
 
 def log_exceptions(func: F) -> F:
-    """
-    Decorator to log exceptions raised by both synchronous and asynchronous functions.
-
-    Logs the exception details including the function name and then re-raises the
-    exception to ensure it's handled upstream.
+    """Decorator for logging exceptions in sync/async functions.
 
     Args:
-        func: The function (sync or async) to decorate.
+        func: Function to decorate (sync or async)
 
     Returns:
-        The wrapped function with exception logging.
+        Wrapped function with exception logging
     """
     if asyncio.iscoroutinefunction(func):
         @functools.wraps(func)
@@ -36,7 +32,7 @@ def log_exceptions(func: F) -> F:
             except Exception as e:
                 logger.error(f"Exception in async function '{func.__name__}': {e}", exc_info=True)
                 raise
-        return async_wrapper # type: ignore # Ignore type checker complaint about return type mismatch
+        return async_wrapper  # type: ignore
     else:
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -45,4 +41,4 @@ def log_exceptions(func: F) -> F:
             except Exception as e:
                 logger.error(f"Exception in sync function '{func.__name__}': {e}", exc_info=True)
                 raise
-        return sync_wrapper # type: ignore # Ignore type checker complaint
+        return sync_wrapper  # type: ignore

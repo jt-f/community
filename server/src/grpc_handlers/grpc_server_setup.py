@@ -4,6 +4,7 @@ import grpc
 from concurrent import futures
 import logging
 import datetime
+import grpc_handlers.grpc_config as grpc_config
 
 # Local imports (assuming config holds keepalive settings)
 import config
@@ -12,19 +13,13 @@ import state  # Needed for agent_keepalive_checker
 logger = logging.getLogger(__name__)
 
 # --- Keepalive Settings ---
-# Values sourced from config or defined here if preferred
-KEEPALIVE_TIME_MS = config.GRPC_KEEPALIVE_TIME_MS
-KEEPALIVE_TIMEOUT_MS = config.GRPC_KEEPALIVE_TIMEOUT_MS
-KEEPALIVE_PERMIT_WITHOUT_CALLS = config.GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS
-MAX_PINGS_WITHOUT_DATA = config.GRPC_MAX_PINGS_WITHOUT_DATA
-MIN_PING_INTERVAL_WITHOUT_DATA_MS = config.GRPC_MIN_PING_INTERVAL_WITHOUT_DATA_MS
-
+# Values sourced from grpc_config or defined here if preferred
 grpc_options = [
-    ('grpc.keepalive_time_ms', KEEPALIVE_TIME_MS),
-    ('grpc.keepalive_timeout_ms', KEEPALIVE_TIMEOUT_MS),
-    ('grpc.keepalive_permit_without_calls', KEEPALIVE_PERMIT_WITHOUT_CALLS),
-    ('grpc.http2.max_pings_without_data', MAX_PINGS_WITHOUT_DATA),
-    ('grpc.http2.min_ping_interval_without_data_ms', MIN_PING_INTERVAL_WITHOUT_DATA_MS),
+    ('grpc.keepalive_time_ms', grpc_config.GRPC_KEEPALIVE_TIME_MS),
+    ('grpc.keepalive_timeout_ms', grpc_config.GRPC_KEEPALIVE_TIMEOUT_MS),
+    ('grpc.keepalive_permit_without_calls', grpc_config.GRPC_KEEPALIVE_PERMIT_WITHOUT_CALLS),
+    ('grpc.http2.max_pings_without_data', grpc_config.GRPC_MAX_PINGS_WITHOUT_DATA),
+    ('grpc.http2.min_ping_interval_without_data_ms', grpc_config.GRPC_MIN_PING_INTERVAL_WITHOUT_DATA_MS),
 ]
 # --- End Keepalive Settings ---
 

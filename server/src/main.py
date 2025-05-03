@@ -19,15 +19,12 @@ import utils
 import message_queue_handler
 import agent_manager
 from grpc_handlers.grpc_server_setup import create_grpc_server
-import agent_status_service
-import agent_registration_service
-import broker_registration_service
+from grpc_handlers import grpc_config
+import grpc_services.agent_status_service as agent_status_service
+import grpc_services.agent_registration_service as agent_registration_service
+import grpc_services.broker_registration_service as broker_registration_service
 
-# --- gRPC Debug Logging ---
-# Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
-if config.GRPC_DEBUG:
-    os.environ["GRPC_VERBOSITY"] = "DEBUG"
-    os.environ["GRPC_TRACE"] = "keepalive,http2_stream_state,http2_ping,http2_flowctl"
+
 
 # Initialize logger early
 setup_logging()
@@ -41,7 +38,7 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 async def lifespan(app: FastAPI):
     """Manages application startup and shutdown events."""
     message_queue_handler.get_rabbitmq_connection()
-    grpc_server = create_grpc_server(config.GRPC_PORT)
+    grpc_server = create_grpc_server(grpc_config.GRPC_PORT)
 
     await grpc_server.start()
 

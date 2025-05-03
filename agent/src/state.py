@@ -100,11 +100,11 @@ class AgentState:
                  self._state[key] = value
                  self._update_timestamp()
                  changed = True
-        logger.debug(f"Full state: {self.get_full_status_for_update()}")
+        logger.debug("Current agent state: %s", self.get_full_status_for_update())
         return changed
 
     # --- Specific State Setters --- 
-    # These provide clearer intent and potentially encapsulate logic
+    
 
     def set_internal_state(self, state: str) -> bool:
         """Explicitly set the internal_state (e.g., busy, paused)."""
@@ -148,8 +148,8 @@ class AgentState:
         with self._lock:
             return self._state["metrics"].copy()
 
-    def get_full_status_for_update(self) -> Dict[str, Any]:
-        """Get a consolidated status dictionary suitable for sending updates."""
+    def get_full_status_for_update(self) -> dict[str, Any]:
+        """Return consolidated status dictionary for server updates."""
         with self._lock:
             # Combine core state and metrics
             status_update = self._state.copy()
