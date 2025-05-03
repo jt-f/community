@@ -41,9 +41,17 @@ services:
       - GRPC_PORT=50051
       - GRPC_DEBUG=0
       - GRPC_DEADLINE_SECONDS=30
+      - LOG_FILE=/var/log/server.log
     volumes:
       - ./shared_models:/app/shared_models
       - ./shared/protos:/app/shared/protos
+      - ./logs:/var/log
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8765/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -63,9 +71,9 @@ services:
       - ./shared_models:/app/shared_models
       - ./shared/protos:/app/shared/protos
     depends_on:
-      - server
-
-
+      server:
+        condition: service_healthy
+    
   frontend:
     build: 
       context: .
@@ -76,4 +84,5 @@ services:
       - VITE_WS_URL=ws://localhost:8765/ws
       - VITE_API_URL=http://localhost:8765
     depends_on:
-      - server 
+      server:
+        condition: service_healthy

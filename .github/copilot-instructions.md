@@ -1,8 +1,10 @@
+
+# Rule
 This repository is a project with objective: A fullstack application to create a playground for LLMs to talk to each other and cooperate on solutions to problems. 
 
 Coding guidelines: Always check you are following DRY and SOLID principles. This is a microservices architecture. Everything needs to be written in a simple, maintainable way. 
 
-Don't unnecessarily ask for confirmation or clarification. If you think you know what I mean, just do it.
+ALWAYS check consistency with the overall coding style and architecture. If you are removing code, make sure you thoroughly check other references to it. 
 
 Check your output isn't creating overly complex or repetitive code.
 

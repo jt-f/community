@@ -17,11 +17,11 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 
 def get_rabbitmq_connection() -> Optional[pika.BlockingConnection]:
     """Gets or establishes a RabbitMQ connection."""
+    
     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
         return state.rabbitmq_connection
     
     try:
-        logger.info(f"Attempting to connect to RabbitMQ at {config.RABBITMQ_HOST}:{config.RABBITMQ_PORT}")
         connection = pika.BlockingConnection(
             pika.ConnectionParameters(host=config.RABBITMQ_HOST, port=config.RABBITMQ_PORT)
         )
@@ -35,10 +35,11 @@ def get_rabbitmq_connection() -> Optional[pika.BlockingConnection]:
 
 def close_rabbitmq_connection():
     """Closes the global RabbitMQ connection if it's open."""
+    logger.info("Closing RabbitMQ connection...")
     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
         try:
             state.rabbitmq_connection.close()
-            logger.info("RabbitMQ connection closed.")
+            logger.info("RabbitMQ connection closed")
         except Exception as e:
             logger.error(f"Error closing RabbitMQ connection: {e}")
         finally:
@@ -46,6 +47,7 @@ def close_rabbitmq_connection():
 
 def publish_to_queue(queue_name: str, message_data: dict) -> bool:
     """Publish a message to a specific RabbitMQ queue."""
+
     channel = None
     connection = get_rabbitmq_connection()
     
@@ -74,17 +76,20 @@ def publish_to_queue(queue_name: str, message_data: dict) -> bool:
     finally:
         if channel and channel.is_open:
             try:
+                logger.info(f"Closing RabbitMQ channel...")
                 channel.close()
             except Exception as close_exc:
                 logger.error(f"Error closing RabbitMQ channel after publishing: {close_exc}")
 
 def publish_to_broker_input_queue(message_data: dict) -> bool:
     """Publish a message to the main broker input queue."""
+    logger.info(f"Publishing message to broker input queue...")
     return publish_to_queue(config.BROKER_INPUT_QUEUE, message_data)
 
-def publish_to_agent_metadata_queue(message_data: dict) -> bool:
-    """Publish an agent metadata message (register, disconnect) to the queue."""
-    return publish_to_queue(config.AGENT_METADATA_QUEUE, message_data)
+# def publish_to_agent_metadata_queue(message_data: dict) -> bool:
+#     """Publish an agent metadata message (register, disconnect) to the queue."""
+#     logger.info(f"Publishing message to agent metadata queue...")
+#     return publish_to_queue(config.AGENT_METADATA_QUEUE, message_data)
 
 def publish_server_advertisement():
     """Publish server availability to the advertisement queue."""
@@ -95,46 +100,47 @@ def publish_server_advertisement():
         "websocket_url": config.WEBSOCKET_URL
     }
     if publish_to_queue(config.SERVER_ADVERTISEMENT_QUEUE, advertisement):
-        logger.info("Published server availability advertisement")
+        logger.info("Published server availability")
     else:
-        logger.error("Failed to publish server availability advertisement")
+        logger.error("Failed to publish server availability")
 
-def process_rabbitmq_events():
-    """Process RabbitMQ events without blocking asyncio loop."""
-    if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
-        try:
-            state.rabbitmq_connection.process_data_events(time_limit=0.1)
-            return True
-        except Exception as e:
-            logger.error(f"Error processing RabbitMQ data events: {e}")
-            close_rabbitmq_connection()
-            return False
-    return False
+# def process_rabbitmq_events():
+#     """Process RabbitMQ events without blocking asyncio loop."""
+#     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
+#         try:
+#             state.rabbitmq_connection.process_data_events(time_limit=0.1)
+#             return True
+#         except Exception as e:
+#             logger.error(f"Error processing RabbitMQ data events: {e}")
+#             close_rabbitmq_connection()
+#             return False
+#     return False
 
-def setup_agent_queue(queue_name: str) -> bool:
-    """Create or verify an agent's message queue exists."""
-    connection = get_rabbitmq_connection()
-    if not connection:
-        logger.error(f"Cannot setup queue {queue_name}: No RabbitMQ connection")
-        return False
+# def setup_agent_queue(queue_name: str) -> bool:
+#     """Create or verify an agent's message queue exists."""
+#     connection = get_rabbitmq_connection()
+#     if not connection:
+#         logger.error(f"Cannot setup queue {queue_name}: No RabbitMQ connection")
+#         return False
         
-    try:
-        channel = connection.channel()
-        # Ensure queue exists and is durable
-        channel.queue_declare(queue=queue_name, durable=True)
-        logger.info(f"Successfully created/verified queue: {queue_name}")
-        channel.close()
-        return True
-    except Exception as e:
-        logger.error(f"Failed to setup queue {queue_name}: {e}")
-        return False
+#     try:
+#         channel = connection.channel()
+#         # Ensure queue exists and is durable
+#         channel.queue_declare(queue=queue_name, durable=True)
+#         logger.info(f"Successfully created/verified queue: {queue_name}")
+#         channel.close()
+#         return True
+#     except Exception as e:
+#         logger.error(f"Failed to setup queue {queue_name}: {e}")
+#         return False
 
 def publish_to_agent_queue(agent_id: str, message_data: dict) -> bool:
     """Publish a message directly to an agent's queue."""
     queue_name = f"{agent_id}"
+    logger.info(f"Publishing message to queue: {queue_name}...")
     result = publish_to_queue(queue_name, message_data)
     if result:
-        logger.info(f"Published message to agent {agent_id} queue")
+        logger.info(f"Published message to queue: {queue_name} successfully")
     else:
-        logger.error(f"Failed to publish message to agent {agent_id} queue")
+        logger.error(f"Failed to publish message to queue: {queue_name}")
     return result 

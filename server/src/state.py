@@ -156,7 +156,7 @@ async def update_agent_metrics(agent_id: str, agent_name: str, metrics: Dict[str
 async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
     """Broadcast agent status updates to all subscribers via gRPC."""
     # Import here to avoid circular imports
-    from grpc_services import broadcast_agent_status_updates
+    from agent_status_service import broadcast_agent_status_updates
     
     try:
         # Call the broadcast function from the gRPC service

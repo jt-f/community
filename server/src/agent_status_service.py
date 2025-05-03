@@ -24,9 +24,8 @@ logger = logging.getLogger(__name__)
 # Import generated gRPC code
 from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
 from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
-import broker_registration_service
 
-# Global variables
+# Global variables for status subscriptions
 # Use a dict to map subscriber_id to subscriber context
 subscriber_contexts = {}
 subscription_lock = asyncio.Lock()
@@ -135,17 +134,21 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         response.is_full_update = is_full_update
         
         # Convert all agent states to AgentInfo format
-        for agent_id, agent_state in state.agent_states.items():
-            agent_info = AgentInfo()
-            agent_info.agent_id = agent_id
-            agent_info.agent_name = agent_state.agent_name
-            agent_info.last_seen = agent_state.last_seen
-            
-            # Add all metrics
-            for key, value in agent_state.get_metrics_dict().items():
-                agent_info.metrics[key] = value
-            
-            response.agents.append(agent_info)
+        current_agent_states = state.agent_states.copy() # Copy for thread safety during iteration
+        for agent_id, agent_state in current_agent_states.items():
+            try:
+                agent_info = AgentInfo()
+                agent_info.agent_id = agent_id
+                agent_info.agent_name = agent_state.agent_name
+                agent_info.last_seen = agent_state.last_seen
+                
+                # Add all metrics
+                for key, value in agent_state.get_metrics_dict().items():
+                    agent_info.metrics[key] = str(value) # Ensure value is string for proto
+                
+                response.agents.append(agent_info)
+            except Exception as e:
+                 logger.error(f"Error converting state for agent {agent_id} to AgentInfo: {e}", exc_info=True)
         
         return response
 
@@ -177,13 +180,19 @@ async def broadcast_agent_status_updates(is_full_update=False):
     logger.info(f"Broadcasting agent status updates to {subscriber_count} subscribers (is_full_update={is_full_update})")
     
     # Create a status response just once for all subscribers
-    response = await AgentStatusServicer()._create_status_response(is_full_update=is_full_update)
+    try:
+        # Need an instance to call the method
+        servicer_instance = AgentStatusServicer()
+        response = await servicer_instance._create_status_response(is_full_update=is_full_update)
+    except Exception as e:
+         logger.error(f"Failed to create status response for broadcast: {e}", exc_info=True)
+         return
     
     async with subscription_lock:
         # Track subscribers to remove if their context is no longer valid
         to_remove = []
         
-        for subscriber_id, subscriber_info in subscriber_contexts.items():
+        for subscriber_id, subscriber_info in list(subscriber_contexts.items()): # Iterate over a copy
             try:
                 # Check if subscriber is marked as active
                 if not subscriber_info.get("active", False):
@@ -218,73 +227,9 @@ async def broadcast_agent_status_updates(is_full_update=False):
                 logger.info(f"Removing invalid subscriber for broker {broker_id}")
                 subscriber_contexts.pop(subscriber_id, None)
 
-# --- Keepalive Settings ---
-# Ping clients every 60 seconds if no activity
-KEEPALIVE_TIME_MS = 60 * 1000
-# Wait 20 seconds for the ping ack before assuming connection is dead
-KEEPALIVE_TIMEOUT_MS = 20 * 1000
-# Allow pings even if there are no active streams
-KEEPALIVE_PERMIT_WITHOUT_CALLS = 1
-# Maximum number of bad pings allowed before closing connection
-MAX_PINGS_WITHOUT_DATA = 3 # More lenient
-# Minimum time between pings - prevents overly frequent pings
-MIN_PING_INTERVAL_WITHOUT_DATA_MS = 30 * 1000
+def start_agent_status_service(server):
+    """Add the agent status service to the given gRPC server"""
+    logger.info("Adding agent status service to gRPC server")
+    servicer = AgentStatusServicer()
+    add_AgentStatusServiceServicer_to_server(servicer, server)
 
-grpc_options = [
-    ('grpc.keepalive_time_ms', KEEPALIVE_TIME_MS),
-    ('grpc.keepalive_timeout_ms', KEEPALIVE_TIMEOUT_MS),
-    ('grpc.keepalive_permit_without_calls', KEEPALIVE_PERMIT_WITHOUT_CALLS),
-    ('grpc.http2.max_pings_without_data', MAX_PINGS_WITHOUT_DATA),
-    ('grpc.http2.min_ping_interval_without_data_ms', MIN_PING_INTERVAL_WITHOUT_DATA_MS),
-    # ('grpc.http2.max_ping_strikes', 2) # Optional: How many pings can be missed before connection is closed by server
-]
-# --- End Keepalive Settings ---
-
-
-# --- Application-level keepalive settings ---
-AGENT_KEEPALIVE_INTERVAL_SECONDS = 60  # How often to check (seconds)
-AGENT_KEEPALIVE_GRACE_SECONDS = 60     # Allowed time since last_seen before marking as unknown
-
-async def agent_keepalive_checker():
-    while True:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        for agent_id, agent_state in state.agent_states.items():
-            try:
-                last_seen_str = agent_state.last_seen
-                last_seen = datetime.datetime.fromisoformat(last_seen_str)
-                if last_seen.tzinfo is None:
-                    last_seen = last_seen.replace(tzinfo=datetime.timezone.utc)
-                delta = (now - last_seen).total_seconds()
-                if delta > AGENT_KEEPALIVE_GRACE_SECONDS:
-                    if agent_state.metrics.get("internal_state") != "unknown_status":
-                        logger.warning(f"Agent {agent_id} missed keepalive window ({delta:.1f}s). Marking as unknown_status.")
-                        await state.update_agent_metrics(agent_id, agent_state.agent_name, {"internal_state": "unknown_status"})
-            except Exception as e:
-                logger.error(f"Error in keepalive check for agent {agent_id}: {e}")
-        await asyncio.sleep(AGENT_KEEPALIVE_INTERVAL_SECONDS)
-
-def start_grpc_server(port=50051):
-    """Start the gRPC server in a separate thread"""
-    server = grpc.aio.server(
-        futures.ThreadPoolExecutor(max_workers=10),
-        options=grpc_options  # <-- Pass the options here
-    )
-    add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
-    broker_registration_service.add_to_server(server)
-    # Bind to both IPv4 and IPv6
-    server.add_insecure_port(f'0.0.0.0:{port}')  # IPv4
-    server.add_insecure_port(f'[::]:{port}')     # IPv6
-    
-    logger.info(f"Starting gRPC server on port {port}")
-
-    # Start the agent keepalive checker as a background task
-    loop = asyncio.get_event_loop()
-    loop.create_task(agent_keepalive_checker())
-
-    return server 
-
-def add_services_to_server(server):
-    """Add all gRPC services to the server"""
-    add_AgentStatusServiceServicer_to_server(AgentStatusServicer(), server)
-    broker_registration_service.add_to_server(server)
-    logger.info("All gRPC services added to server")

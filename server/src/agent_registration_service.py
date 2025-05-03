@@ -336,6 +336,6 @@ async def cancel_command(command_id: str) -> bool:
 
 def start_registration_service(server):
     """Add the agent registration service to the given gRPC server"""
+    logger.info("Adding agent registration service to gRPC server")
     servicer = AgentRegistrationServicer()
     add_AgentRegistrationServiceServicer_to_server(servicer, server)
-    logger.info("Agent registration service added to gRPC server")

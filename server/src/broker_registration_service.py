@@ -48,7 +48,7 @@ class BrokerRegistrationServicer(BrokerRegistrationServiceServicer):
             message="Broker registered successfully"
         )
 
-def add_to_server(server):
+def start_registration_service(server):
     """Add the broker registration service to the gRPC server"""
+    logger.info("Adding broker registration service to gRPC server")
     add_BrokerRegistrationServiceServicer_to_server(BrokerRegistrationServicer(), server)
-    logger.info("Broker registration service added to gRPC server")

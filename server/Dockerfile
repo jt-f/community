@@ -3,8 +3,9 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Install system dependencies and clean up in one layer
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir poetry==2.1.1
 
@@ -23,6 +24,7 @@ RUN pip install --no-cache-dir -e /app/shared_models \
 # Copy only the necessary source files
 COPY server/src/ src/
 COPY server/run.sh server/build_protos.sh ./
+
 
 # Set Python path
 ENV PYTHONPATH=/app:/app/src:/app/generated

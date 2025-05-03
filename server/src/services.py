@@ -292,93 +292,93 @@ async def periodic_status_broadcast():
 
 # --- Agent Metadata Consumer Service ---
 
-async def agent_metadata_consumer():
-    """Service that consumes messages from the AGENT_METADATA_QUEUE."""
-    channel = None
-    logger.info(f"Starting agent metadata consumer listening on {config.AGENT_METADATA_QUEUE}...")
+# async def agent_metadata_consumer():
+#     """Service that consumes messages from the AGENT_METADATA_QUEUE."""
+#     channel = None
+#     logger.info(f"Starting agent metadata consumer listening on {config.AGENT_METADATA_QUEUE}...")
     
-    while not shutdown_event.is_set():
-        try:
-            connection = rabbitmq_utils.get_rabbitmq_connection()
-            if not connection or connection.is_closed:
-                logger.warning("Agent metadata consumer: No RabbitMQ connection or connection closed. Retrying in 5s...")
-                await asyncio.sleep(5)
-                continue
+#     while not shutdown_event.is_set():
+#         try:
+#             connection = rabbitmq_utils.get_rabbitmq_connection()
+#             if not connection or connection.is_closed:
+#                 logger.warning("Agent metadata consumer: No RabbitMQ connection or connection closed. Retrying in 5s...")
+#                 await asyncio.sleep(5)
+#                 continue
 
-            channel = connection.channel()
-            # Ensure queue exists
-            channel.queue_declare(queue=config.AGENT_METADATA_QUEUE, durable=True)
+#             channel = connection.channel()
+#             # Ensure queue exists
+#             channel.queue_declare(queue=config.AGENT_METADATA_QUEUE, durable=True)
             
-            # Define the callback for received messages
-            def callback_wrapper(ch, method, properties, body):
-                try:
-                    logger.debug(f"Received raw message from {config.AGENT_METADATA_QUEUE}")
-                    message_data = json.loads(body.decode('utf-8'))
-                    # Run the async processing in the main event loop
-                    asyncio.create_task(_process_agent_metadata_message(message_data))
-                    # Acknowledge message *after* creating the task (fire-and-forget)
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    logger.debug(f"Acknowledged message from {config.AGENT_METADATA_QUEUE}")
-                except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON received on {config.AGENT_METADATA_QUEUE}: {body[:100]}...")
-                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                except Exception as e:
-                    logger.exception(f"Error in callback_wrapper for {config.AGENT_METADATA_QUEUE}: {e}")
-                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+#             # Define the callback for received messages
+#             def callback_wrapper(ch, method, properties, body):
+#                 try:
+#                     logger.debug(f"Received raw message from {config.AGENT_METADATA_QUEUE}")
+#                     message_data = json.loads(body.decode('utf-8'))
+#                     # Run the async processing in the main event loop
+#                     asyncio.create_task(_process_agent_metadata_message(message_data))
+#                     # Acknowledge message *after* creating the task (fire-and-forget)
+#                     ch.basic_ack(delivery_tag=method.delivery_tag)
+#                     logger.debug(f"Acknowledged message from {config.AGENT_METADATA_QUEUE}")
+#                 except json.JSONDecodeError:
+#                     logger.error(f"Invalid JSON received on {config.AGENT_METADATA_QUEUE}: {body[:100]}...")
+#                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+#                 except Exception as e:
+#                     logger.exception(f"Error in callback_wrapper for {config.AGENT_METADATA_QUEUE}: {e}")
+#                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             
-            # Start consuming
-            channel.basic_consume(queue=config.AGENT_METADATA_QUEUE, on_message_callback=callback_wrapper, auto_ack=False)
-            logger.info(f"Agent metadata consumer started listening on {config.AGENT_METADATA_QUEUE}")
+#             # Start consuming
+#             channel.basic_consume(queue=config.AGENT_METADATA_QUEUE, on_message_callback=callback_wrapper, auto_ack=False)
+#             logger.info(f"Agent metadata consumer started listening on {config.AGENT_METADATA_QUEUE}")
             
-            # Keep consuming using process_data_events
-            while not shutdown_event.is_set() and connection.is_open:
-                try:
-                    connection.process_data_events(time_limit=1)
-                    await asyncio.sleep(0.1)  # Yield to allow other tasks to run
-                except pika.exceptions.ConnectionClosedByBroker:
-                    logger.warning("Agent metadata consumer: Connection closed by broker. Reconnecting...")
-                    break
-                except pika.exceptions.AMQPConnectionError:
-                    logger.warning("Agent metadata consumer: AMQP connection error. Reconnecting...")
-                    break
-                except Exception as e:
-                    logger.error(f"Unexpected error in agent metadata consumer: {e}")
-                    await asyncio.sleep(1)  # Wait before retrying
+#             # Keep consuming using process_data_events
+#             while not shutdown_event.is_set() and connection.is_open:
+#                 try:
+#                     connection.process_data_events(time_limit=1)
+#                     await asyncio.sleep(0.1)  # Yield to allow other tasks to run
+#                 except pika.exceptions.ConnectionClosedByBroker:
+#                     logger.warning("Agent metadata consumer: Connection closed by broker. Reconnecting...")
+#                     break
+#                 except pika.exceptions.AMQPConnectionError:
+#                     logger.warning("Agent metadata consumer: AMQP connection error. Reconnecting...")
+#                     break
+#                 except Exception as e:
+#                     logger.error(f"Unexpected error in agent metadata consumer: {e}")
+#                     await asyncio.sleep(1)  # Wait before retrying
                     
-        except pika.exceptions.ChannelClosedByBroker:
-            logger.warning("Agent metadata consumer: Channel closed by broker. Reconnecting...")
-            await asyncio.sleep(5)
-        except pika.exceptions.AMQPConnectionError:
-            logger.error("Agent metadata consumer: AMQP Connection Error. Reconnecting...")
-            await asyncio.sleep(5)
-        except asyncio.CancelledError:
-            logger.info("Agent metadata consumer task cancelled.")
-            break
-        except Exception as e:
-            logger.exception(f"Unexpected error in agent metadata consumer: {e}")
-            await asyncio.sleep(5)
-        finally:
-            if channel and channel.is_open:
-                try:
-                    channel.close()
-                    logger.info("Agent metadata consumer channel closed.")
-                except Exception as close_exc:
-                    logger.error(f"Error closing agent metadata consumer channel: {close_exc}")
+#         except pika.exceptions.ChannelClosedByBroker:
+#             logger.warning("Agent metadata consumer: Channel closed by broker. Reconnecting...")
+#             await asyncio.sleep(5)
+#         except pika.exceptions.AMQPConnectionError:
+#             logger.error("Agent metadata consumer: AMQP Connection Error. Reconnecting...")
+#             await asyncio.sleep(5)
+#         except asyncio.CancelledError:
+#             logger.info("Agent metadata consumer task cancelled.")
+#             break
+#         except Exception as e:
+#             logger.exception(f"Unexpected error in agent metadata consumer: {e}")
+#             await asyncio.sleep(5)
+#         finally:
+#             if channel and channel.is_open:
+#                 try:
+#                     channel.close()
+#                     logger.info("Agent metadata consumer channel closed.")
+#                 except Exception as close_exc:
+#                     logger.error(f"Error closing agent metadata consumer channel: {close_exc}")
             
-    logger.info("Agent metadata consumer service stopped.")
+#     logger.info("Agent metadata consumer service stopped.")
 
-async def _process_agent_metadata_message(message_data: dict):
-    """Process a single message from the agent_metadata_queue."""
-    message_type = message_data.get("message_type")
+# async def _process_agent_metadata_message(message_data: dict):
+#     """Process a single message from the agent_metadata_queue."""
+#     message_type = message_data.get("message_type")
     
-    if message_type == MessageType.REGISTER_BROKER:
-        # Handle broker registration via RabbitMQ
-        await _handle_broker_registration(message_data)
-    elif message_type == MessageType.CLIENT_DISCONNECTED:
-        # Handle disconnection notification
-        await _handle_client_disconnected(message_data)
-    else:
-        logger.warning(f"Unrecognized message type in agent metadata queue: {message_type}")
+#     if message_type == MessageType.REGISTER_BROKER:
+#         # Handle broker registration via RabbitMQ
+#         await _handle_broker_registration(message_data)
+#     elif message_type == MessageType.CLIENT_DISCONNECTED:
+#         # Handle disconnection notification
+#         await _handle_client_disconnected(message_data)
+#     else:
+#         logger.warning(f"Unrecognized message type in agent metadata queue: {message_type}")
 
 async def _handle_broker_registration(message_data: dict):
     """Handle broker registration via RabbitMQ."""
@@ -527,30 +527,14 @@ async def _handle_control_message(message_data: dict):
         else:
             logger.warning(f"Cannot shutdown agent {agent_id}: Not found.")
 
-    # Handle DEREGISTER_AGENT, REREGISTER_AGENT, etc. (Add logic as needed)
-    # ... other control message handling ...
-
-# --- Service Management --- 
-
 async def start_services():
     """Starts all background services."""
-    logger.info("Starting background services...")
+    logger.info("Starting background services")
 
-    # Ensure RabbitMQ connection is attempted before starting consumers
-    if not rabbitmq_utils.get_rabbitmq_connection():
-        logger.warning("Failed to establish initial RabbitMQ connection. Services depending on it might fail to start properly.")
+    asyncio.create_task(server_input_consumer(), name="ServerInputConsumer"),
+    asyncio.create_task(periodic_status_broadcast(), name="PeriodicStatusBroadcast")
 
-    # Create tasks for each service
-    service_tasks = [
-        # Replace response_consumer with server_input_consumer
-        asyncio.create_task(server_input_consumer(), name="ServerInputConsumer"),
-        asyncio.create_task(periodic_status_broadcast(), name="PeriodicStatusBroadcast"),
-        asyncio.create_task(agent_metadata_consumer(), name="AgentMetadataConsumer")
-    ]
-    logger.info(f"Started {len(service_tasks)} background services:")
-    for task in service_tasks:
-        logger.info(f"  - {task.get_name()}")
-    # No need to await tasks here, they run in the background
+
 
 async def stop_services():
     """Attempts to gracefully stop all background services."""

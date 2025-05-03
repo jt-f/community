@@ -65,11 +65,12 @@ def handle_exit(sig, frame):
 
 def setup_signal_handlers():
     """Sets up signal handlers for graceful shutdown."""
+    logger.info("Setting up signal handlers to support graceful shutdown")
     try:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, handle_exit, sig, None)
-        logger.info("Signal handlers registered for SIGINT and SIGTERM.")
+        logger.info("Signal handlers registered")
     except NotImplementedError:
         logger.warning("asyncio.add_signal_handler not supported, falling back to signal.signal.")
         for sig in (signal.SIGINT, signal.SIGTERM):
