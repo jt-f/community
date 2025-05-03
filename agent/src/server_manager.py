@@ -59,10 +59,10 @@ class ServerManager:
 
     def _update_grpc_state(self, new_state: str):
         if self._grpc_connection_state != new_state:
-            logger.info(f"gRPC connection state changing from '{self._grpc_connection_state}' to '{new_state}'")
+            logger.info("gRPC connection state changed to %s", new_state)
             self._grpc_connection_state = new_state
             if self._state_updater:
-                changed = self._state_updater.set_grpc_status(new_state)
+                self._state_updater.set_grpc_status(new_state)
 
     def _ensure_connection(self):
         if self.channel is None:
@@ -73,98 +73,109 @@ class ServerManager:
                 )
                 self.stub = AgentRegistrationServiceStub(self.channel)
                 self.agent_status_stub = AgentStatusServiceStub(self.channel)
-                logger.info(f"gRPC channel created for {self.server_host}:{self.server_port} with keepalive options.")
+                logger.info("Created gRPC channel to %s:%s", self.server_host, self.server_port)
                 self._update_grpc_state("connecting")
                 return True
             except Exception as e:
-                logger.error(f"Failed to create gRPC channel: {e}")
-                self.channel = None
-                self.stub = None
-                self.agent_status_stub = None
-                self._update_grpc_state("failed")
+                logger.error("Failed to create gRPC channel: %s", e)
+                self._cleanup_connection()
                 return False
         return True
 
-    def _on_channel_state_change(self, state):
-        logger.info(f"gRPC channel state changed: {state}")
-        if state == grpc.ChannelConnectivity.READY:
-            self._update_grpc_state("connected")
-        elif state == grpc.ChannelConnectivity.CONNECTING:
-             self._update_grpc_state("connecting")
-        elif state == grpc.ChannelConnectivity.TRANSIENT_FAILURE:
-             self._update_grpc_state("unavailable")
-        elif state == grpc.ChannelConnectivity.IDLE:
-             self._update_grpc_state("idle")
-        elif state == grpc.ChannelConnectivity.SHUTDOWN:
-             self._update_grpc_state("shutdown")
-             self.channel = None
-             self.stub = None
+    def _cleanup_connection(self):
+        self.channel = None
+        self.stub = None
+        self.agent_status_stub = None
+        self._update_grpc_state("failed")
 
-    async def check_grpc_readiness(self, timeout: float = agent_config.GRPC_READINESS_CHECK_TIMEOUT, retries: int = agent_config.GRPC_READINESS_CHECK_RETRIES, retry_delay: float = agent_config.GRPC_READINESS_CHECK_RETRY_DELAY) -> bool:
+    async def check_grpc_readiness(self, *, 
+                                 timeout: float = agent_config.GRPC_READINESS_CHECK_TIMEOUT,
+                                 retries: int = agent_config.GRPC_READINESS_CHECK_RETRIES,
+                                 retry_delay: float = agent_config.GRPC_READINESS_CHECK_RETRY_DELAY) -> bool:
         if not self._ensure_connection():
             return False
 
         for attempt in range(retries + 1):
             current_state = self.channel.get_state(try_to_connect=True)
-            logger.debug(f"Checking gRPC readiness (Attempt {attempt + 1}/{retries + 1}), current state: {current_state}")
+            logger.debug("gRPC readiness check attempt %d/%d", attempt + 1, retries + 1)
 
             if current_state == grpc.ChannelConnectivity.READY:
                 self._update_grpc_state("connected")
-                logger.info("gRPC channel is READY.")
                 return True
 
             if current_state == grpc.ChannelConnectivity.SHUTDOWN:
-                logger.warning("gRPC channel is SHUTDOWN. Cannot check readiness.")
-                self._update_grpc_state("shutdown")
+                logger.warning("gRPC channel in shutdown state")
                 return False
 
             try:
-                await asyncio.wait_for(self.channel.wait_for_state_change(current_state), timeout=timeout)
+                await asyncio.wait_for(
+                    self.channel.wait_for_state_change(current_state),
+                    timeout=timeout
+                )
                 new_state = self.channel.get_state(try_to_connect=False)
-                logger.info(f"gRPC state changed from {current_state} to {new_state} (Attempt {attempt + 1})")
                 self._on_channel_state_change(new_state)
 
                 if new_state == grpc.ChannelConnectivity.READY:
                     return True
-                elif new_state == grpc.ChannelConnectivity.SHUTDOWN:
-                    logger.warning("gRPC channel transitioned to SHUTDOWN during readiness check.")
-                    return False
 
             except asyncio.TimeoutError:
                 final_state = self.channel.get_state(try_to_connect=False)
-                logger.warning(f"gRPC channel state did not change from {current_state} within {timeout}s timeout (Attempt {attempt + 1}). Final state: {final_state}")
+                logger.warning("gRPC state check timeout after %.1fs", timeout)
                 self._on_channel_state_change(final_state)
 
-            except Exception as e:
-                 logger.error(f"Error waiting for gRPC channel readiness (Attempt {attempt + 1}): {e}")
-                 self._update_grpc_state("failed")
-                 return False
-
-            if attempt < retries and self.channel.get_state(try_to_connect=False) != grpc.ChannelConnectivity.READY:
-                logger.info(f"Waiting {retry_delay}s before next gRPC readiness check...")
+            if attempt < retries:
                 await asyncio.sleep(retry_delay)
 
-        final_state_after_retries = self.channel.get_state(try_to_connect=False)
-        logger.error(f"gRPC channel failed to become ready after {retries + 1} attempts. Final state: {final_state_after_retries}")
-        if final_state_after_retries != grpc.ChannelConnectivity.READY:
-             self._on_channel_state_change(final_state_after_retries)
+        logger.error("gRPC readiness check failed after %d attempts", retries + 1)
         return False
 
     def _on_channel_state_change(self, state: grpc.ChannelConnectivity):
-        logger.info(f"gRPC channel state changed: {state}")
-        if state == grpc.ChannelConnectivity.READY:
-            self._update_grpc_state("connected")
-        elif state == grpc.ChannelConnectivity.CONNECTING:
-            self._update_grpc_state("connecting")
-        elif state == grpc.ChannelConnectivity.TRANSIENT_FAILURE:
-            self._update_grpc_state("unavailable")
-        elif state == grpc.ChannelConnectivity.IDLE:
-            self._update_grpc_state("disconnected")
-        elif state == grpc.ChannelConnectivity.SHUTDOWN:
-            self._update_grpc_state("shutdown")
-        else:
-            logger.warning(f"Unhandled gRPC channel state: {state}")
-            self._update_grpc_state("error")
+        state_map = {
+            grpc.ChannelConnectivity.READY: "connected",
+            grpc.ChannelConnectivity.CONNECTING: "connecting",
+            grpc.ChannelConnectivity.TRANSIENT_FAILURE: "unavailable",
+            grpc.ChannelConnectivity.IDLE: "idle",
+            grpc.ChannelConnectivity.SHUTDOWN: "shutdown"
+        }
+        new_state = state_map.get(state, "error")
+        self._update_grpc_state(new_state)
+        if state == grpc.ChannelConnectivity.SHUTDOWN:
+            self._cleanup_connection()
+
+    async def register(self, agent_id: str, agent_name: str) -> bool:
+        """Register agent with central server.
+
+        Args:
+            agent_id: Unique agent identifier
+            agent_name: Human-readable agent name
+
+        Returns:
+            True if registration succeeded
+        """
+        if not self._ensure_connection():
+            logger.error("gRPC connection unavailable for registration")
+            return False
+
+        try:
+            request = AgentRegistrationRequest(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                version=agent_config.AGENT_VERSION
+            )
+            response = await self.stub.RegisterAgent(request, timeout=10)
+
+            if response.success:
+                self._is_registered = True
+                if self._state_updater:
+                    self._state_updater.set_registration_status("registered")
+                return True
+
+            logger.error("Registration failed: %s", response.message)
+            return False
+
+        except Exception as e:
+            logger.error("Registration error: %s", e)
+            return False
 
     def _update_grpc_state(self, status: str):
         if self._state_updater:
@@ -237,53 +248,55 @@ class ServerManager:
 
     @log_exceptions
     async def send_agent_status_update(self, agent_id: str, agent_name: str, last_seen: str = None, metrics: Dict[str, Any] = None) -> bool:
-        """Sends an unsolicited agent status update to the server using SendAgentStatus RPC."""
+        """Push agent status to server.
+
+        Args:
+            agent_id: Unique agent identifier
+            agent_name: Human-readable agent name
+            last_seen: ISO8601 timestamp of last activity
+            metrics: Dictionary of agent metrics
+
+        Returns:
+            True if update succeeded
+        """
         if not self.agent_status_stub:
-            logger.error("Cannot send status update: AgentStatusServiceStub not initialized.")
+            logger.error("Status service unavailable")
             return False
 
-        if not await self.check_grpc_readiness(timeout=2.0): # Quick check
-            logger.error("Cannot send status update: gRPC channel not ready.")
+        if not await self.check_grpc_readiness(timeout=2.0):
+            logger.error("gRPC channel not ready for status update")
             return False
-            
-        # Convert metrics to string map if necessary (proto expects map<string, string>)
-        metrics_dict = {}
-        if metrics:
-            for k, v in metrics.items():
-                metrics_dict[str(k)] = str(v)
-                
-        # Use current time if last_seen not provided
-        if not last_seen:
-            last_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-        # Construct the AgentInfo message
-        agent_info = AgentInfo(
-            agent_id=agent_id,
-            agent_name=agent_name,
-            last_seen=last_seen,
-            metrics=metrics_dict
-        )
 
-        # Create the request with the agent_info
-        request = AgentStatusUpdateRequest(agent=agent_info)
-        
-        # Use a default timeout if GRPC_CALL_TIMEOUT is not defined
-        timeout = getattr(agent_config, 'GRPC_CALL_TIMEOUT', 10.0)  # Default 10 seconds
-        
+        metrics_dict = {str(k): str(v) for k, v in (metrics or {}).items()}
+        last_seen = last_seen or datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
         try:
-            logger.debug(f"Sending agent status update for {agent_id}...")
-            response = await self.agent_status_stub.SendAgentStatus(request, timeout=timeout)
+            request = AgentStatusUpdateRequest(
+                agent=AgentInfo(
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    last_seen=last_seen,
+                    metrics=metrics_dict
+                )
+            )
+            
+            response = await self.agent_status_stub.SendAgentStatus(
+                request,
+                timeout=getattr(agent_config, 'GRPC_CALL_TIMEOUT', 10.0)
+            )
+
             if response.success:
-                logger.debug(f"Agent status update for {agent_id} successful.")
+                logger.debug("Status update for %s succeeded", agent_id)
                 return True
-            else:
-                logger.warning(f"Agent status update for {agent_id} failed on server: {response.message}")
-                return False
+
+            logger.warning("Server rejected status update: %s", response.message)
+            return False
+
         except grpc.aio.AioRpcError as e:
-            logger.error(f"gRPC error sending agent status update: {e.code()} - {e.details()}")
+            logger.error("gRPC error: %s - %s", e.code().name, e.details())
             return False
         except Exception as e:
-            logger.error(f"Unexpected error sending agent status update: {e}", exc_info=True)
+            logger.error("Status update failed: %s", e)
             return False
 
     # --- Periodic Status Update Logic (Renamed from Heartbeat) ---
