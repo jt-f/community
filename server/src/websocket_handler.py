@@ -8,7 +8,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 # Import shared models, config, state, and utils
 from shared_models import MessageType, ResponseStatus, ChatMessage, setup_logging
 import state
-import rabbitmq_utils
+import message_queue_handler
 import agent_manager
 import services
 
@@ -76,7 +76,7 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
             logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
 
     # Forward to Broker via RabbitMQ
-    if not rabbitmq_utils.publish_to_broker_input_queue(message_data):
+    if not message_queue_handler.publish_to_broker_input_queue(message_data):
         logger.error(f"Failed to publish incoming message from {client_id} to RabbitMQ.")
         error_resp = {
             "message_type": MessageType.ERROR,

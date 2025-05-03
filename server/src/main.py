@@ -3,58 +3,48 @@ load_dotenv()  # Load .env file early
 
 import os
 import logging
-# --- gRPC Debug Logging ---
-# Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
+from contextlib import asynccontextmanager
 
+# Third-party imports
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+# Local application/library specific imports
 from shared_models import setup_logging
-setup_logging()  # Initialize logger early
-logger = logging.getLogger(__name__)
-# Import local modules
 import config
 import websocket_handler
 import services
 import utils
-import rabbitmq_utils
-
+import message_queue_handler
 import agent_manager
-
-from grpc_server_setup import create_grpc_server
+from grpc_handlers.grpc_server_setup import create_grpc_server
 import agent_status_service
 import agent_registration_service
 import broker_registration_service
 
-
-if config.GRPC_DEBUG: # Use config value
+# --- gRPC Debug Logging ---
+# Set gRPC debug env vars BEFORE any grpc import or anything that might import grpc
+if config.GRPC_DEBUG:
     os.environ["GRPC_VERBOSITY"] = "DEBUG"
     os.environ["GRPC_TRACE"] = "keepalive,http2_stream_state,http2_ping,http2_flowctl"
 
-import logging
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-import uvicorn  # Import uvicorn for server configuration and execution
-from fastapi.middleware.cors import CORSMiddleware
+# Initialize logger early
+setup_logging()
+logger = logging.getLogger(__name__)
 
+# Suppress verbose logging from pika
 logging.getLogger("pika").setLevel(logging.WARNING)
 
-# Import local modules
-import config
-import websocket_handler
-import services
-import utils
-import rabbitmq_utils
-
-import agent_manager
-
-
-
+# --- Lifespan Management ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    rabbitmq_utils.get_rabbitmq_connection()
+    """Manages application startup and shutdown events."""
+    message_queue_handler.get_rabbitmq_connection()
     grpc_server = create_grpc_server(config.GRPC_PORT)
-    
+
     await grpc_server.start()
-    
+
     broker_registration_service.start_registration_service(grpc_server)
     agent_registration_service.start_registration_service(grpc_server)
     agent_status_service.start_agent_status_service(grpc_server)
@@ -62,20 +52,21 @@ async def lifespan(app: FastAPI):
     await services.start_services()
     utils.setup_signal_handlers()
 
-    rabbitmq_utils.publish_server_advertisement()
+    message_queue_handler.publish_server_advertisement()
 
     await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None)
 
     logger.info("Server startup complete")
-    
+
     yield # The application runs while yielding
-    
+
     logger.info("Server shutting down")
     logger.info("Shutting down gRPC server")
     await grpc_server.stop(grace=None)
     logger.info("gRPC server stopped")
     logger.info("Server shutdown complete")
 
+# --- FastAPI App Initialization ---
 # Create FastAPI app instance with lifespan manager
 app = FastAPI(
     title="Agent Communication Server",
@@ -84,7 +75,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# --- Middleware Setup --- 
+# --- Middleware Setup ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
@@ -94,7 +85,7 @@ app.add_middleware(
 )
 logger.debug(f"CORS configured with allowed origins: {config.ALLOWED_ORIGINS}")
 
-# --- API Routes --- 
+# --- API Routes ---
 # Add the WebSocket endpoint
 app.add_websocket_route("/ws", websocket_handler.websocket_endpoint)
 logger.debug(f"WebSocket endpoint registered at /ws")
@@ -102,6 +93,7 @@ logger.debug(f"WebSocket endpoint registered at /ws")
 # Basic HTTP route for health check / info
 @app.get("/")
 async def read_root():
+    """Provides basic server information."""
     return {
         "message": "Agent Communication Server is running.",
         "services": {
@@ -113,35 +105,29 @@ async def read_root():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
+    """Checks the health of the server and its dependencies."""
     result = {
         "status": "service_healthy",
         "services": {
             "websocket": True,
             "grpc": True,
-            "rabbitmq": rabbitmq_utils.get_rabbitmq_connection() is not None
+            "rabbitmq": message_queue_handler.get_rabbitmq_connection() is not None
         }
     }
     logger.info(f"Health check: {result}")
     return result
-    
 
-# --- Main Execution --- 
+# --- Main Execution ---
 if __name__ == "__main__":
-    logger.info(f"Starting Server") # Use config value
-    
-    # Get host and port from environment or use defaults
-    server_host = config.HOST # Use config value
-    server_port = config.PORT # Use config value
+    logger.info(f"Starting Server on {config.HOST}:{config.PORT}")
 
-    # Configure uvicorn
-    uvicorn_config = uvicorn.Config(
+    # Configure and run uvicorn server
+    uvicorn.run(
         "main:app",
-        host=server_host,
-        port=server_port,
+        host=config.HOST,
+        port=config.PORT,
         log_level="info",
-        reload=False
+        reload=False # Typically False in production/non-dev environments
     )
-    server = uvicorn.Server(uvicorn_config)
-    server.run()
 
     logger.info("Server process finished.")

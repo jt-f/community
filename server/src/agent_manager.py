@@ -1,10 +1,10 @@
 import json
 from datetime import datetime
 import asyncio
-from fastapi.websockets import WebSocket, WebSocketState
+from fastapi.websockets import WebSocket
 
 # Import shared models, config, state, and utils
-from shared_models import AgentStatus, MessageType, setup_logging
+from shared_models import MessageType, setup_logging
 import state
 import agent_status_service
 import logging
@@ -12,18 +12,6 @@ import logging
 # Configure logging
 setup_logging() # Call setup_logging without arguments
 logger = logging.getLogger(__name__) # Get logger for this module
-
-def has_agent_status_changed(agent_id: str, new_status: AgentStatus) -> bool:
-    """Check if an agent's status has changed from its previous state."""
-    if agent_id not in state.agent_status_history:
-        return True  # First time seeing this agent
-    old_status = state.agent_status_history[agent_id]
-    # Compare relevant fields for change detection
-    # Remove is_online from comparison, use metrics/internal_state if needed
-    return (
-        old_status.last_seen != new_status.last_seen or
-        old_status.agent_name != new_status.agent_name
-    )
 
 async def broadcast_agent_status(force_full_update: bool = False, is_full_update: bool = False, target_websocket: WebSocket = None):
     """Broadcast agent status to all clients or a specific frontend client.

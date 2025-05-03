@@ -10,11 +10,12 @@ import os
 from shared_models import MessageType, setup_logging, ResponseStatus
 import config
 import state
-import rabbitmq_utils
+import message_queue_handler
 import agent_manager
 import logging
+
 # Import the necessary publish functions explicitly
-from rabbitmq_utils import publish_to_agent_queue, publish_to_broker_input_queue
+from message_queue_handler import publish_to_agent_queue, publish_to_broker_input_queue
 
 # Create shutdown event for graceful service termination
 shutdown_event = asyncio.Event()
@@ -199,7 +200,7 @@ async def server_input_consumer():
     
     while not shutdown_event.is_set():
         try:
-            connection = rabbitmq_utils.get_rabbitmq_connection()
+            connection = message_queue_handler.get_rabbitmq_connection()
             if not connection or connection.is_closed:
                 logger.warning("Server input consumer: No RabbitMQ connection or connection closed. Retrying in 5s...")
                 await asyncio.sleep(5)
@@ -299,7 +300,7 @@ async def periodic_status_broadcast():
     
 #     while not shutdown_event.is_set():
 #         try:
-#             connection = rabbitmq_utils.get_rabbitmq_connection()
+#             connection = message_queue_handler.get_rabbitmq_connection()
 #             if not connection or connection.is_closed:
 #                 logger.warning("Agent metadata consumer: No RabbitMQ connection or connection closed. Retrying in 5s...")
 #                 await asyncio.sleep(5)
@@ -415,7 +416,7 @@ async def _handle_broker_registration(message_data: dict):
     }
     
     # Send response to the server input queue (broker will consume from there)
-    if not rabbitmq_utils.publish_to_queue(config.SERVER_INPUT_QUEUE, response):
+    if not message_queue_handler.publish_to_queue(config.SERVER_INPUT_QUEUE, response):
         logger.error(f"Failed to send registration response to broker {broker_id}")
     else:
         logger.info(f"Sent registration response to broker {broker_id}")
@@ -546,7 +547,7 @@ async def stop_services():
     if not tasks:
         logger.info("No background tasks found to stop.")
         # Still close RabbitMQ connection if it was opened
-        rabbitmq_utils.close_rabbitmq_connection()
+        message_queue_handler.close_rabbitmq_connection()
         return
 
     logger.info(f"Waiting for {len(tasks)} background tasks to complete shutdown...")
@@ -568,5 +569,5 @@ async def stop_services():
         logger.error(f"Error during service shutdown wait: {e}")
 
     # Close RabbitMQ connection after services are stopped
-    rabbitmq_utils.close_rabbitmq_connection()
+    message_queue_handler.close_rabbitmq_connection()
     logger.info("Background services stopped.")

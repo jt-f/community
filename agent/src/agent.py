@@ -1,16 +1,16 @@
+"""Main module for the autonomous agent."""
+import argparse
 import asyncio
+import logging
 import os
 import signal
 import sys
-from datetime import datetime
-from typing import Dict, Any, Optional
-from dotenv import load_dotenv
-import logging
-load_dotenv()
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
-# Local imports
+from dotenv import load_dotenv
+
 import agent_config
-import argparse
 from command_handler import CommandHandler
 from decorators import log_exceptions
 from llm_client import LLMClient
@@ -20,7 +20,11 @@ from server_manager import ServerManager
 from shared_models import setup_logging
 from state import AgentState
 
-setup_logging()  # Initialize logger early
+# Load environment variables from .env file
+load_dotenv()
+
+# Initialize logger early
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -28,217 +32,231 @@ class Agent:
     """Represents an autonomous agent interacting with the system."""
 
     def __init__(self, agent_name: Optional[str] = None):
-        """Initialize the agent with a unique ID and name."""
-        logger.info(f"Initializing...")
+        """Initialize the agent with configuration, state, and handlers."""
+        logger.info("Initializing agent...")
 
         self.agent_id, self.agent_name = agent_config.create_agent_metadata(agent_name)
         self.loop = asyncio.get_event_loop()
         self.state = AgentState(self.agent_id, self.agent_name)
         self.llm_client = LLMClient(state_updater=self.state)
-        self.mq_handler = MessageQueueHandler(state_updater=self.state, message_handler=self.handle_message_wrapper, loop=self.loop)
+        # Pass the async message handler wrapper to MQHandler
+        self.mq_handler = MessageQueueHandler(
+            state_updater=self.state,
+            message_handler=self.handle_message_wrapper, # Pass the async wrapper
+            loop=self.loop
+        )
         self.command_handler = CommandHandler(self)
-        self.server_manager = ServerManager(state_updater=self.state, command_callback=self.handle_server_command_wrapper)
+        # Pass the async command handler wrapper to ServerManager
+        self.server_manager = ServerManager(
+            state_updater=self.state,
+            command_callback=self.handle_server_command_wrapper # Pass the async wrapper
+        )
         self._last_status_update_time = datetime.now()
         self._shutdown_requested = False
 
-        logger.info(f"Initialization complete")
+        logger.info(f"Agent '{self.agent_name}' (ID: {self.agent_id}) initialized successfully.")
+
+    @log_exceptions
+    async def handle_message_wrapper(self, body: bytes):
+        """Asynchronous wrapper to process messages received from the queue."""
+        logger.debug(f"Received raw message body (first 100 bytes): {body[:100]}...")
+        try:
+            message_dict = json.loads(body.decode('utf-8'))
+            logger.info(f"Processing message ID: {message_dict.get('message_id', 'N/A')}")
+            # Call the actual processing function (which might involve LLM)
+            await process_message(
+                llm_client=self.llm_client,
+                mq_channel=self.mq_handler.channel, # Provide the channel for publishing response
+                agent_id=self.agent_id,
+                message=message_dict
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode message JSON: {e}", exc_info=True)
+            # Consider how to handle undecodable messages (e.g., log, discard, move to dead-letter queue)
+        except Exception as e:
+            logger.error(f"Error in handle_message_wrapper: {e}", exc_info=True)
+            # Handle potential errors during message processing
+
+    @log_exceptions
+    async def handle_server_command_wrapper(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Asynchronous wrapper to handle commands received from the server."""
+        logger.info(f"Handling server command: {command}")
+        try:
+            # Delegate command handling to the synchronous CommandHandler method
+            # Run synchronous code in a separate thread to avoid blocking the event loop
+            result = await self.loop.run_in_executor(
+                None, # Use default executor (ThreadPoolExecutor)
+                self.command_handler.handle_server_command,
+                command
+            )
+            logger.info(f"Command handling result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Error in handle_server_command_wrapper: {e}", exc_info=True)
+            return {
+                "success": False,
+                "output": "Internal error handling command",
+                "error_message": str(e),
+                "exit_code": 1
+            }
+
+    def setup_signal_handlers(self):
+        """Set up signal handlers for graceful shutdown."""
+        logger.info("Setting up signal handlers...")
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            self.loop.add_signal_handler(
+                s, lambda s=s: asyncio.create_task(self.shutdown(signal=s))
+            )
+        logger.info("Signal handlers set up.")
 
     @log_exceptions
     async def run(self):
         """Main execution loop for the agent."""
-        logger.info(f"Agent {self.agent_name} starting run loop.")
+        logger.info(f"Agent '{self.agent_name}' starting run loop.")
+        self.state.set_internal_state('starting')
 
         self.setup_signal_handlers()
 
-        # Connect to RabbitMQ
+        # 1. Connect to RabbitMQ
+        logger.info("Connecting to Message Queue...")
         if not self.mq_handler.connect(queue_name=self.agent_id):
+            logger.critical("Failed to connect to Message Queue. Agent cannot operate.")
             self.state.set_internal_state('error')
-            return
+            await self.cleanup_async() # Attempt cleanup
+            return # Exit if MQ connection fails
+        logger.info("Message Queue connection successful.")
 
-        # Register with the server
+        # 2. Connect to gRPC Server and Register
+        logger.info("Connecting to gRPC Server and registering...")
         registered = await self.server_manager.register(self.agent_id, self.agent_name)
         if not registered:
-            logger.error("Failed to register with the server. Agent will exit.")
+            logger.critical("Failed to register with the server. Agent will exit.")
             self.state.set_internal_state('error')
-            # Attempt cleanup even if registration failed, might close partial connections
-            await self.cleanup_async()
-            return
-            
-        logger.info("Agent registered successfully.")
+            await self.cleanup_async() # Attempt cleanup
+            return # Exit if registration fails
+        logger.info("Agent registered successfully with the server.")
         self.state.set_registration_status("registered")
-        
-        # Start background tasks like the periodic status updater after successful registration
-        await self.server_manager.start_status_updater() # Start the status update loop (Renamed)
+        self.state.set_internal_state('idle') # Move to idle after successful setup
 
-        try:
-            while not self._shutdown_requested:
+        # 3. Start background tasks (status updates, command stream)
+        await self.server_manager.start_status_updater() # Renamed for clarity
+        await self.server_manager.start_command_stream() # Start listening for commands
 
-                current_state = self.state.get_state('internal_state')
-                if current_state == 'error':
-                    logger.warning("Agent is in error state. Pausing activity.")
-                    await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP * 2) # Longer sleep in error state
-                elif current_state == 'paused':
-                    logger.info("Agent is paused. Skipping active tasks.")
-                    await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP)
-                else:
-                    logger.debug(f"Agent state: {current_state}")
-                    pass
+        # 4. Main agent loop
+        logger.info("Entering main agent loop.")
+        while not self._shutdown_requested:
+            try:
+                # Main loop logic (can be expanded later)
+                # For now, it primarily relies on background tasks (MQ consumer, gRPC streams)
+                # We can add periodic checks or tasks here if needed.
+
+                # Example: Check agent health or perform periodic tasks
+                # if datetime.now() - self._last_status_update_time > timedelta(minutes=5):
+                #     logger.info("Performing periodic health check...")
+                #     # Perform checks
+                #     self._last_status_update_time = datetime.now()
+
+                # Update internal state based on component health
+                self.state.update_internal_state_based_on_components()
 
                 await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP)
 
-        except asyncio.CancelledError:
-            logger.info("Agent run loop cancelled.")
-        except Exception as e:
-            logger.error(f"Unhandled exception in agent run loop: {e}", exc_info=True)
-            self.state.set_last_error(f"Unhandled run loop error: {e}")
-            self.state.set_internal_state('error')
-        finally:
-            logger.info("Agent run loop finished. Initiating cleanup...")
-            await self.cleanup_async()
+            except asyncio.CancelledError:
+                logger.info("Main loop cancelled, likely during shutdown.")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error in main agent loop: {e}", exc_info=True)
+                self.state.set_internal_state('error')
+                self.state.set_last_error(f"Main loop error: {e}")
+                # Consider if agent should attempt recovery or shut down on main loop errors
+                await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP * 2) # Longer sleep after error
+
+        logger.info(f"Agent '{self.agent_name}' main loop finished.")
+        # Final cleanup is handled after the loop exits
+        await self.cleanup_async()
 
     @log_exceptions
-    def handle_server_command_wrapper(self, command: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Wraps the CommandHandler's method to fit the ServerManager callback signature."""
-        logger.info(f"Handling server command: {command}")
-
-        return self.command_handler.handle_server_command(command)
-
-    @log_exceptions
-    def handle_message_wrapper(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Process a message dictionary received from the message queue.
-        """
-        logger.info(f"Handling message: {message}")
-        self.state.set_internal_state('busy') 
-
-        try:
-            response = process_message(
-                self.llm_client,
-                self.mq_handler.channel,
-                self.agent_id,
-                message
-            )
-            self.state.set_internal_state('idle')
-
-            return response
-
-        except Exception as e:
-            self.state.set_internal_state('error')
-            logger.error(f"Error handling message: {e}", exc_info=True)
-            self.state.set_last_error(f"Error handling message: {e}")
-
-            return {
-                "error": str(e),
-                "agent_id": self.agent_id
-            }
-
-    @log_exceptions
-    def setup_signal_handlers(self):
-        """Set up signal handlers for graceful shutdown."""
-        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
-        for s in signals:
-            self.loop.add_signal_handler(
-                s, lambda s=s: asyncio.create_task(self.shutdown(s))
-            )
-        logger.info(f"Signal handlers set up for signals: {signals}")
-
-    @log_exceptions
-    async def shutdown(self, sig: Optional[signal.Signals] = None):
+    async def shutdown(self, signal: Optional[signal.Signals] = None):
         """Initiate graceful shutdown of the agent."""
         if self._shutdown_requested:
             logger.info("Shutdown already in progress.")
             return
 
         self._shutdown_requested = True
-        if sig:
-            logger.info(f"Received shutdown signal: {sig.name}. Initiating graceful shutdown...")
-        else:
-            logger.info("Shutdown requested programmatically. Initiating graceful shutdown...")
-
         self.state.set_internal_state('shutting_down')
+        if signal:
+            logger.info(f"Shutdown initiated by signal {signal.name}...")
+        else:
+            logger.info("Shutdown initiated...")
 
-        # Stop the main loop by cancelling its task (if run via asyncio.run)
-        # Or simply let the loop condition self._shutdown_requested handle it
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        logger.info(f"Cancelling {len(tasks)} outstanding tasks.")
-        for task in tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                logger.debug("Task cancelled successfully.")
+        # The actual cleanup logic will run after the main loop exits
+        # We just set the flag here to break the loop
 
-        return
+        # Optionally, cancel long-running tasks here if they don't check _shutdown_requested
+        # e.g., if server_manager tasks need explicit cancellation:
+        # await self.server_manager.stop_tasks()
+
+        logger.info("Shutdown flag set. Main loop will exit and perform cleanup.")
 
     @log_exceptions
     async def cleanup_async(self):
-        """Perform asynchronous cleanup of agent resources."""
+        """Perform asynchronous cleanup of resources."""
+        logger.info("Starting asynchronous cleanup...")
+        self.state.set_internal_state('shutting_down') # Ensure state reflects shutdown
 
-        # 1. Cleanup ServerManager (includes unregistering and closing gRPC)
+        # 1. Stop server interactions (status updates, command stream, unregister)
         if self.server_manager:
-            logger.info("Cleaning up ServerManager...")
+            logger.info("Cleaning up Server Manager...")
             await self.server_manager.cleanup(self.agent_id)
-            logger.info("ServerManager cleanup finished.")
+            logger.info("Server Manager cleanup complete.")
 
-        # 2. Cleanup MessageQueueHandler (closes connection, stops consumer)
+        # 2. Disconnect from Message Queue
         if self.mq_handler:
-            logger.info("Cleaning up MessageQueueHandler...")
-            self.mq_handler.cleanup()
-            logger.info("MessageQueueHandler cleanup finished.")
+            logger.info("Cleaning up Message Queue Handler...")
+            # disconnect() is synchronous but manages a thread, call directly
+            self.mq_handler.disconnect()
+            logger.info("Message Queue Handler cleanup complete.")
 
-        # 3. Cleanup LLMClient
+        # 3. Cleanup LLM Client (if needed)
         if self.llm_client:
-            logger.info("Cleaning up LLMClient...")
+            logger.info("Cleaning up LLM Client...")
             self.llm_client.cleanup()
-            logger.info("LLMClient cleanup finished.")
+            logger.info("LLM Client cleanup complete.")
 
-        # Final state update
-        self.state.set_internal_state('shutdown_complete') # Add a final state if needed
+        # 4. Cancel remaining asyncio tasks (important for clean exit)
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            logger.info(f"Cancelling {len(tasks)} outstanding asyncio tasks...")
+            for task in tasks:
+                task.cancel()
+            # Wait for tasks to cancel
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("Outstanding asyncio tasks cancelled.")
 
-        logger.info(f"Asynchronous cleanup for agent {self.agent_name} complete.")
+        logger.info("Asynchronous cleanup finished.")
+        self.state.set_internal_state('shutdown') # Final state
 
 
-async def main(agent_name: Optional[str] = 'Name_not_provided'):
-    """Entry point for running the agent."""
-    agent = Agent(agent_name=agent_name)
-
-    try:
-        await agent.run()
-    except KeyboardInterrupt:
-        logger.info("KeyboardInterrupt received, initiating shutdown...")
-        # The signal handler should catch this, but as a fallback:
-        if not agent._shutdown_requested:
-            await agent.shutdown()
-    finally:
-        logger.info("Checking if event loop is running, and stopping it if necessary")
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            logger.info("Stopping event loop")
-            loop.stop()
-            logger.info("Stopped event loop")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Start the agent with optional name override.")
-    parser.add_argument("--name", type=str, help="Override the agent name (takes precedence over environment variable)")
+async def main():
+    """Main entry point for running the agent."""
+    parser = argparse.ArgumentParser(description="Run an autonomous agent.")
+    parser.add_argument("--name", type=str, help="Assign a specific name to the agent.")
     args = parser.parse_args()
 
-    if args.name:
-        agent_name = args.name
-    else:
-        agent_name = os.getenv("DEFAULT_AGENT_NAME", "Unknown_Agent")
+    agent = None
     try:
-        asyncio.run(main(agent_name=agent_name))
-    except KeyboardInterrupt:
-        logger.warning("Agent interrupted by user.")
-    except RuntimeError as e:
-        if "Event loop is closed" in str(e):
-            logger.info("Event loop closed normally.")
-        else:
-            logger.error(f"RuntimeError in main execution: {e}", exc_info=True)
-            sys.exit(1)
+        agent = Agent(agent_name=args.name)
+        await agent.run()
     except Exception as e:
-        logger.error(f"Unexpected error during script execution: {e}", exc_info=True)
-        sys.exit(1)
+        logger.critical(f"Critical error during agent execution: {e}", exc_info=True)
+        # Attempt cleanup even if initialization or run fails partially
+        if agent:
+            logger.info("Attempting emergency cleanup...")
+            await agent.cleanup_async()
+        sys.exit(1) # Exit with error code
     finally:
         logger.info("Agent process finished.")
-        sys.exit(0)
+
+if __name__ == "__main__":
+    asyncio.run(main())

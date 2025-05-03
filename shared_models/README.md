@@ -1,35 +1,38 @@
 # Shared Models
 
-This directory contains Python data models and enumerations shared across the different components (server, broker, agent, potentially frontend if using Python) of the Agent Communication System. Using shared models ensures consistency in data structures and message types throughout the application.
+This directory contains Python data models (Pydantic `BaseModel`) and enumerations (`Enum`) shared across the different Python-based components (Server, Broker, Agent) of the Agent Communication System.
+
+Using these shared models ensures consistency in data structures and message types throughout the application.
+
+For details on setting up dependencies and the overall project structure, refer to the main [Project README](../../README.md) and the [Getting Started Guide](../../GETTING_STARTED.md).
 
 ## Contents
 
--   `shared_models.py`: Defines the core data structures using Pydantic `BaseModel` and standard Python `Enum`.
+-   `shared_models.py`: Defines the core data structures and enumerations.
 
 ## Key Definitions
 
-### Enumerations
+Refer to the source code in `shared_models.py` for the most up-to-date definitions of:
 
--   **`MessageType(str, Enum)`**: Defines the valid types for messages exchanged within the system (e.g., `AGENT_STATUS_UPDATE`, `CLIENT_DISCONNECTED`, `ERROR`, `REGISTER_FRONTEND`, `REGISTER_FRONTEND_RESPONSE`, `REQUEST_AGENT_STATUS`, `REPLY`, `SYSTEM`, `TEXT`).
--   **`ResponseStatus(str, Enum)`**: Defines simple status values for response messages (e.g., `SUCCESS`, `ERROR`).
-
-### Pydantic Models (`BaseModel`)
-
--   **`ChatMessage`**: Represents a standard chat message with fields like `message_id`, `sender_id`, `text_payload`, `send_timestamp`, `message_type`, and optional `in_reply_to_message_id`.
-    -   Includes helper class methods (`create`, `from_dict`) and instance methods (`to_dict`).
--   **`AgentRegistrationMessage`**: Structure for the message sent by an agent *to the server* during registration (now contains primarily `agent_name`, as `agent_id` is assigned by the server).
--   **`AgentRegistrationResponse`**: Structure for the server's response to an agent's registration attempt, including `status`, assigned `agent_id`, and a `message`.
--   **`AgentStatus`**: Represents the status information for a single agent, including `agent_id`, `agent_name`, and `last_seen` timestamp. The legacy `is_online` and `status` fields have been removed. Use the `metrics` map for extensible state.
--   **`AgentStatusUpdate`**: Structure for the message broadcast by the server containing a list of `AgentStatus` objects for multiple agents. Includes `message_type` and a list of `AgentStatus` objects.
-
-### Helper Functions
-
--   `create_text_message(...)`: Convenience function to create a `ChatMessage` instance with `message_type=TEXT`.
--   `create_reply_message(...)`: Convenience function to create a `ChatMessage` instance with `message_type=REPLY`, automatically setting the `in_reply_to_message_id`.
+-   **Enumerations:** `MessageType`, `ResponseStatus`
+-   **Pydantic Models:** `ChatMessage`, `AgentRegistrationMessage`, `AgentRegistrationResponse`, `AgentStatus`, `AgentStatusUpdate`
+-   **Helper Functions:** `create_text_message`, `create_reply_message`
 
 ## Usage
 
-Other components (server, broker, agent) install this package as a local path dependency (e.g., using Poetry or pip editable installs). They can then import the necessary models and enums:
+Other Python components (Server, Broker, Agent) install this package as a local path dependency using Poetry:
+
+```toml
+# In the pyproject.toml of the consuming service (e.g., server/pyproject.toml)
+[tool.poetry.dependencies]
+python = ">=3.13"
+# ... other dependencies
+shared-models = { path = "../shared_models", develop = true }
+```
+
+Then run `poetry install` in the consuming service's directory.
+
+Imports are standard:
 
 ```python
 from shared_models import MessageType, ChatMessage, AgentStatus
@@ -38,16 +41,3 @@ from shared_models import MessageType, ChatMessage, AgentStatus
 new_message = ChatMessage.create(sender_id="user1", text_payload="Hello!")
 status_update = AgentStatusUpdate(agents=[...])
 ```
-
-## Installation as Dependency
-
-Typically, this package is installed using Poetry by specifying a path dependency in the `pyproject.toml` file of the consuming package (server, broker, agent):
-
-```toml
-[tool.poetry.dependencies]
-python = ">=3.13"
-# ... other dependencies
-shared-models = { path = "../shared_models", develop = true }
-```
-
-Then run `poetry install` in the consuming package's directory.

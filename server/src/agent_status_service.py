@@ -2,41 +2,40 @@
 gRPC server implementation for agent status service
 """
 import asyncio
-import grpc
-from concurrent import futures
-import sys
-import os
-import datetime
 import logging
-# Add the parent directory to sys.path so we can import the generated modules
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.insert(0, parent_dir)
+import os
+import sys
+
+import grpc
+
+# Import generated gRPC code
+from generated.agent_status_service_pb2 import AgentInfo, AgentStatusResponse, AgentStatusUpdateResponse
+from generated.agent_status_service_pb2_grpc import (AgentStatusServiceServicer,
+                                                   add_AgentStatusServiceServicer_to_server)
 
 # Import shared modules
 from shared_models import setup_logging
 import state
+import agent_manager # Import moved here for clarity
 
+# Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-
-# Import generated gRPC code
-from generated.agent_status_service_pb2 import AgentStatusResponse, AgentInfo
-from generated.agent_status_service_pb2_grpc import AgentStatusServiceServicer, add_AgentStatusServiceServicer_to_server
-
 # Global variables for status subscriptions
-# Use a dict to map subscriber_id to subscriber context
-subscriber_contexts = {}
+subscriber_contexts = {}  # Maps subscriber_id to subscriber context
 subscription_lock = asyncio.Lock()
 
+
 class AgentStatusServicer(AgentStatusServiceServicer):
-    """Implementation of the AgentStatusService"""
-    
+    """Implementation of the AgentStatusService."""
+
     async def SubscribeToAgentStatus(self, request, context):
         """
-        Stream agent status updates to the broker.
+        Stream agent status updates to a subscriber (e.g., a broker).
+
         This is a server-streaming RPC that sends updates whenever agent status changes.
+        It sends an initial full update and then subsequent partial or full updates.
         """
         broker_id = request.broker_id
         logger.info(f"Broker {broker_id} subscribed to agent status updates")
@@ -90,7 +89,8 @@ class AgentStatusServicer(AgentStatusServiceServicer):
     async def GetAgentStatus(self, request, context):
         """
         Get a one-time full agent status update.
-        This is a unary RPC that returns the current agent status.
+
+        This is a unary RPC that returns the current status of all known agents.
         """
         broker_id = request.broker_id
         logger.info(f"Broker {broker_id} requested a one-time agent status update")
@@ -100,36 +100,40 @@ class AgentStatusServicer(AgentStatusServiceServicer):
     
     async def SendAgentStatus(self, request, context):
         """
-        Handle agent-initiated status updates via SendAgentStatus RPC.
-        Uses the AgentInfo format with metrics for all agent state.
+        Receive an agent-initiated status update.
+
+        This unary RPC allows an agent to push its current status and metrics
+        to the server.
         """
         agent = request.agent
         agent_id = agent.agent_id
         agent_name = agent.agent_name
-        
+
         # Extract all metrics from the request
         metrics = dict(agent.metrics)
-        logger.info(f"Received status update from agent {agent_id} with {len(metrics)} metrics")
-        
+        logger.info(f"Received status update from agent {agent_id} ('{agent_name}')")
+
         try:
-            # Update last_seen if not provided
-            if 'last_seen' not in metrics and agent.last_seen:
-                metrics['last_seen'] = agent.last_seen
-                
-            # Update agent metrics in state
+            # Ensure 'last_seen' is present in the metrics from the agent
+            if 'last_seen' not in metrics:
+                logger.warning(f"Agent {agent_id} sent status update without 'last_seen' metric.")
+                # Optionally, you could reject the update or use a default, but for now, we log and proceed.
+                # If strict enforcement is needed, return an error here.
+
+            # Update agent metrics in the central state
             await state.update_agent_metrics(agent_id, agent_name, metrics)
-            
-            # Broadcast to frontends
-            import agent_manager
+
+            # Broadcast the update to connected frontends/subscribers
+            # Use force_full_update=True to ensure consistency after direct update
             asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
         except Exception as e:
-            logger.error(f"Failed to process agent status update: {e}")
-        
-        from generated.agent_status_service_pb2 import AgentStatusUpdateResponse
+            logger.error(f"Failed to process agent status update from {agent_id}: {e}", exc_info=True)
+            return AgentStatusUpdateResponse(success=False, message=f"Error processing update: {e}")
+
         return AgentStatusUpdateResponse(success=True, message="Status update received")
 
     async def _create_status_response(self, is_full_update=False):
-        """Create an AgentStatusResponse from the current agent state"""
+        """Create an AgentStatusResponse message from the current agent state."""
         response = AgentStatusResponse()
         response.is_full_update = is_full_update
         
@@ -153,7 +157,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         return response
 
     def _handle_context_done(self, subscriber_id):
-        """Handle context completion by marking the subscriber as inactive"""
+        """Callback function invoked when a subscriber's gRPC context is done (cancelled/closed)."""
         subscriber_info = subscriber_contexts.get(subscriber_id)
         if subscriber_info:
             subscriber_info["active"] = False
@@ -161,17 +165,20 @@ class AgentStatusServicer(AgentStatusServiceServicer):
             logger.debug(f"Marked subscriber for broker {broker_id} as inactive due to context completion")
 
     async def _cleanup_subscriber(self, subscriber_id):
-        """Remove a subscriber from the active subscribers list"""
+        """Remove a subscriber's context and queue from the active subscribers list."""
         async with subscription_lock:
             if subscriber_id in subscriber_contexts:
                 broker_id = subscriber_contexts[subscriber_id].get("broker_id", "unknown")
                 logger.info(f"Cleaning up subscriber for broker {broker_id}")
                 del subscriber_contexts[subscriber_id]
 
+
 async def broadcast_agent_status_updates(is_full_update=False):
     """
-    Broadcast agent status updates to all active subscribers.
-    This function should be called whenever agent status changes.
+    Broadcast the current agent status to all active subscribers.
+
+    This function is called when agent status changes need to be pushed
+    to subscribed clients (like brokers).
     """
     subscriber_count = len(subscriber_contexts)
     if subscriber_count == 0:
@@ -227,8 +234,9 @@ async def broadcast_agent_status_updates(is_full_update=False):
                 logger.info(f"Removing invalid subscriber for broker {broker_id}")
                 subscriber_contexts.pop(subscriber_id, None)
 
+
 def start_agent_status_service(server):
-    """Add the agent status service to the given gRPC server"""
+    """Add the AgentStatusServiceServicer to the given gRPC server."""
     logger.info("Adding agent status service to gRPC server")
     servicer = AgentStatusServicer()
     add_AgentStatusServiceServicer_to_server(servicer, server)

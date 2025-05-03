@@ -143,6 +143,8 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         
         # Register the command stream
         async with command_stream_lock:
+            if agent_id in agent_command_streams:
+                 logger.warning(f"Agent {agent_id} already has an active command stream. Replacing.")
             agent_command_streams[agent_id] = command_queue
         
         # Set up cancellation detection
@@ -335,7 +337,7 @@ async def cancel_command(command_id: str) -> bool:
         return True
 
 def start_registration_service(server):
-    """Add the agent registration service to the given gRPC server"""
+    """Add the AgentRegistrationServiceServicer to the given gRPC server."""
     logger.info("Adding agent registration service to gRPC server")
     servicer = AgentRegistrationServicer()
     add_AgentRegistrationServiceServicer_to_server(servicer, server)

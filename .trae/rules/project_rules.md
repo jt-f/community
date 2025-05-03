@@ -1,0 +1,1 @@
+Keep all the different microservices implemented as consistently as possible, in terms of file and directory structure, naming conventions, etc.

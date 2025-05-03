@@ -1,203 +1,107 @@
 # Broker Service
 
-The broker service acts as a central router for messages within the system. It receives messages intended for agents, determines the appropriate destination agent based on available status information, and forwards the message accordingly via RabbitMQ.
+This service acts as a message router within the Agent Communication System. It receives messages destined for agents, determines the appropriate target based on agent status information obtained from the Server, and forwards the message via RabbitMQ.
 
-## Architecture Overview
+For overall system architecture and setup, see the main [Project README](../../README.md) and the [Getting Started Guide](../../GETTING_STARTED.md).
 
-The broker utilizes **gRPC** for communication with the central server and **RabbitMQ** for message queuing and routing.
+## Core Responsibilities
 
--   **gRPC Communication:**
-    -   **Broker Registration:** Upon startup, the broker registers itself with the central server using the `RegisterBroker` gRPC call, handled by the `ServerManager` class.
-    -   **Agent Status Updates:** The broker subscribes to real-time agent status updates from the server using the `SubscribeToAgentStatus` gRPC stream. These updates are processed by the `BrokerState` to keep the broker's internal agent state current. All gRPC logic is encapsulated in `src/server_manager.py` for maintainability and DRY/SOLID compliance.
--   **RabbitMQ Message Flow:**
-    -   The broker consumes messages from the `broker_input_queue`. These are typically replies from agents or messages needing routing.
-    -   Based on the message details and the agent state maintained by `BrokerState`, the broker determines the target agent.
-    -   The broker publishes the message to the `server_input_queue` with the appropriate `receiver_id` set for the server to handle final delivery.
+*   **gRPC Communication:** Connects to the central Server via gRPC to register itself and subscribe to real-time agent status updates (`SubscribeToAgentStatus`).
+*   **State Management:** Maintains an internal representation of agent availability based on status updates received from the Server.
+*   **Message Routing (RabbitMQ):**
+    *   Consumes messages from `broker_input_queue` (sent by Server or Agents).
+    *   Determines the target agent based on message details and internal state.
+    *   Publishes the message to `server_input_queue` with the `receiver_id` set for the Server to handle final delivery to the agent or frontend.
 
-## Broker Service
+## Architecture & Message Flow
 
-The broker service is responsible for routing messages between agents and the server, maintaining agent state, and integrating with gRPC and RabbitMQ. It is now implemented as a `Broker` class in `src/broker.py`.
+```mermaid
+graph TD
+    subgraph External Connections
+        Broker -- gRPC --> Server(Server: Agent Status)
+        Broker -- AMQP --> RMQ_BrokerIn[(RabbitMQ: broker_input_queue)]
+        Broker -- AMQP --> RMQ_ServerIn[(RabbitMQ: server_input_queue)]
+    end
 
-### Key Features
-- Encapsulates all broker logic and state in a single class (`Broker`).
-- Handles message routing, agent state updates, and gRPC integration.
-- Entry point instantiates and runs the `Broker` class for maintainability and testability.
+    subgraph Internal Components
+        BrokerApp(Broker Main Logic)
+        GRPC_Client(gRPC Client) --> BrokerState
+        RMQ_Handler(RabbitMQ Handler) --> BrokerApp
+        BrokerState(Agent State Cache)
+    end
 
-### Usage
+    BrokerApp -- Uses --> GRPC_Client
+    BrokerApp -- Uses --> RMQ_Handler
+    BrokerApp -- Uses --> BrokerState
 
-To run the broker service:
+    GRPC_Client -- Updates --> BrokerState
+    RMQ_Handler -- Consumes --> RMQ_BrokerIn
+    RMQ_Handler -- Publishes --> RMQ_ServerIn
 
-```bash
-python src/broker.py
+    style BrokerApp fill:#cfc,stroke:#333,stroke-width:2px
+    style GRPC_Client fill:#ccf,stroke:#333,stroke-width:1px
+    style RMQ_Handler fill:#fcc,stroke:#333,stroke-width:1px
+    style BrokerState fill:#ffc,stroke:#333,stroke-width:1px
+    style Server fill:#ccf,stroke:#333,stroke-width:1px
+    style RMQ_BrokerIn fill:#fcc,stroke:#333,stroke-width:1px
+    style RMQ_ServerIn fill:#fcc,stroke:#333,stroke-width:1px
 ```
 
-### Code Structure
-- All global state and functions are now methods or attributes of the `Broker` class.
-- The main execution flow is handled by `Broker.run()`.
+*Diagram: Broker internal components and interactions.*
 
-### Design Notes
-- Follows DRY and SOLID principles for microservices.
-- Avoids unnecessary complexity and repetition.
-- Message queue handler and state manager are injected as class attributes.
+1.  **Startup:** Connects to Server via gRPC, registers, and subscribes to agent status updates.
+2.  **Status Updates:** Receives agent status via gRPC stream and updates internal `BrokerState`.
+3.  **Message Consumption:** Reads messages from `broker_input_queue`.
+4.  **Routing Decision:** Uses `BrokerState` and message metadata to determine the target agent (if applicable).
+5.  **Message Publishing:** Publishes the message (with `receiver_id`) to `server_input_queue` for the Server to handle.
 
----
+## Project Structure (`src/`)
 
-For more details, see the code and comments in `src/broker.py`.
+*   `broker.py`: Main application logic, `Broker` class, entry point.
+*   `config.py`: Environment variable configuration.
+*   `grpc_client.py`: Handles gRPC connection and communication with the Server.
+*   `message_queue_handler.py`: RabbitMQ interaction utilities.
+*   `state.py`: Manages the broker's internal agent state cache (`BrokerState`).
+*   `protos/`: Copied Protobuf definitions.
+*   `generated/`: Generated gRPC code.
 
 ## Prerequisites
 
--   Python (version specified in `pyproject.toml`)
--   RabbitMQ server running
--   gRPC server (central server component) running
--   Poetry for dependency management
--   Generated gRPC code (run `python generate_grpc.py`)
+-   Python 3.13+
+-   Poetry
+-   Running RabbitMQ instance
+-   Running Server instance (for gRPC)
+-   Generated gRPC code (`python generate_grpc.py`)
 
-## Installation
+## Installation & Running
 
-1.  Clone the repository (if you haven't already).
-2.  Navigate to the `broker` directory.
-3.  **Generate gRPC code:**
+1.  **Environment Setup:** Ensure Python, Poetry, and Docker are installed (see [Getting Started Guide](../../GETTING_STARTED.md)).
+2.  **Clone Repository:** If not already done.
+3.  **Navigate to `broker` directory.**
+4.  **Generate gRPC Code:**
     ```bash
     python generate_grpc.py
     ```
-    *(This copies necessary `.proto` files from the server and generates Python gRPC code)*
-4.  Create and activate a virtual environment (recommended):
-    ```bash
-    python -m venv .venv
-    # On Linux/macOS:
-    source .venv/bin/activate
-    # On Windows:
-    .venv\Scripts\activate
-    ```
-5.  Install dependencies using Poetry:
+5.  **Install Dependencies:**
     ```bash
     poetry install
     ```
+6.  **Configure:** Set required environment variables (see `src/config.py`). Create a `.env` file or export them.
+    *   `RABBITMQ_HOST` (Defaults to `localhost`)
+    *   `GRPC_HOST` (Required, no default)
+    *   `GRPC_PORT` (Defaults to `50051`)
+    *   *(Others as needed)*
+7.  **Run:**
+    ```bash
+    poetry run python src/broker.py
+    ```
 
-## Configuration
+## Configuration Details
 
-Configure the broker using environment variables.
+Key environment variables (see `src/config.py` for defaults and all options):
 
--   **`GRPC_HOST` (Required)**: gRPC server host.
--   **`GRPC_PORT` (Required)**: gRPC server port (e.g., `50051`).
--   **`RABBITMQ_HOST` (Required)**: RabbitMQ server host.
--   **`BROKER_ID` (Optional)**: Unique ID for this broker instance. Auto-generated if not provided.
--   **`BROKER_NAME` (Optional)**: Human-readable name for this broker. Defaults to `Broker-{hostname}` if not provided.
+-   `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`
+-   `GRPC_HOST`, `GRPC_PORT`
+-   `LOG_LEVEL` (e.g., `INFO`, `DEBUG`)
 
-Example:
-```bash
-export GRPC_HOST='localhost'
-export GRPC_PORT='50051'
-export RABBITMQ_HOST='localhost'
-export BROKER_NAME='PrimaryBroker'
-```
-
-## Usage
-
-Ensure the required environment variables are set and gRPC code is generated.
-
-Start the broker service:
-```bash
-# Option 1: Running directly with Poetry (for development)
-poetry run python src/broker.py
-
-# Option 2: Using Docker Compose
-docker compose up broker
-
-# Option 3: Using Docker directly
-docker build -f broker/Dockerfile -t community_broker .
-docker run -p 50051:50051 community_broker
-```
-
-## Running with Docker
-
-When running with Docker, you can pass environment variables using the `-e` flag:
-
-```bash
-docker run -p 50051:50051 \
-  -e GRPC_HOST=host.docker.internal \
-  -e GRPC_PORT=50051 \
-  -e RABBITMQ_HOST=host.docker.internal \
-  -e BROKER_NAME=DockerBroker \
-  community_broker
-```
-
-Note: When using Docker, you may need to use `host.docker.internal` instead of `localhost` to connect to services running on the host machine, or ensure proper Docker networking is set up between containers.
-
-## Information Flow Diagram
-
-```mermaid
-sequenceDiagram
-    participant Broker
-    participant gRPC Server
-    participant RabbitMQ
-    participant Agent
-
-    Broker->>gRPC Server: RegisterBroker(broker_id, name)
-    gRPC Server-->>Broker: Registration Confirmation
-    Broker->>gRPC Server: SubscribeToAgentStatus(broker_id)
-    gRPC Server-->>Broker: AgentStatusResponse Stream (updates agent registry)
-
-    Note over Broker, RabbitMQ: Broker connects to RabbitMQ
-    Broker->>RabbitMQ: Declare/Connect Queues (broker_input_queue, agent queues)
-    Note over Broker: Starts consuming broker_input_queue
-
-    Note over Agent, RabbitMQ: Agent sends REPLY message
-    Agent->>RabbitMQ: Publish REPLY to broker_input_queue
-
-    RabbitMQ->>Broker: Consume Message (from broker_input_queue)
-    Broker->>Broker: Determine Target Agent Queue (using agent registry)
-    Broker->>RabbitMQ: Publish Message to agent_queue_{target_agent_id}
-
-    RabbitMQ->>Agent: Deliver Message to Target Agent
-```
-
-## Components
-
--   **`broker.py`**: Main application entry point. Handles initialization, instantiates the `BrokerState`, starts the gRPC client (via `ServerManager`), sets up RabbitMQ connections, and manages the main application lifecycle and message routing logic.
--   **`server_manager.py`**: Handles all gRPC communication for the broker, including registration and agent status updates. This is now the single source of truth for all gRPC logic in the broker, following DRY and SOLID principles.
--   **`state.py`**: Contains the `BrokerState` class, responsible for managing the in-memory state of known agents (online status, names, etc.) based on updates received via gRPC. Provides thread-safe methods to query agent state.
--   **`message_queue_handler.py`**: Manages RabbitMQ connections, consuming messages from `broker_input_queue`, and publishing messages to specific agent queues.
--   **`generated/`**: Directory containing Python code generated from `.proto` files.
--   **`src/protos/`**: Copied `.proto` definitions from the server.
-
-## Message Queue Handling (2025 Update)
-
-The broker now uses a dedicated `MessageQueueHandler` class (see `src/message_queue_handler.py`) for all RabbitMQ operations. This handler:
-- Encapsulates connection, queue declaration, message consumption, and publishing logic.
-- Is instantiated in `broker.py` and used for both consuming from `broker_input_queue` and publishing to `server_input_queue`.
-- Follows the same DRY, SOLID, and microservice-friendly approach as the agent's message queue handler.
-
-**Benefits:**
-- Consistent, maintainable message queue logic across microservices.
-- No direct `pika` usage or ad-hoc consumer setup in `broker.py`.
-- Easier to test, extend, and debug.
-
-**If you previously used direct RabbitMQ code in `broker.py`, update your integrations to use the `MessageQueueHandler` interface.**
-
-## Async Message Handler Support (2025 Update)
-
-The `MessageQueueHandler` now supports async (coroutine) message handlers. If you pass an async function as the message handler, it will be scheduled on the main event loop using `asyncio.run_coroutine_threadsafe`. This is required for correct integration with async broker logic (such as `Broker.handle_incoming_message`).
-
-**Usage Example:**
-
-```python
-# In broker.py
-self.mq_handler = MessageQueueHandler(
-    state_update=..., 
-    message_handler=self.handle_incoming_message,  # can be async
-    event_loop=asyncio.get_event_loop()
-)
-```
-
-This prevents coroutine warnings and ensures async message processing works as expected in threaded consumers.
-
-## Design Notes (2025 Update)
-
-- All gRPC logic is now handled in `src/server_manager.py`. The old `grpc_client.py` is no longer used and can be deleted.
-- This change improves maintainability, reduces repetition, and follows microservices best practices (DRY/SOLID).
-- The codebase is now simpler and easier to extend or debug.
-
-## Shutdown
-
-The broker attempts a graceful shutdown upon receiving SIGINT or SIGTERM signals, closing RabbitMQ and gRPC connections.
+Use a `.env` file in the `broker` directory for local development.
