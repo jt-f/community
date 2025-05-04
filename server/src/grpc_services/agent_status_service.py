@@ -109,7 +109,10 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         agent = request.agent
         agent_id = agent.agent_id
         agent_name = agent.agent_name
-        logger.info(f"Received status update from agent {agent_id} ('{agent_name}')")
+        logger.info(f"""
+        Received status update from agent {agent_id} ('{agent_name}')
+        {request.agent}
+        """)
 
         try:
             # Ensure 'last_seen' is present in the agent info

@@ -108,7 +108,6 @@ class AgentRegistrationServicer(AgentRegistrationServiceServicer):
         # Remove agent from status registry and update status
         if agent_id in state.agent_statuses:
             status = state.agent_statuses[agent_id]
-            status.status = "offline"
             status.last_seen = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             state.update_agent_status(agent_id, status)
             # Broadcast a DEREGISTER_AGENT message to all frontends so the UI removes the agent
