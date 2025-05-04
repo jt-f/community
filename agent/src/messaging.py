@@ -49,7 +49,7 @@ def publish_to_broker_input_queue(rabbitmq_channel: Optional[pika.channel.Channe
         return False
 
 @log_exceptions
-async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel], agent_id: str, message_body: bytes = None, message: Dict[str, Any] = None):
+async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel], agent_id: str, message: Dict[str, Any] = None):
     """
     Process a raw message body or message dictionary, generate a response using the LLM, and publish it.
 
@@ -63,20 +63,10 @@ async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel]
     Returns:
         The dictionary representing the response message, or None if processing failed.
     """
-    # If message_body is provided, decode it to a dictionary
-    if message_body is not None:
-        try:
-            message = json.loads(message_body.decode('utf-8'))
-            logger.info(f"Processing message ID: {message.get('message_id', 'N/A')}")
-        except json.JSONDecodeError:
-            logger.error(f"Failed to decode message JSON: {message_body!r}", exc_info=True)
-            return None  # Cannot process invalid JSON
-        except UnicodeDecodeError:
-            logger.error(f"Failed to decode message body as UTF-8: {message_body!r}", exc_info=True)
-            return None  # Cannot process non-UTF-8
-    elif message is None:
-        logger.error("Neither message_body nor message dictionary provided")
-        return None
+    logger.info(f"""Processing message:
+{message}
+""")
+
 
     prompt = message.get("text_payload", "")
     if not prompt:

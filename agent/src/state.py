@@ -39,10 +39,11 @@ class AgentState:
     def _update_internal_state(self):
         """Internal method to determine the overall agent state based on component statuses."""
         # State Priority (Highest to Lowest): shutting_down > paused > error > initializing > busy > idle
+        logger.info("Updating internal state based on component statuses")
         current_internal = self._state.get("internal_state")
 
         # 1. Preserve critical manual states
-        if current_internal in ["shutting_down", "paused"]:
+        if current_internal in ["shutting_down", "paused", "error"]:
             return False # These states are set explicitly and shouldn't be overridden by component status
 
         # 2. Check for error states in components

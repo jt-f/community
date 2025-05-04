@@ -59,6 +59,8 @@ class Agent:
     @log_exceptions
     async def handle_message_wrapper(self, body: bytes):
         """Asynchronous wrapper to process messages received from the queue."""
+        # Update state to busy
+        self.state.set_internal_state('busy')
         logger.debug(f"Received raw message body (first 100 bytes): {body[:100]}...")
         try:
             message_dict = json.loads(body.decode('utf-8'))
@@ -70,6 +72,9 @@ class Agent:
                 agent_id=self.agent_id,
                 message=message_dict
             )
+            # Update state to idle after processing
+            self.state.set_internal_state('idle')
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode message JSON: {e}", exc_info=True)
             # Consider how to handle undecodable messages (e.g., log, discard, move to dead-letter queue)
@@ -115,19 +120,9 @@ class Agent:
         """Main execution loop for the agent."""
         logger.info(f"Agent '{self.agent_name}' starting run loop.")
         self.state.set_internal_state('starting')
-
         self.setup_signal_handlers()
 
-        # 1. Connect to RabbitMQ
-        logger.info("Connecting to Message Queue...")
-        if not self.mq_handler.connect(queue_name=self.agent_id):
-            logger.critical("Failed to connect to Message Queue. Agent cannot operate.")
-            self.state.set_internal_state('error')
-            await self.cleanup_async() # Attempt cleanup
-            return # Exit if MQ connection fails
-        logger.info("Message Queue connection successful.")
 
-        # 2. Connect to gRPC Server and Register
         logger.info("Connecting to gRPC Server and registering...")
         registered = await self.server_manager.register(self.agent_id, self.agent_name)
         if not registered:
@@ -136,26 +131,25 @@ class Agent:
             await self.cleanup_async() # Attempt cleanup
             return # Exit if registration fails
         logger.info("Agent registered successfully with the server.")
+        await self.server_manager.start_status_updater() 
+        await self.server_manager.start_command_stream()
         self.state.set_registration_status("registered")
-        self.state.set_internal_state('idle') # Move to idle after successful setup
 
-        # 3. Start background tasks (status updates, command stream)
-        await self.server_manager.start_status_updater() # Renamed for clarity
-        await self.server_manager.start_command_stream() # Start listening for commands
+
+        logger.info("Connecting to Message Queue...")
+        if not self.mq_handler.connect(queue_name=self.agent_id):
+            logger.critical("Failed to connect to Message Queue. Agent cannot operate.")
+            self.state.set_internal_state('error')
+            await self.cleanup_async() # Attempt cleanup
+            return # Exit if MQ connection fails
+        logger.info("Message Queue connection successful.")
+
+        self.state.set_internal_state('idle') # Move to idle after successful setup
 
         # 4. Main agent loop
         logger.info("Entering main agent loop.")
         while not self._shutdown_requested:
             try:
-                # Main loop logic (can be expanded later)
-                # For now, it primarily relies on background tasks (MQ consumer, gRPC streams)
-                # We can add periodic checks or tasks here if needed.
-
-                # Example: Check agent health or perform periodic tasks
-                # if datetime.now() - self._last_status_update_time > timedelta(minutes=5):
-                #     logger.info("Performing periodic health check...")
-                #     # Perform checks
-                #     self._last_status_update_time = datetime.now()
 
                 # Update internal state based on component health
                 self.state.update_internal_state_based_on_components()
