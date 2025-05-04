@@ -1,11 +1,12 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 from fastapi.websockets import WebSocket
 
 # Import shared models, config, state, and utils
 from shared_models import MessageType, setup_logging
 import state
+import config # Added for keepalive settings
 from grpc_services import agent_status_service
 import logging
 
@@ -256,3 +257,59 @@ def mark_agent_offline(agent_id: str) -> bool:
     else:
         logger.warning(f"Cannot mark unknown agent {agent_id} as offline.")
     return False
+
+
+async def agent_keepalive_checker():
+    """Periodically checks agent last_seen times and marks inactive agents."""
+    while True:
+        await asyncio.sleep(config.AGENT_KEEPALIVE_INTERVAL_SECONDS) # Check interval first
+        logger.info(f"Checking agent keepalive status...")
+        now = datetime.now(timezone.utc)
+        agents_to_update = []
+        try:
+            # Use items() for safe iteration if state might change elsewhere (though updates should be async safe)
+            current_agent_states = state.agent_states.copy() # Copy for iteration safety
+            for agent_id, agent_state in current_agent_states.items():
+                logger.info(f"Checking agent {agent_id} keepalive status...")
+                try:
+                    last_seen_str = agent_state.last_seen
+                    if not last_seen_str:
+                        # Should not happen if agent is registered, but handle defensively
+                        logger.warning(f"Agent {agent_id} has no last_seen timestamp.")
+                        continue
+
+                    last_seen = datetime.fromisoformat(last_seen_str)
+                    # Ensure timezone awareness for comparison
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=timezone.utc)
+
+                    delta = (now - last_seen).total_seconds()
+
+                    # Check if grace period exceeded AND status is not already 'unknown_status'
+                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and agent_state.metrics.get("internal_state") != "unknown_status":
+                        logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) missed keepalive window ({delta:.1f}s > {config.AGENT_KEEPALIVE_GRACE_SECONDS}s). Marking as unknown_status.")
+                        # Collect agents that need updating
+                        agents_to_update.append((agent_id, agent_state.agent_name))
+                    else:
+                        logger.info(f"Agent {agent_id} is still active (last_seen: {last_seen_str}, delta: {delta:.1f}s)")  
+
+                except ValueError as ve:
+                    logger.error(f"Error parsing last_seen for agent {agent_id} ('{last_seen_str}'): {ve}")
+                except Exception as e:
+                    logger.error(f"Unexpected error in keepalive check loop for agent {agent_id}: {e}", exc_info=True)
+
+            # Perform state updates outside the iteration loop
+            if agents_to_update:
+                logger.info(f"Updating status for {len(agents_to_update)} potentially inactive agents...")
+                # update_agent_metrics is an async function in state.py
+                tasks = [
+                    state.update_agent_metrics(agent_id, agent_name, {"internal_state": "unknown_status"})
+                    for agent_id, agent_name in agents_to_update
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True) # Log errors if update fails
+                for result, (agent_id, _) in zip(results, agents_to_update):
+                     if isinstance(result, Exception):
+                           logger.error(f"Failed to update status for agent {agent_id}: {result}")
+
+        except Exception as e:
+             logger.error(f"Error during agent keepalive check cycle: {e}", exc_info=True)

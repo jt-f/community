@@ -3,6 +3,7 @@ load_dotenv()  # Load .env file early
 
 import os
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 # Third-party imports
@@ -52,6 +53,10 @@ async def lifespan(app: FastAPI):
     message_queue_handler.publish_server_advertisement()
 
     await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None)
+
+    # Start background tasks
+    asyncio.create_task(agent_manager.agent_keepalive_checker())
+    logger.info("Started agent keepalive checker task.")
 
     logger.info("Server startup complete")
 

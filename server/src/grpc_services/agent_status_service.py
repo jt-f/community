@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime
 
 import grpc
 
@@ -108,20 +109,17 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         agent = request.agent
         agent_id = agent.agent_id
         agent_name = agent.agent_name
-
-        # Extract all metrics from the request
-        metrics = dict(agent.metrics)
         logger.info(f"Received status update from agent {agent_id} ('{agent_name}')")
 
         try:
-            # Ensure 'last_seen' is present in the metrics from the agent
-            if 'last_seen' not in metrics:
-                logger.warning(f"Agent {agent_id} sent status update without 'last_seen' metric.")
-                # Optionally, you could reject the update or use a default, but for now, we log and proceed.
-                # If strict enforcement is needed, return an error here.
+            # Ensure 'last_seen' is present in the agent info
+            if not agent.last_seen:
+                logger.warning(f"Agent {agent_id} sent status update without 'last_seen' timestamp.")
+                # Use current time as fallback
+                agent.last_seen = datetime.now().isoformat()
 
-            # Update agent metrics in the central state
-            await state.update_agent_metrics(agent_id, agent_name, metrics)
+
+            await state.update_agent_status(agent_id, agent)
 
             # Broadcast the update to connected frontends/subscribers
             # Use force_full_update=True to ensure consistency after direct update
