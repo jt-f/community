@@ -2,9 +2,9 @@
 
 import logging
 # Import Servicer Implementations
-from ..agent_status_service import AgentStatusServicer # Kept in grpc_services for now
-from ..agent_registration_service import AgentRegistrationServicer
-from ..broker_registration_service import BrokerRegistrationServicer
+from grpc_services.agent_status_service import AgentStatusServicer
+from grpc_services.agent_registration_service import AgentRegistrationServicer
+from grpc_services.broker_registration_service import BrokerRegistrationServicer
 # Import generated add functions
 from generated.agent_status_service_pb2_grpc import add_AgentStatusServiceServicer_to_server
 from generated.agent_registration_service_pb2_grpc import add_AgentRegistrationServiceServicer_to_server
