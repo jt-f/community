@@ -6,6 +6,7 @@ import random
 import string
 import logging
 import sys
+import colorlog
 
 class MessageType(str, Enum):
     """Enumeration of all possible message types in the system."""
@@ -115,9 +116,17 @@ def setup_logging(
 ) -> None: # Doesn't need to return a logger
     """Set up root logging with a consistent format and level.
     Adds a console handler only if one doesn't already exist.
+    Uses colorlog for colored output.
     """
-    log_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    log_formatter = colorlog.ColoredFormatter(
+        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'green',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        }
     )
     root_logger = logging.getLogger() # Get the root logger
     root_logger.setLevel(level) # Set the overall minimum level
@@ -129,7 +138,7 @@ def setup_logging(
     )
 
     if not has_console_handler:
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = colorlog.StreamHandler(sys.stdout) # Use colorlog's StreamHandler
         # Explicitly set the HANDLER's level to match the root logger's level
         # This prevents the handler filtering messages the logger allows
         console_handler.setLevel(level)
@@ -138,9 +147,13 @@ def setup_logging(
         # Optional: Log a message indicating handler was added
         # root_logger.debug(f"Root console handler added with level {logging.getLevelName(level)}")
     else:
-        # Optional: Check if existing handler level is too high
+        # Optional: Check if existing handler level is too high or formatter needs update
         for h in root_logger.handlers:
             if isinstance(h, logging.StreamHandler) and h.stream in (sys.stdout, sys.stderr):
+                # Update formatter to the colored one if it's not already set
+                if not isinstance(h.formatter, colorlog.ColoredFormatter):
+                    h.setFormatter(log_formatter)
+                    root_logger.debug("Updated existing console handler formatter to ColoredFormatter.")
                 if h.level > level:
                     # Log a warning if the existing handler might filter messages
                     root_logger.warning(f"Existing console handler level ({logging.getLevelName(h.level)}) is higher than requested ({logging.getLevelName(level)}). Some logs may not appear on console.")
