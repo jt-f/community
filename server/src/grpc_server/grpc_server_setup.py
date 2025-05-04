@@ -4,7 +4,7 @@ import grpc
 from concurrent import futures
 import logging
 import datetime
-import grpc_handlers.grpc_config as grpc_config
+import grpc_server.grpc_config as grpc_config
 
 # Local imports (assuming config holds keepalive settings)
 import config
@@ -22,10 +22,6 @@ grpc_options = [
     ('grpc.http2.min_ping_interval_without_data_ms', grpc_config.GRPC_MIN_PING_INTERVAL_WITHOUT_DATA_MS),
 ]
 # --- End Keepalive Settings ---
-
-# --- Application-level keepalive settings ---
-AGENT_KEEPALIVE_INTERVAL_SECONDS = config.AGENT_KEEPALIVE_INTERVAL_SECONDS
-AGENT_KEEPALIVE_GRACE_SECONDS = config.AGENT_KEEPALIVE_GRACE_SECONDS
 
 async def agent_keepalive_checker():
     """Periodically checks agent last_seen times and marks inactive agents."""
@@ -52,7 +48,7 @@ async def agent_keepalive_checker():
                     delta = (now - last_seen).total_seconds()
 
                     # Check if grace period exceeded AND status is not already 'unknown_status'
-                    if delta > AGENT_KEEPALIVE_GRACE_SECONDS and agent_state.metrics.get("internal_state") != "unknown_status":
+                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and agent_state.metrics.get("internal_state") != "unknown_status":
                         logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) missed keepalive window ({delta:.1f}s > {AGENT_KEEPALIVE_GRACE_SECONDS}s). Marking as unknown_status.")
                         # Collect agents that need updating
                         agents_to_update.append((agent_id, agent_state.agent_name))

@@ -18,8 +18,8 @@ import services
 import utils
 import message_queue_handler
 import agent_manager
-from grpc_handlers.grpc_server_setup import create_grpc_server
-from grpc_handlers import grpc_config
+from grpc_server.grpc_server_setup import create_grpc_server
+from grpc_server import grpc_config
 import grpc_services.agent_status_service as agent_status_service
 import grpc_services.agent_registration_service as agent_registration_service
 import grpc_services.broker_registration_service as broker_registration_service
