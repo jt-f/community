@@ -7,8 +7,6 @@ import os
 from generated.agent_registration_service_pb2 import (
     AgentRegistrationRequest,
     AgentUnregistrationRequest,
-    CommandResult,
-    HeartbeatRequest,
     ReceiveCommandsRequest
 )
 from generated.agent_registration_service_pb2_grpc import AgentRegistrationServiceStub
@@ -43,7 +41,13 @@ class ServerManager:
     status updates, command streaming, and command results.
     Uses the AgentState object for state updates.
     """
-    def __init__(self, state_updater: Optional[AgentState] = None, command_callback: Optional[Callable] = None):
+
+    def __init__(self, state_updater: AgentState, command_callback: Callable):
+        """Initialize ServerManager.
+        Args:
+            state_updater: The AgentState instance to monitor and report.
+            command_callback: Async function to call when a command is received.
+        """
         self.server_host = agent_config.GRPC_HOST
         self.server_port = agent_config.GRPC_PORT
         self.channel = None
@@ -55,18 +59,62 @@ class ServerManager:
         self._is_registered = False
         self._grpc_connection_state = "disconnected"
         self._killed = False
-        self.status_update_task = None
+        # self.status_update_task = None # Removed: No longer needed
+
+        # Register the handler for state updates
+        self._state_updater.register_listener(self._handle_state_update)
+
+    # --- State Update Handler ---
+    @log_exceptions
+    async def _handle_state_update(self, updated_state: Dict[str, Any]):
+        """Callback triggered by AgentState when the state changes."""
+        logger.info(f"Handling state update notification: {updated_state}")
+
+        # Check if the agent is registered and connection is ready before sending
+        if not self._is_registered or not self.agent_status_stub:
+            logger.debug("Skipping status update: Agent not registered or status stub unavailable.")
+            return
+
+        if not await self.check_grpc_readiness(timeout=1.0, retries=0): # Quick check
+            logger.warning("Skipping status update: gRPC channel not ready.")
+            return
+
+        # Extract necessary info from the state updater
+        # Use get_full_status_for_update to ensure all relevant data is included
+        try:
+            agent_id = self._state_updater.get_agent_id()
+            agent_name = self._state_updater.get_agent_name()
+            full_status = self._state_updater.get_full_status_for_update()
+            last_seen = full_status.get('last_updated') # Use the timestamp from the state
+            metrics = full_status # Pass the full dictionary as metrics
+
+            if not agent_id or not agent_name:
+                logger.warning("Skipping status update: Agent ID or Name not available in state.")
+                return
+
+            logger.info(f"Scheduling status update task for agent {agent_id} based on state change.")
+            # Schedule the update to avoid blocking the listener callback
+            asyncio.create_task(self.send_agent_status_update(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                last_seen=last_seen,
+                metrics=metrics
+            ))
+        except Exception as e:
+            logger.error(f"Error preparing data for state-triggered status update: {e}", exc_info=True)
+
+    # --- gRPC Connection Management ---
 
     def _update_grpc_state(self, new_state: str):
         if self._grpc_connection_state != new_state:
             logger.info("gRPC connection state changed to %s", new_state)
             self._grpc_connection_state = new_state
-            if self._state_updater:
-                self._state_updater.set_grpc_status(new_state)
+            self._state_updater.set_grpc_status(new_state)
 
     def _ensure_connection(self):
         if self.channel is None:
             try:
+                logger.info(f"Attempting to create gRPC channel to {self.server_host}:{self.server_port}")
                 self.channel = grpc.aio.insecure_channel(
                     f"{self.server_host}:{self.server_port}",
                     options=grpc_options
@@ -93,14 +141,17 @@ class ServerManager:
                                  retries: int = agent_config.GRPC_READINESS_CHECK_RETRIES,
                                  retry_delay: float = agent_config.GRPC_READINESS_CHECK_RETRY_DELAY) -> bool:
         if not self._ensure_connection():
+            logger.warning("gRPC readiness check failed: Could not ensure connection.")
             return False
 
+        logger.debug("Starting gRPC readiness check...")
         for attempt in range(retries + 1):
             current_state = self.channel.get_state(try_to_connect=True)
-            logger.debug("gRPC readiness check attempt %d/%d", attempt + 1, retries + 1)
+            logger.debug("gRPC readiness check attempt %d/%d. Current state: %s", attempt + 1, retries + 1, current_state)
 
             if current_state == grpc.ChannelConnectivity.READY:
                 self._update_grpc_state("connected")
+                logger.info("gRPC channel is READY.")
                 return True
 
             if current_state == grpc.ChannelConnectivity.SHUTDOWN:
@@ -127,6 +178,7 @@ class ServerManager:
                 await asyncio.sleep(retry_delay)
 
         logger.error("gRPC readiness check failed after %d attempts", retries + 1)
+        self._update_grpc_state("failed") # Ensure state reflects failure
         return False
 
     def _on_channel_state_change(self, state: grpc.ChannelConnectivity):
@@ -152,6 +204,7 @@ class ServerManager:
         Returns:
             True if registration succeeded
         """
+        logger.info(f"Attempting registration for agent {agent_id} ('{agent_name}')...")
         if not self._ensure_connection():
             logger.error("gRPC connection unavailable for registration")
             return False
@@ -196,6 +249,7 @@ class ServerManager:
         Returns:
             True if registration is successful, False otherwise.
         """
+        logger.info(f"Attempting registration for agent {agent_id} ('{agent_name}')...")
         if not self._ensure_connection():
             logger.error("Cannot register agent: Failed to establish gRPC connection.")
             if self._state_updater:
@@ -259,6 +313,7 @@ class ServerManager:
         Returns:
             True if update succeeded
         """
+        logger.debug(f"Attempting to send status update for agent {agent_id}...")
         if not self.agent_status_stub:
             logger.error("Status service unavailable")
             return False
@@ -286,7 +341,7 @@ class ServerManager:
             )
 
             if response.success:
-                logger.debug("Status update for %s succeeded", agent_id)
+                logger.debug(f"Status update for {agent_id} succeeded")
                 return True
 
             logger.warning("Server rejected status update: %s", response.message)
@@ -299,84 +354,8 @@ class ServerManager:
             logger.error("Status update failed: %s", e)
             return False
 
-    # --- Periodic Status Update Logic (Renamed from Heartbeat) ---
-
-    async def start_status_updater(self):
-        """Starts the status update loop if not already running."""
-        if self.status_update_task and not self.status_update_task.done():
-            logger.warning("Status update task already running.")
-            return
-            
-        if not await self.check_grpc_readiness(timeout=5.0): # Ensure connection before starting
-            logger.error("Cannot start status updater: gRPC channel not ready.")
-            return
-
-        # We have _state_updater instead of state_manager
-        if not self._state_updater:
-            logger.error("Cannot start status updater: Missing state updater.")
-            return
-             
-        logger.info("Starting status update task...")
-        self.status_update_task = asyncio.create_task(self._send_status_update_loop())
-        # Optional: Add done callback for logging/cleanup if task finishes unexpectedly
-        self.status_update_task.add_done_callback(self._status_update_done_callback)
-
-    def _status_update_done_callback(self, task: asyncio.Task):
-        """Callback executed when the status update task finishes."""
-        try:
-            task.result() # Raises exception if task failed
-            logger.info("Status update task finished normally.")
-        except asyncio.CancelledError:
-            logger.info("Status update task was cancelled.")
-        except Exception as e:
-            logger.error(f"Status update task exited with error: {e}", exc_info=True)
-        finally:
-            # Ensure task reference is cleared if it finishes somehow
-            if self.status_update_task is task:
-                 self.status_update_task = None
-
-    async def _send_status_update_loop(self):
-        """Periodically sends status updates using SendAgentStatus RPC."""
-        if not self._state_updater:
-            logger.error("_send_status_update_loop cannot run: Missing state updater.")
-            return
-            
-        # Use the interval defined in agent_config
-        status_update_interval = agent_config.AGENT_STATUS_UPDATE_INTERVAL 
-        
-        logger.info(f"Starting status update loop with interval {status_update_interval}s.")
-
-        while True:
-            try:
-                # Gather necessary info from state updater
-                agent_id = self._state_updater.get_agent_id()
-                agent_name = self._state_updater.get_agent_name()
-                full_status = self._state_updater.get_full_status_for_update()
-                last_seen = full_status.get('last_updated') # Might be None initially
-                metrics = full_status # Pass the full dictionary as metrics
-
-                logger.debug(f"Sending periodic status update for {agent_id}...")
-                # Call the existing method that uses SendAgentStatus RPC
-                success = await self.send_agent_status_update(
-                    agent_id=agent_id,
-                    agent_name=agent_name,
-                    last_seen=last_seen,
-                    metrics=metrics
-                )
-
-                if not success:
-                    logger.warning("Periodic status update failed.")
-                    # Consider adding more robust error handling or backoff here
-
-            except Exception as e:
-                logger.error(f"Error in status update loop: {e}", exc_info=True)
-                # Avoid spamming logs in case of persistent errors
-                await asyncio.sleep(status_update_interval) 
-
-            # Wait for the next interval
-            await asyncio.sleep(status_update_interval)
-
-        logger.info("Status update loop stopped.") # Should ideally not be reached unless task cancelled
+    # --- Periodic Status Update Logic (REMOVED) ---
+    # Methods start_status_updater, _status_update_done_callback, _send_status_update_loop removed
 
     # --- Shutdown Logic ---
 
@@ -384,22 +363,25 @@ class ServerManager:
         """Gracefully shuts down the gRPC connection and stops related tasks."""
         logger.info("Shutting down gRPC Server Manager...")
 
-        # 1. Stop status update task (Renamed)
-        if self.status_update_task and not self.status_update_task.done():
-            logger.info("Cancelling status update task...")
-            self.status_update_task.cancel()
+        # 1. Stop command stream task (if running)
+        if self._command_stream_task and not self._command_stream_task.done():
+            logger.info("Cancelling command stream task...")
+            self._command_stream_task.cancel()
             try:
-                await asyncio.wait_for(self.status_update_task, timeout=grace_period / 2)
-                logger.info("Status update task cancelled.")
+                await asyncio.wait_for(self._command_stream_task, timeout=grace_period / 2)
+                logger.info("Command stream task cancelled.")
             except asyncio.CancelledError:
-                logger.info("Status update task successfully cancelled.")
+                logger.info("Command stream task successfully cancelled.")
             except asyncio.TimeoutError:
-                logger.warning("Status update task did not cancel within grace period.")
+                logger.warning("Command stream task did not cancel within grace period.")
             except Exception as e:
-                logger.error(f"Error waiting for status update task cancellation: {e}")
-        self.status_update_task = None
+                logger.error(f"Error waiting for command stream task cancellation: {e}")
+        self._command_stream_task = None
 
-        # 2. Close gRPC channel
+        # 2. Stop status update task (REMOVED)
+        # No longer needed as status updates are event-driven
+
+        # 3. Close gRPC channel
         if self.channel:
             logger.info("Closing gRPC channel...")
             # Close the channel directly
@@ -418,10 +400,14 @@ class ServerManager:
     @log_exceptions
     async def cleanup(self, agent_id: str, grace_period: float = 5.0):
         """Unregisters the agent and then shuts down the gRPC connection."""
-        logger.info(f"Starting cleanup for agent {agent_id}...")
-        
+
+        # 1. Stop command stream task (if running)
+        if self._command_stream_task and not self._command_stream_task.done():
+            logger.info(f"Starting cleanup for agent {agent_id}...")
+
         # 1. Attempt Unregistration
         if self._is_registered and self.stub:
+            logger.info(f"Checking gRPC readiness for unregistration of agent {agent_id}")
             if await self.check_grpc_readiness(timeout=2.0):
                 try:
                     logger.info(f"Attempting to unregister agent {agent_id}...")
@@ -453,6 +439,7 @@ class ServerManager:
 
     async def start_command_stream(self):
         """Starts listening for commands from the server."""
+        logger.info("Attempting to start command stream...")
         if not self._command_callback:
             logger.error("Cannot start command stream: No command callback provided.")
             return
@@ -471,6 +458,7 @@ class ServerManager:
     async def _command_stream_loop(self):
         """Continuously listens for commands from the server."""
         while True:
+            logger.debug("Command stream loop waiting for command...")
             try:
                 if not self.stub or not self._is_registered:
                     logger.warning("Command stream loop stopping: Not registered or stub not available.")
@@ -482,6 +470,7 @@ class ServerManager:
                         continue
 
                     try:
+                        logger.info(f"Received command {command.command_id} of type {command.type} for agent {self._state_updater.get_agent_id()}")
                         # Convert command to dictionary format
                         command_dict = {
                             "type": command.type,
@@ -498,9 +487,11 @@ class ServerManager:
                     logger.info("Command stream cancelled.")
                     break
                 logger.error(f"gRPC error in command stream: {e.code()} - {e.details()}")
+                logger.info("Waiting 5 seconds before retrying command stream...")
                 await asyncio.sleep(5)  # Wait before retrying
             except Exception as e:
                 logger.error(f"Unexpected error in command stream: {e}", exc_info=True)
+                logger.info("Waiting 5 seconds before retrying command stream after unexpected error...")
                 await asyncio.sleep(5)  # Wait before retrying
 
         logger.info("Command stream loop stopped.")

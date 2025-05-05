@@ -131,7 +131,7 @@ class Agent:
             await self.cleanup_async() # Attempt cleanup
             return # Exit if registration fails
         logger.info("Agent registered successfully with the server.")
-        await self.server_manager.start_status_updater() 
+
         await self.server_manager.start_command_stream()
         self.state.set_registration_status("registered")
 
@@ -152,8 +152,8 @@ class Agent:
             try:
 
                 # Update internal state based on component health
-                self.state.update_internal_state_based_on_components()
-
+                # self.state.update_internal_state_based_on_components()
+                #
                 await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP)
 
             except asyncio.CancelledError:

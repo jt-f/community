@@ -192,6 +192,7 @@ async def broadcast_agent_status_updates(is_full_update=False):
         # Need an instance to call the method
         servicer_instance = AgentStatusServicer()
         response = await servicer_instance._create_status_response(is_full_update=is_full_update)
+        logger.info(f"Created status response for broadcast: {response}")
     except Exception as e:
          logger.error(f"Failed to create status response for broadcast: {e}", exc_info=True)
          return

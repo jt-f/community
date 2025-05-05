@@ -1,8 +1,9 @@
 """Manages the internal state of the agent, providing thread-safe access and updates."""
 import threading
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Callable
 import logging
+import asyncio
 from shared_models import setup_logging
 
 # Configure logging
@@ -16,6 +17,7 @@ class AgentState:
     Provides methods to get and set various state attributes.
     Automatically updates 'last_updated' timestamp on any change.
     Handles internal state logic based on component statuses.
+    Notifies registered listeners of state changes.
     """
     def __init__(self, agent_id: str, agent_name: str):
         self._state = {
@@ -31,6 +33,43 @@ class AgentState:
             "metrics": {}
         }
         self._lock = threading.Lock()
+        self._listeners: List[Callable[[Dict[str, Any]], None]] = [] # List to hold listener callbacks
+
+    def register_listener(self, listener: Callable[[Dict[str, Any]], None]):
+        """Register a callback function to be notified of state changes."""
+        with self._lock:
+            if listener not in self._listeners:
+                self._listeners.append(listener)
+                logger.info(f"Registered listener: {listener.__name__}")
+
+    def unregister_listener(self, listener: Callable[[Dict[str, Any]], None]):
+        """Unregister a callback function."""
+        with self._lock:
+            try:
+                self._listeners.remove(listener)
+                logger.info(f"Unregistered listener: {listener.__name__}")
+            except ValueError:
+                logger.warning(f"Attempted to unregister a non-existent listener: {listener.__name__}")
+
+    async def _notify_listeners(self):
+        """Notify all registered listeners about the state change."""
+        # Get a snapshot of the state to pass to listeners
+        state_snapshot = self.get_full_status_for_update() # Use the method that prepares the update format
+        # Call listeners outside the lock to avoid deadlocks if a listener tries to access state
+        listeners_to_notify = self._listeners[:] # Create a copy to iterate over
+        logger.debug(f"Notifying {len(listeners_to_notify)} listeners of state change.")
+        
+        for listener in listeners_to_notify:
+            try:
+                # Check if the listener is a coroutine function
+                if asyncio.iscoroutinefunction(listener):
+                    # Create a task for async listeners
+                    asyncio.create_task(listener(state_snapshot))
+                else:
+                    # Call sync listeners directly
+                    listener(state_snapshot)
+            except Exception as e:
+                logger.error(f"Error calling state listener {listener.__name__}: {e}", exc_info=True)
 
     def _update_timestamp(self):
         """Internal method to update the last_updated timestamp."""
@@ -87,21 +126,41 @@ class AgentState:
     def set_state(self, key: str, value: Any) -> bool:
         """Set a specific state value. Returns True if the value was changed."""
         changed = False
+        notify = False # Flag to track if listeners should be notified
         with self._lock:
             if key in self._state and self._state[key] != value:
                 self._state[key] = value
                 self._update_timestamp()
                 changed = True
+                notify = True # Mark for notification
                 # Update internal state if a component status changed
                 if key in ["registration_status", "grpc_status", "message_queue_status", "llm_client_status", "last_error"]:
                     internal_changed = self._update_internal_state()
                     changed = changed or internal_changed # Report change if either value or internal state changed
+                    # Notify even if only internal state changed
+                    if internal_changed:
+                        notify = True
             elif key not in self._state:
                  # Allow adding new keys, maybe log a warning?
                  self._state[key] = value
                  self._update_timestamp()
                  changed = True
-        logger.debug("Current agent state: %s", self.get_full_status_for_update())
+                 notify = True # Mark for notification
+
+        # Notify listeners outside the lock if a change occurred
+        if notify:
+            logger.debug(f"State changed for key '{key}'. Notifying listeners.")
+            # Create a new event loop if one doesn't exist
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            # Run the notification in the event loop
+            loop.create_task(self._notify_listeners())
+        else:
+            logger.debug(f"State set for key '{key}', but value unchanged or no listeners to notify.")
+
         return changed
 
     # --- Specific State Setters --- 
@@ -134,6 +193,7 @@ class AgentState:
     def update_metrics(self, new_metrics: Dict[str, Any]) -> bool:
         """Update the metrics dictionary with new values."""
         changed = False
+        notify = False # Flag for notification
         with self._lock:
             # Simple merge, new_metrics overwrite existing keys
             for k, v in new_metrics.items():
@@ -142,6 +202,13 @@ class AgentState:
                     changed = True
             if changed:
                 self._update_timestamp()
+                notify = True # Mark for notification
+
+        # Notify listeners outside the lock if metrics changed
+        if notify:
+            logger.debug("Metrics updated. Notifying listeners.")
+            self._notify_listeners()
+
         return changed
 
     def get_metrics(self) -> Dict[str, Any]:
@@ -175,4 +242,16 @@ class AgentState:
         Returns:
             bool: True if the state was changed, False otherwise
         """
-        return self._update_internal_state()
+        notify = False
+        with self._lock:
+            changed = self._update_internal_state()
+            if changed:
+                self._update_timestamp() # Update timestamp if internal state changed
+                notify = True
+
+        # Notify listeners outside the lock if internal state changed
+        if notify:
+            logger.debug("Internal state updated based on components. Notifying listeners.")
+            self._notify_listeners()
+
+        return changed
