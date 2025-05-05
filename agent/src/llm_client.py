@@ -63,7 +63,6 @@ class LLMClient:
             logger.error("LLMClient is not configured or failed initialization. Cannot generate response.")
             return "Error: LLM Client not available."
 
-        logger.info(f"Generating LLM response for prompt (first 100 chars): {prompt[:100]}...")
         try:
             # Ensure self.client is not None before calling methods
             if self.client:
@@ -76,7 +75,7 @@ class LLMClient:
 
                 if chat_response.choices:
                     response_content = chat_response.choices[0].message.content
-                    logger.info("LLM response received successfully.")
+                    logger.debug("LLM response received successfully.")
                     return response_content
                 else:
                     logger.warning("Mistral API returned no choices in the response.")

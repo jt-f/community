@@ -262,21 +262,31 @@ def mark_agent_offline(agent_id: str) -> bool:
 async def agent_keepalive_checker():
     """Periodically checks agent last_seen times and marks inactive agents."""
     while True:
-        await asyncio.sleep(config.AGENT_KEEPALIVE_INTERVAL_SECONDS) # Check interval first
+        # Check interval first before performing checks
+        await asyncio.sleep(config.AGENT_KEEPALIVE_INTERVAL_SECONDS)
         logger.info(f"Checking agent keepalive status...")
         now = datetime.now(timezone.utc)
-        agents_to_update = []
+        agents_to_mark_unknown = []
+        agents_to_mark_offline = []
+
         try:
             # Use items() for safe iteration if state might change elsewhere (though updates should be async safe)
             current_agent_states = state.agent_states.copy() # Copy for iteration safety
+
             for agent_id, agent_state in current_agent_states.items():
-                logger.info(f"Checking agent {agent_id} keepalive status...")
+                logger.debug(f"Processing keepalive check for agent {agent_id} ({agent_state.agent_name})")
+                current_internal_state = agent_state.metrics.get("internal_state", "initializing")
+
+                # --- Skip agents already marked offline ---
+                if current_internal_state == "offline":
+                    logger.debug(f"Agent {agent_id} is already offline, skipping keepalive check.")
+                    continue
+
                 try:
                     last_seen_str = agent_state.last_seen
                     if not last_seen_str:
-                        # Should not happen if agent is registered, but handle defensively
-                        logger.warning(f"Agent {agent_id} has no last_seen timestamp.")
-                        continue
+                        logger.warning(f"Agent {agent_id} has no last_seen timestamp, cannot perform keepalive check.")
+                        continue # Cannot check if no last_seen
 
                     last_seen = datetime.fromisoformat(last_seen_str)
                     # Ensure timezone awareness for comparison
@@ -284,14 +294,23 @@ async def agent_keepalive_checker():
                         last_seen = last_seen.replace(tzinfo=timezone.utc)
 
                     delta = (now - last_seen).total_seconds()
+                    logger.debug(f"Agent {agent_id} last seen: {last_seen_str}, delta: {delta:.1f}s")
 
-                    # Check if grace period exceeded AND status is not already 'unknown_status'
-                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and agent_state.metrics.get("internal_state") != "unknown_status":
+                    # --- Handle transition from active to unknown_status ---
+                    # Check if grace period exceeded AND status is *not* already 'unknown_status' or 'offline'
+                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and current_internal_state not in ["unknown_status", "offline"]:
                         logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) missed keepalive window ({delta:.1f}s > {config.AGENT_KEEPALIVE_GRACE_SECONDS}s). Marking as unknown_status.")
-                        # Collect agents that need updating
-                        agents_to_update.append((agent_id, agent_state.agent_name))
+                        agents_to_mark_unknown.append((agent_id, agent_state.agent_name))
+
+                    # --- Handle transition from unknown_status to offline ---
+                    # Check if status is unknown_status AND it has exceeded the unknown_offline grace period
+                    elif current_internal_state == "unknown_status" and delta > config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS:
+                         logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) in unknown_status missed the unknown-to-offline window ({delta:.1f}s > {config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS}s). Marking as offline.")
+                         agents_to_mark_offline.append(agent_id)
+
                     else:
-                        logger.info(f"Agent {agent_id} is still active (last_seen: {last_seen_str}, delta: {delta:.1f}s)")  
+                        # Agent is active or in unknown_status but within grace period
+                        logger.debug(f"Agent {agent_id} is within its keepalive window (delta: {delta:.1f}s)")
 
                 except ValueError as ve:
                     logger.error(f"Error parsing last_seen for agent {agent_id} ('{last_seen_str}'): {ve}")
@@ -299,17 +318,29 @@ async def agent_keepalive_checker():
                     logger.error(f"Unexpected error in keepalive check loop for agent {agent_id}: {e}", exc_info=True)
 
             # Perform state updates outside the iteration loop
-            if agents_to_update:
-                logger.info(f"Updating status for {len(agents_to_update)} potentially inactive agents...")
-                # update_agent_metrics is an async function in state.py
+            # Mark agents as unknown_status
+            if agents_to_mark_unknown:
+                logger.info(f"Updating status for {len(agents_to_mark_unknown)} agents to unknown_status...")
                 tasks = [
                     state.update_agent_metrics(agent_id, agent_name, {"internal_state": "unknown_status"})
-                    for agent_id, agent_name in agents_to_update
+                    for agent_id, agent_name in agents_to_mark_unknown
                 ]
-                results = await asyncio.gather(*tasks, return_exceptions=True) # Log errors if update fails
-                for result, (agent_id, _) in zip(results, agents_to_update):
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result, (agent_id, _) in zip(results, agents_to_mark_unknown):
                      if isinstance(result, Exception):
-                           logger.error(f"Failed to update status for agent {agent_id}: {result}")
+                           logger.error(f"Failed to update status for agent {agent_id} to unknown_status: {result}")
+
+            # Mark agents as offline
+            if agents_to_mark_offline:
+                logger.info(f"Marking {len(agents_to_mark_offline)} agents as offline...")
+                # Use the existing mark_agent_offline function which handles broadcasting
+                tasks = [
+                    mark_agent_offline(agent_id)
+                    for agent_id in agents_to_mark_offline
+                ]
+                # Await the tasks, but we don't necessarily need the results unless debugging failures
+                await asyncio.gather(*tasks, return_exceptions=True)
+
 
         except Exception as e:
              logger.error(f"Error during agent keepalive check cycle: {e}", exc_info=True)

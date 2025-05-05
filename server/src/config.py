@@ -42,5 +42,6 @@ ALLOWED_ORIGINS = ["*"]
 
 # --- Application-level Agent Keepalive (used in grpc_server_setup.py) ---
 AGENT_KEEPALIVE_INTERVAL_SECONDS = int(os.getenv('AGENT_KEEPALIVE_INTERVAL_SECONDS', 60)) # How often to check
-AGENT_KEEPALIVE_GRACE_SECONDS = int(os.getenv('AGENT_KEEPALIVE_GRACE_SECONDS', 120))    # Allowed time since last_seen (e.g., 2*interval)
+AGENT_KEEPALIVE_GRACE_SECONDS = int(os.getenv('AGENT_KEEPALIVE_GRACE_SECONDS', 120))    # Allowed time since last_seen before unknown_status
+AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS = int(os.getenv('AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS', 300)) # Allowed time in unknown_status before marking offline
 

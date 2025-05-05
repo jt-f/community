@@ -66,7 +66,7 @@ async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel]
     """
     # Define a temporary formatter for this log block
     processing_message_formatter = colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - Processing message:\n%(message)s',
+        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - Incoming message:\n%(message)s',
         log_colors={
             'DEBUG':    'cyan',
             'INFO':     'purple', 
@@ -80,7 +80,7 @@ async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel]
         # Log the message details without inline ANSI codes
         logger.info(
             f"""Message ID: {message.get('message_id', 'N/A')}
-Text Payload: {message.get('text_payload', 'N/A')}"""
+{message.get('text_payload', 'N/A')}"""
         )
 
     prompt = message.get("text_payload", "")
@@ -109,5 +109,19 @@ Text Payload: {message.get('text_payload', 'N/A')}"""
     else:
         logger.warning("MQ channel not provided, cannot publish response.")
 
+    response_message_formatter = colorlog.ColoredFormatter(
+        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - Response:\n%(message)s',
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'yellow', 
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        }
+    )
+
+    with temporary_formatter(response_message_formatter):
+        logger.info(f"""Message ID: {response_message.get('message_id', 'N/A')}
+{response_message.get('text_payload', 'N/A')}""")
     return response_message
 
