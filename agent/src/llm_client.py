@@ -13,7 +13,6 @@ from state import AgentState
 # Configure logging
 setup_logging()
 logger = logging.getLogger(__name__)
-logger.propagate = False # Prevent duplicate logging if root logger is configured
 
 
 class LLMClient:

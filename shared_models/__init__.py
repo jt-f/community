@@ -4,7 +4,8 @@ from shared_models.shared_models import (
     AgentStatus,
     AgentStatusUpdate,
     ChatMessage,
-    setup_logging
+    setup_logging,
+    temporary_formatter
 )
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     'AgentStatus',
     'AgentStatusUpdate',
     'ChatMessage',
-    'setup_logging'
+    'setup_logging',
+    'temporary_formatter'
 ]

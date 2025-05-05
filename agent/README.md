@@ -108,7 +108,7 @@ graph TD
     ```
 2.  **Run Container:**
     ```bash
-    docker run --rm -it agent
+    docker run --network community_default --env-file ./agent/.env agent
     ```
 6.  **Configure:** Set required environment variables (see `src/config.py`). Create a `.env` file or export them.
     *   `MISTRAL_API_KEY` (Required)
@@ -135,7 +135,7 @@ docker build -f agent/Dockerfile -t agent-service .
 
 **Run the Agent container:**
 ```bash
-docker run --rm \
+docker run --env-file ./agent/.env \
   --env-file agent/.env \
   agent-service
 ```

@@ -7,6 +7,7 @@ import string
 import logging
 import sys
 import colorlog
+import contextlib
 
 class MessageType(str, Enum):
     """Enumeration of all possible message types in the system."""
@@ -111,6 +112,42 @@ class AgentStatusUpdate(BaseModel):
             agents=[AgentStatus(**agent) for agent in data.get("agents", [])]
         )
 
+@contextlib.contextmanager
+def temporary_formatter(new_formatter: logging.Formatter):
+    """
+    Temporarily sets a different formatter for the root logger's console handler.
+
+    Args:
+        new_formatter: The new logging.Formatter instance to use temporarily.
+    """
+    root_logger = logging.getLogger()
+    original_formatter = None
+    console_handler = None
+
+    # Find the console handler
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
+            console_handler = handler
+            original_formatter = console_handler.formatter
+            break # Assume only one console handler
+
+    if console_handler is None:
+        # Handle the case where no console handler is found (e.g., logging not set up with a console handler)
+        # You might want to log a warning or raise an error here, depending on desired behavior.
+        # For now, we'll just just proceed without changing anything.
+        print("Warning: No console stream handler found to change formatter.")
+        yield # Yield immediately if no handler is found
+        return # Exit the context manager
+
+    try:
+        # Set the new formatter
+        console_handler.setFormatter(new_formatter)
+        yield # Code inside the 'with' block will execute here
+    finally:
+        # Restore the original formatter
+        if original_formatter is not None and console_handler is not None:
+            console_handler.setFormatter(original_formatter)
+
 def setup_logging(
     level: int = logging.INFO,
 ) -> None: # Doesn't need to return a logger
@@ -160,5 +197,3 @@ def setup_logging(
                     # Optionally force the level down (use with caution):
                     # h.setLevel(level)
                 break # Assume only one console handler
-
-    # No need to return the logger, modules will use logging.getLogger(__name__)

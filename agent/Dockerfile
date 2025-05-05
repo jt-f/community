@@ -29,7 +29,7 @@ COPY agent/ .
 RUN chmod +x /app/run.sh && chmod +x /app/build_protos.sh
 
 # Set Python path
-ENV PYTHONPATH=/app:/app/src:/app/generated
+ENV PYTHONPATH=/app
 
 # Run the application
 CMD ["./run.sh"]

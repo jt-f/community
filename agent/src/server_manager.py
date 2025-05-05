@@ -22,7 +22,6 @@ import logging
 # Configure logging
 setup_logging() # Call setup_logging without arguments
 logger = logging.getLogger(__name__) # Get logger for this module
-logger.propagate = False
 
 if agent_config.GRPC_DEBUG:
     os.environ["GRPC_VERBOSITY"] = "DEBUG"
@@ -68,7 +67,6 @@ class ServerManager:
     @log_exceptions
     async def _handle_state_update(self, updated_state: Dict[str, Any]):
         """Callback triggered by AgentState when the state changes."""
-        logger.info(f"Handling state update notification: {updated_state}")
 
         # Check if the agent is registered and connection is ready before sending
         if not self._is_registered or not self.agent_status_stub:
@@ -92,7 +90,6 @@ class ServerManager:
                 logger.warning("Skipping status update: Agent ID or Name not available in state.")
                 return
 
-            logger.info(f"Scheduling status update task for agent {agent_id} based on state change.")
             # Schedule the update to avoid blocking the listener callback
             asyncio.create_task(self.send_agent_status_update(
                 agent_id=agent_id,
@@ -107,22 +104,20 @@ class ServerManager:
 
     async def _update_grpc_state(self, new_state: str):
         if self._grpc_connection_state != new_state:
-            logger.info("gRPC connection state changed to %s", new_state)
             self._grpc_connection_state = new_state
             await self._state_manager.set_grpc_status(new_state)
 
     async def _ensure_connection(self):
         if self.channel is None:
             try:
-                logger.info(f"Attempting to create gRPC channel to {self.server_host}:{self.server_port}")
+                logger.info(f"Creating gRPC channel to {self.server_host}:{self.server_port}")
                 self.channel = grpc.aio.insecure_channel(
                     f"{self.server_host}:{self.server_port}",
                     options=grpc_options
                 )
                 self.stub = AgentRegistrationServiceStub(self.channel)
                 self.agent_status_stub = AgentStatusServiceStub(self.channel)
-                logger.info("Created gRPC channel to %s:%s", self.server_host, self.server_port)
-                await self._update_grpc_state("connecting")
+                await self._update_grpc_state("connected")
                 return True
             except Exception as e:
                 logger.error("Failed to create gRPC channel: %s", e)
@@ -151,7 +146,7 @@ class ServerManager:
 
             if current_state == grpc.ChannelConnectivity.READY:
                 await self._update_grpc_state("connected")
-                logger.info("gRPC channel is READY.")
+
                 return True
 
             if current_state == grpc.ChannelConnectivity.SHUTDOWN:
@@ -194,54 +189,6 @@ class ServerManager:
         if state == grpc.ChannelConnectivity.SHUTDOWN:
             await self._cleanup_connection()
 
-    # --- Registration Logic (Original - Keep for reference or remove if fully replaced) ---
-    # async def register(self, agent_id: str, agent_name: str) -> bool:
-    #     """Register agent with central server.
-    #
-    #     Args:
-    #         agent_id: Unique agent identifier
-    #         agent_name: Human-readable agent name
-    #
-    #     Returns:
-    #         True if registration succeeded
-    #     """
-    #     logger.info(f"Attempting registration for agent {agent_id} ('{agent_name}')...")
-    #     if not await self._ensure_connection(): # Added await
-    #         logger.error("gRPC connection unavailable for registration")
-    #         return False
-    #
-    #     try:
-    #         request = AgentRegistrationRequest(
-    #             agent_id=agent_id,
-    #             agent_name=agent_name,
-    #             version=agent_config.AGENT_VERSION
-    #         )
-    #         response = await self.stub.RegisterAgent(request, timeout=10)
-    #
-    #         if response.success:
-    #             self._is_registered = True
-    #             if self._state_manager:
-    #                 await self._state_manager.set_registration_status("registered") # Added await
-    #             return True
-    #
-    #         logger.error("Registration failed: %s", response.message)
-    #         return False
-    #
-    #     except Exception as e:
-    #         logger.error("Registration error: %s", e)
-    #         return False
-
-    # --- Duplicate _update_grpc_state (Remove this) ---
-    # def _update_grpc_state(self, status: str):
-    #     if self._state_manager:
-    #         changed = self._state_manager.set_grpc_status(status) # Needs await
-    #         if changed:
-    #             logger.info(f"Agent gRPC status updated to: {status}")
-    #     else:
-    #         logger.warning("State updater not available, cannot update gRPC status.")
-
-    # --- Registration Logic (Revised) ---
-
     async def register(self, agent_id: str, agent_name: str) -> bool:
         """
         Registers the agent with the central server via gRPC.
@@ -267,6 +214,8 @@ class ServerManager:
                 if self._state_manager:
                     await self._state_manager.set_registration_status("error") # Added await
                 return False
+            else:
+                logger.info("gRPC channel is ready for agent registration.")
 
             # Use the directly imported message class
             request = AgentRegistrationRequest(
@@ -441,7 +390,7 @@ class ServerManager:
 
     async def start_command_stream(self):
         """Starts listening for commands from the server."""
-        logger.info("Attempting to start command stream...")
+
         if not self._command_callback:
             logger.error("Cannot start command stream: No command callback provided.")
             return
@@ -454,11 +403,11 @@ class ServerManager:
             logger.warning("Command stream task already running.")
             return
 
-        logger.info("Starting command stream task...")
         self._command_stream_task = asyncio.create_task(self._command_stream_loop())
 
     async def _command_stream_loop(self):
         """Continuously listens for commands from the server."""
+        logger.info("Starting command stream loop")
         while True:
             logger.debug("Command stream loop waiting for command...")
             try:

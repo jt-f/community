@@ -7,7 +7,8 @@ from typing import Any, Dict, Optional
 import pika
 
 from decorators import log_exceptions
-from shared_models import setup_logging
+from shared_models import setup_logging, temporary_formatter
+import colorlog
 
 # Configure logging
 setup_logging()
@@ -63,10 +64,24 @@ async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel]
     Returns:
         The dictionary representing the response message, or None if processing failed.
     """
-    logger.info(f"""Processing message:
-{message}
-""")
+    # Define a temporary formatter for this log block
+    processing_message_formatter = colorlog.ColoredFormatter(
+        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - Processing message:\n%(message)s',
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'purple', 
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        }
+    )
 
+    with temporary_formatter(processing_message_formatter):
+        # Log the message details without inline ANSI codes
+        logger.info(
+            f"""Message ID: {message.get('message_id', 'N/A')}
+Text Payload: {message.get('text_payload', 'N/A')}"""
+        )
 
     prompt = message.get("text_payload", "")
     if not prompt:
@@ -75,7 +90,7 @@ async def process_message(llm_client, mq_channel: Optional[pika.channel.Channel]
         # For now, let's generate a default response
         llm_response_text = "Received empty message."
     else:
-        llm_response_text = llm_client.generate_response(prompt)
+        llm_response_text = await llm_client.generate_response(prompt)
 
     response_message = {
         "message_id": f"msg_{uuid.uuid4()}",

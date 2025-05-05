@@ -60,11 +60,10 @@ class Agent:
     async def handle_message_wrapper(self, body: bytes):
         """Asynchronous wrapper to process messages received from the queue."""
         # Update state to busy
-        self.state.set_internal_state('busy')
+        await self.state.set_internal_state('busy')
         logger.debug(f"Received raw message body (first 100 bytes): {body[:100]}...")
         try:
             message_dict = json.loads(body.decode('utf-8'))
-            logger.info(f"Processing message ID: {message_dict.get('message_id', 'N/A')}")
             # Call the actual processing function (which might involve LLM)
             await process_message(
                 llm_client=self.llm_client,
@@ -73,7 +72,7 @@ class Agent:
                 message=message_dict
             )
             # Update state to idle after processing
-            self.state.set_internal_state('idle')
+            await self.state.set_internal_state('idle')
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode message JSON: {e}", exc_info=True)
@@ -122,7 +121,6 @@ class Agent:
         await self.state.set_internal_state('starting') # Added await
         self.setup_signal_handlers()
 
-
         logger.info("Connecting to gRPC Server and registering...")
         registered = await self.server_manager.register(self.agent_id, self.agent_name)
         if not registered:
@@ -135,8 +133,6 @@ class Agent:
         await self.server_manager.start_command_stream()
         await self.state.set_registration_status("registered") # Added await
 
-
-        logger.info("Connecting to Message Queue...")
         if not self.mq_handler.connect(queue_name=self.agent_id):
             logger.critical("Failed to connect to Message Queue. Agent cannot operate.")
             await self.state.set_internal_state('error') # Added await
