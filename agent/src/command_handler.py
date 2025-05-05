@@ -30,7 +30,7 @@ class CommandHandler:
             "status": self._handle_status_command,
             # Add more command handlers here as needed
         }
-        logger.info(f"CommandHandler initialized for agent '{self.agent.agent_name}' (ID: {self.agent.agent_id})")
+        logger.debug(f"CommandHandler initialized for agent '{self.agent.agent_name}' (ID: {self.agent.agent_id})")
 
     @log_exceptions
     def handle_server_command(self, command: Dict[str, Any]) -> Dict[str, Any]:

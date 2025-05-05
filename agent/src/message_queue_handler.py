@@ -35,7 +35,7 @@ class MessageQueueHandler:
 
     def __init__(self,
                  message_handler: Callable[[bytes], Any], # Handler takes bytes
-                 state_updater: AgentState,
+                 state_manager: AgentState,
                  loop: asyncio.AbstractEventLoop):
         """Initialize the MessageQueueHandler."""
         self.rabbitmq_host = agent_config.RABBITMQ_HOST
@@ -47,7 +47,7 @@ class MessageQueueHandler:
         self._paused = False
         self._lock = threading.Lock() # Protects access to _paused and potentially channel/connection state
         self._message_handler = message_handler
-        self._state_updater = state_updater
+        self._state_manager = state_manager
         self._event_loop = loop
         self._consumer_thread: Optional[threading.Thread] = None
         self._stop_consuming = threading.Event() # Signal to stop the consumer loop
@@ -86,18 +86,19 @@ class MessageQueueHandler:
             self._consumer_thread = threading.Thread(target=self._consumer_loop, daemon=True)
             self._consumer_thread.start()
             logger.info("RabbitMQ consumer thread started.")
-            self._state_updater.set_message_queue_status('connected')
+            # Schedule the async state update on the event loop
+            asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('connected'), self._event_loop)
             return True
 
         except pika.exceptions.AMQPConnectionError as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}", exc_info=True)
-            self._state_updater.set_message_queue_status('error')
+            asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('error'), self._event_loop)
             self.connection = None # Ensure connection is None on failure
             self.channel = None
             return False
         except Exception as e:
             logger.error(f"An unexpected error occurred during RabbitMQ connection: {e}", exc_info=True)
-            self._state_updater.set_message_queue_status('error')
+            asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('error'), self._event_loop)
             self.connection = None
             self.channel = None
             return False
@@ -117,16 +118,12 @@ class MessageQueueHandler:
 
                 if not self.channel or not self.channel.is_open:
                     logger.warning("Consumer loop: Channel is not open or available. Attempting to reconnect...")
-                    # Implement reconnection logic or rely on higher-level restart
-                    self._state_updater.set_message_queue_status('disconnected') # Or 'reconnecting'
+                    # Schedule state update
+                    asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('disconnected'), self._event_loop)
                     time.sleep(agent_config.RABBITMQ_RETRY_DELAY)
-                    # Attempt to re-establish connection/channel might happen in the main agent loop
                     continue # Skip this iteration
 
-                # Use basic_consume for continuous consumption
-                # This approach is generally preferred over basic_get in a loop
-                # However, basic_get allows for the pause mechanism easily
-                # Let's stick with basic_get for now due to the pause requirement
+                # Use basic_get for the pause mechanism
                 method_frame, header_frame, body = self.channel.basic_get(queue=self.queue_name, auto_ack=False)
 
                 if method_frame:
@@ -134,20 +131,28 @@ class MessageQueueHandler:
                     try:
                         # Schedule the message handler in the main event loop if it's async
                         if asyncio.iscoroutinefunction(self._message_handler):
-                            asyncio.run_coroutine_threadsafe(self._message_handler(body), self._event_loop)
+                            future = asyncio.run_coroutine_threadsafe(self._message_handler(body), self._event_loop)
+                            # Optional: Wait for the future if you need to handle exceptions from the handler here
+                            # future.result() # This would block the consumer thread
                         else:
                             # Execute sync handler directly (careful about blocking)
                             self._message_handler(body)
 
                         # Acknowledge the message *after* successful scheduling/handling
-                        self.channel.basic_ack(delivery_tag=method_frame.delivery_tag)
-                        logger.debug(f"Acknowledged message {method_frame.delivery_tag}")
+                        if self.channel and self.channel.is_open:
+                            self.channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+                            logger.debug(f"Acknowledged message {method_frame.delivery_tag}")
+                        else:
+                             logger.warning(f"Cannot ACK message {method_frame.delivery_tag}, channel closed.")
                     except Exception as e:
                         logger.error(f"Error processing message (delivery tag: {method_frame.delivery_tag}): {e}", exc_info=True)
                         # Negative acknowledgement - requeue=False to avoid poison messages
                         try:
-                            self.channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=False)
-                            logger.warning(f"Negatively acknowledged message {method_frame.delivery_tag}")
+                            if self.channel and self.channel.is_open:
+                                self.channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=False)
+                                logger.warning(f"Negatively acknowledged message {method_frame.delivery_tag}")
+                            else:
+                                logger.warning(f"Cannot NACK message {method_frame.delivery_tag}, channel closed.")
                         except pika.exceptions.AMQPError as nack_err:
                             logger.error(f"Failed to NACK message {method_frame.delivery_tag}: {nack_err}")
                 else:
@@ -156,26 +161,29 @@ class MessageQueueHandler:
 
             except pika.exceptions.ConnectionClosedByBroker:
                 logger.warning("Consumer loop: Connection closed by broker. Stopping consumer.")
-                self._state_updater.set_message_queue_status('disconnected')
+                asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('disconnected'), self._event_loop)
                 break # Exit loop
             except pika.exceptions.AMQPChannelError as ce:
                 logger.error(f"Consumer loop: Channel error: {ce}. Stopping consumer.", exc_info=True)
-                self._state_updater.set_message_queue_status('error')
+                asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('error'), self._event_loop)
                 break # Exit loop
             except pika.exceptions.AMQPConnectionError as conn_err:
                 logger.error(f"Consumer loop: Connection error: {conn_err}. Stopping consumer.", exc_info=True)
-                self._state_updater.set_message_queue_status('error')
+                asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('error'), self._event_loop)
                 break # Exit loop
             except Exception as e:
                 logger.error(f"Consumer loop: Unexpected error: {e}. Stopping consumer.", exc_info=True)
-                self._state_updater.set_message_queue_status('error')
+                asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('error'), self._event_loop)
                 break # Exit loop
 
         logger.info("Consumer thread loop finished.")
         # Ensure channel/connection are cleaned up if loop exits unexpectedly
         self._safe_close_channel()
         self._safe_close_connection()
-        self._state_updater.set_message_queue_status('disconnected')
+
+        # Final state update is now handled by the caller (Agent.cleanup_async)
+        # asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('disconnected'), self._event_loop)
+        logger.info("Disconnected from RabbitMQ.")
 
     def pause_consumer(self):
         """Pause message consumption."""
@@ -183,7 +191,8 @@ class MessageQueueHandler:
             if not self._paused:
                 logger.info("Pausing RabbitMQ consumer.")
                 self._paused = True
-                self._state_updater.set_internal_state('paused') # Reflect pause in agent state
+                # Schedule state update
+                asyncio.run_coroutine_threadsafe(self._state_manager.set_internal_state('paused'), self._event_loop)
 
     def resume_consumer(self):
         """Resume message consumption."""
@@ -217,7 +226,8 @@ class MessageQueueHandler:
     def disconnect(self):
         """Disconnect from RabbitMQ and stop the consumer thread gracefully."""
         logger.info("Disconnecting from RabbitMQ...")
-        self._state_updater.set_message_queue_status('disconnecting')
+        # Schedule state update
+        asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('disconnecting'), self._event_loop)
 
         # Signal the consumer loop to stop
         self._stop_consuming.set()
@@ -236,5 +246,6 @@ class MessageQueueHandler:
         self._safe_close_channel()
         self._safe_close_connection()
 
-        self._state_updater.set_message_queue_status('disconnected')
+        # Final state update is now handled by the caller (Agent.cleanup_async)
+        # asyncio.run_coroutine_threadsafe(self._state_manager.set_message_queue_status('disconnected'), self._event_loop)
         logger.info("Disconnected from RabbitMQ.")

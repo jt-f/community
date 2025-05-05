@@ -2,6 +2,7 @@
 import logging
 import os
 from typing import Any, Dict, Optional
+import asyncio
 
 from mistralai import Mistral
 
@@ -18,37 +19,37 @@ logger.propagate = False # Prevent duplicate logging if root logger is configure
 class LLMClient:
     """Client for interacting with the Mistral LLM API."""
 
-    def __init__(self, state_updater: AgentState):
+    def __init__(self, state_manager: AgentState):
         """Initialize the Mistral client using configuration and update agent state."""
         self.api_key: Optional[str] = agent_config.MISTRAL_API_KEY
         self.model: str = agent_config.MISTRAL_MODEL
         self.client: Optional[Mistral] = None
-        self._state_updater: AgentState = state_updater
+        self._state_manager: AgentState = state_manager
 
         if not self.api_key:
             logger.warning("MISTRAL_API_KEY environment variable not set. LLMClient will be disabled.")
-            self._state_updater.set_llm_client_status('not_configured')
+            asyncio.create_task(self._state_manager.set_llm_client_status('not_configured'))
             return
 
         if not self.model:
             logger.warning("MISTRAL_MODEL not configured. Using default may not be intended. LLMClient will be disabled.")
-            self._state_updater.set_llm_client_status('not_configured')
+            asyncio.create_task(self._state_manager.set_llm_client_status('not_configured'))
             return
 
         try:
             self.client = Mistral(api_key=self.api_key)
             logger.info(f"Mistral client initialized successfully for model: {self.model}")
-            self._state_updater.set_llm_client_status('configured')
+            asyncio.create_task(self._state_manager.set_llm_client_status('configured'))
         except Exception as e:
             logger.error(f"Failed to initialize Mistral client: {e}", exc_info=True)
             self.client = None
-            self._state_updater.set_llm_client_status('error')
+            asyncio.create_task(self._state_manager.set_llm_client_status('error'))
 
     def is_configured(self) -> bool:
         """Check if the client is configured with an API key and model."""
         return bool(self.api_key and self.model and self.client)
 
-    def generate_response(self, prompt: str, **kwargs: Any) -> str:
+    async def generate_response(self, prompt: str, **kwargs: Any) -> str:
         """
         Generate a response from the configured Mistral model.
 
@@ -88,15 +89,15 @@ class LLMClient:
 
         except Exception as e:
             logger.error(f"Error during Mistral API call: {e}", exc_info=True)
-            self._state_updater.set_llm_client_status('error') # Update state on API error
+            await self._state_manager.set_llm_client_status('error') # Update state on API error
             return f"Error: Exception during LLM API call: {e}"
 
-    def cleanup(self):
+    async def cleanup(self):
         """Clean up resources, though the Mistral client might not require explicit cleanup."""
         if self.client:
             logger.info("Cleaning up LLMClient resources.")
             # The Mistral client itself might not have an explicit close/cleanup method.
             # Setting to None helps with garbage collection.
             self.client = None
-            self._state_updater.set_llm_client_status('disconnected') # Or an appropriate final state
+            await self._state_manager.set_llm_client_status('disconnected') # Or an appropriate final state
             logger.info("LLMClient resources released.")

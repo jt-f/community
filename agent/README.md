@@ -73,6 +73,7 @@ graph TD
 
 -   Python 3.13+
 -   Poetry
+-   Docker
 -   Running RabbitMQ instance
 -   Running Server instance (for gRPC)
 -   Mistral AI API Key (for this example implementation)
@@ -80,16 +81,34 @@ graph TD
 
 ## Installation & Running
 
+### Local Development
+
 1.  **Environment Setup:** Ensure Python, Poetry, and Docker are installed (see [Getting Started Guide](../../GETTING_STARTED.md)).
 2.  **Clone Repository:** If not already done.
-3.  **Navigate to `agent` directory.**
+3.  **Navigate to project root:**
+    ```bash
+    cd community
+    ```
 4.  **Generate gRPC Code:**
     ```bash
+    cd agent
     python generate_grpc.py
+    cd ..
     ```
 5.  **Install Dependencies:**
     ```bash
     poetry install
+    ```
+
+### Docker
+
+1.  **Build Docker Image:**
+    ```bash
+    docker build -t agent . -f agent/Dockerfile
+    ```
+2.  **Run Container:**
+    ```bash
+    docker run --rm -it agent
     ```
 6.  **Configure:** Set required environment variables (see `src/config.py`). Create a `.env` file or export them.
     *   `MISTRAL_API_KEY` (Required)
@@ -100,10 +119,30 @@ graph TD
     *   *(Others like `MISTRAL_MODEL`)*
 7.  **Run:** Provide a unique name for the agent instance.
     ```bash
-    poetry run python src/agent.py --name "MyMistralAgent"
+    poetry run python agent/src/agent.py --name "MyMistralAgent"
     # Or if AGENT_NAME is set in .env
-    # poetry run python src/agent.py
+    # poetry run python agent/src/agent.py
     ```
+
+## Running with Docker
+
+The Agent Dockerfile expects the build context to be the project root (`community/`).
+
+**Build the Agent image:**
+```bash
+docker build -f agent/Dockerfile -t agent-service .
+```
+
+**Run the Agent container:**
+```bash
+docker run --rm \
+  --env-file agent/.env \
+  agent-service
+```
+
+- The container will use the `run.sh` script as its entrypoint.
+- Make sure RabbitMQ and the Server are running and accessible from the container.
+- Adjust `--env-file` and other options as needed for your environment.
 
 ## Configuration Details
 

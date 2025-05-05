@@ -25,6 +25,8 @@ AGENT_MAIN_LOOP_SLEEP: float = 5.0
 # Sleep duration in seconds when the message consumer is paused
 AGENT_PAUSED_CONSUMER_SLEEP: float = 0.1
 
+AGENT_VERSION: str = "0.0.1"
+
 # Default gRPC host if not set by environment variable
 GRPC_HOST_DEFAULT: str = "localhost"
 
@@ -120,7 +122,7 @@ def create_agent_metadata(agent_name_override: Optional[str] = None) -> Tuple[st
     """
     agent_id = f"agent_{uuid.uuid4()}"
     agent_name = agent_name_override if agent_name_override else DEFAULT_AGENT_NAME
-    logger.info(f"Generated Agent ID: {agent_id}, Agent Name: {agent_name}")
+    logger.debug(f"Generated Agent ID: {agent_id}, Agent Name: {agent_name}")
     return agent_id, agent_name
 
 # Log loaded configuration for debugging (optional)

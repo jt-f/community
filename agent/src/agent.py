@@ -38,17 +38,17 @@ class Agent:
         self.agent_id, self.agent_name = agent_config.create_agent_metadata(agent_name)
         self.loop = asyncio.get_event_loop()
         self.state = AgentState(self.agent_id, self.agent_name)
-        self.llm_client = LLMClient(state_updater=self.state)
+        self.llm_client = LLMClient(state_manager=self.state)
         # Pass the async message handler wrapper to MQHandler
         self.mq_handler = MessageQueueHandler(
-            state_updater=self.state,
+            state_manager=self.state,
             message_handler=self.handle_message_wrapper, # Pass the async wrapper
             loop=self.loop
         )
         self.command_handler = CommandHandler(self)
         # Pass the async command handler wrapper to ServerManager
         self.server_manager = ServerManager(
-            state_updater=self.state,
+            state_manager=self.state,
             command_callback=self.handle_server_command_wrapper # Pass the async wrapper
         )
         self._last_status_update_time = datetime.now()
@@ -107,19 +107,19 @@ class Agent:
 
     def setup_signal_handlers(self):
         """Set up signal handlers for graceful shutdown."""
-        logger.info("Setting up signal handlers...")
+
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for s in signals:
             self.loop.add_signal_handler(
                 s, lambda s=s: asyncio.create_task(self.shutdown(signal=s))
             )
-        logger.info("Signal handlers set up.")
+        logger.info("Signal handlers added")
 
     @log_exceptions
     async def run(self):
         """Main execution loop for the agent."""
-        logger.info(f"Agent '{self.agent_name}' starting run loop.")
-        self.state.set_internal_state('starting')
+        logger.info(f"Starting run loop.")
+        await self.state.set_internal_state('starting') # Added await
         self.setup_signal_handlers()
 
 
@@ -127,24 +127,24 @@ class Agent:
         registered = await self.server_manager.register(self.agent_id, self.agent_name)
         if not registered:
             logger.critical("Failed to register with the server. Agent will exit.")
-            self.state.set_internal_state('error')
+            await self.state.set_internal_state('error') # Added await
             await self.cleanup_async() # Attempt cleanup
             return # Exit if registration fails
         logger.info("Agent registered successfully with the server.")
 
         await self.server_manager.start_command_stream()
-        self.state.set_registration_status("registered")
+        await self.state.set_registration_status("registered") # Added await
 
 
         logger.info("Connecting to Message Queue...")
         if not self.mq_handler.connect(queue_name=self.agent_id):
             logger.critical("Failed to connect to Message Queue. Agent cannot operate.")
-            self.state.set_internal_state('error')
+            await self.state.set_internal_state('error') # Added await
             await self.cleanup_async() # Attempt cleanup
             return # Exit if MQ connection fails
         logger.info("Message Queue connection successful.")
 
-        self.state.set_internal_state('idle') # Move to idle after successful setup
+        await self.state.set_internal_state('idle') # Added await # Move to idle after successful setup
 
         # 4. Main agent loop
         logger.info("Entering main agent loop.")
@@ -161,8 +161,8 @@ class Agent:
                 break
             except Exception as e:
                 logger.error(f"Unexpected error in main agent loop: {e}", exc_info=True)
-                self.state.set_internal_state('error')
-                self.state.set_last_error(f"Main loop error: {e}")
+                await self.state.set_internal_state('error') # Added await
+                await self.state.set_last_error(f"Main loop error: {e}") # Added await
                 # Consider if agent should attempt recovery or shut down on main loop errors
                 await asyncio.sleep(agent_config.AGENT_MAIN_LOOP_SLEEP * 2) # Longer sleep after error
 
@@ -178,7 +178,7 @@ class Agent:
             return
 
         self._shutdown_requested = True
-        self.state.set_internal_state('shutting_down')
+        await self.state.set_internal_state('shutting_down')
         if signal:
             logger.info(f"Shutdown initiated by signal {signal.name}...")
         else:
@@ -197,7 +197,7 @@ class Agent:
     async def cleanup_async(self):
         """Perform asynchronous cleanup of resources."""
         logger.info("Starting asynchronous cleanup...")
-        self.state.set_internal_state('shutting_down') # Ensure state reflects shutdown
+        await self.state.set_internal_state('shutting_down') # Ensure state reflects shutdown
 
         # 1. Stop server interactions (status updates, command stream, unregister)
         if self.server_manager:
@@ -207,16 +207,16 @@ class Agent:
 
         # 2. Disconnect from Message Queue
         if self.mq_handler:
-            logger.info("Cleaning up Message Queue Handler...")
             # disconnect() is synchronous but manages a thread, call directly
+            logger.info("Cleaning up Message Queue Handler...")
             self.mq_handler.disconnect()
+            # Set final state after disconnect completes
+            await self.state.set_message_queue_status('disconnected')
             logger.info("Message Queue Handler cleanup complete.")
 
         # 3. Cleanup LLM Client (if needed)
         if self.llm_client:
-            logger.info("Cleaning up LLM Client...")
-            self.llm_client.cleanup()
-            logger.info("LLM Client cleanup complete.")
+            await self.llm_client.cleanup()
 
         # 4. Cancel remaining asyncio tasks (important for clean exit)
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -229,7 +229,7 @@ class Agent:
             logger.info("Outstanding asyncio tasks cancelled.")
 
         logger.info("Asynchronous cleanup finished.")
-        self.state.set_internal_state('shutdown') # Final state
+        await self.state.set_internal_state('shutdown') # Final state
 
 
 async def main():

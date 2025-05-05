@@ -510,20 +510,6 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
 
 [[package]]
-name = "shared-models"
-version = "0.1.2"
-description = "Shared models for the community project"
-optional = false
-python-versions = ">=3.13"
-groups = ["main"]
-files = []
-develop = true
-
-[package.source]
-type = "directory"
-url = "../shared_models"
-
-[[package]]
 name = "six"
 version = "1.17.0"
 description = "Python 2 and 3 compatibility utilities"
@@ -577,4 +563,4 @@ typing-extensions = ">=4.12.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13"
-content-hash = "8f52f60a8bcc69e9ce88d93934d75c8a862a5f9fab123636c6fb0fd33073f72b"
+content-hash = "f282cba4c7246054dad61e9f12601be182721382ef5a06f20ba555941751d048"

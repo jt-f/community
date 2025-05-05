@@ -56,3 +56,23 @@ With the prerequisites installed and RabbitMQ running, you can now set up and ru
 *   **[Frontend](./frontend/README.md)**
 
 Follow the instructions in each component's README file for specific installation (dependency installation, gRPC code generation) and running steps.
+
+### Building and Running the Agent Service with Docker
+
+The Agent Dockerfile expects the build context to be the project root (`community/`).
+
+**Build the Agent image:**
+```bash
+docker build -f agent/Dockerfile -t agent .
+```
+
+**Run the Agent container:**
+```bash
+docker run --rm \
+  --env-file agent/.env \
+  agent
+```
+
+- The container will use the `run.sh` script as its entrypoint.
+- Make sure the Server is running and accessible from the container.
+- Adjust `--env-file` and other options as needed for your environment.

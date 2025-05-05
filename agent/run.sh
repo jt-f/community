@@ -6,11 +6,13 @@ set -e
 
 # Build protos first
 echo "Building protos..."
+pwd
+ls -lrt
+
+chmod +x ./build_protos.sh
 ./build_protos.sh
 
-pip install --no-cache-dir -e ../shared_models && \
-    poetry install --no-root
 
 # Run the agent module
 echo "Running agent..."
-poetry run python src/agent.py "$@" 
+python src/agent.py "$@"
