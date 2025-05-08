@@ -10,6 +10,7 @@ __pycache__
 .Python
 .env
 .venv
+.venv/
 env/
 venv/
 ENV/
@@ -60,3 +61,9 @@ Thumbs.db
 *.swo
 *.DS_Store
 Thumbs.db
+
+# Ignore test and docs
+**/tests/
+**/test/
+**/docs/
+*.test.py

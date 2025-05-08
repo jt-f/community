@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Import shared models
 from shared_models import AgentStatus, setup_logging
-
+from decorators import log_function_call # Added import
 
 from grpc_services.agent_status_service import broadcast_agent_status_updates
 import agent_manager
@@ -45,6 +45,7 @@ class AgentState:
             if key not in self.metrics or self.metrics[key] != str_value:
                 self.metrics[key] = str_value
                 changed = True
+                logger.debug(f"Agent {self.agent_id} metric '{key}' set to '{str_value}'") # Log individual change
         
         if changed:
             logger.debug(f"Agent {self.agent_id} metrics updated with {len(metrics)} values")
@@ -97,6 +98,7 @@ rabbitmq_connection: Optional[pika.BlockingConnection] = None
 broker_statuses: Dict[str, Dict] = {}  # broker_id -> status dict
 broker_status_lock = asyncio.Lock()
 
+@log_function_call # Added decorator
 async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     """Update an agent's status, record history, and broadcast updates to all clients."""
     # Save previous status for change detection
@@ -123,14 +125,12 @@ async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     
     # Broadcast updates to all clients
     try:
-        # Broadcast to frontends via WebSockets
-        asyncio.create_task(agent_manager.broadcast_agent_status(is_full_update=True, target_websocket=None))
-        
-        # Broadcast to brokers via gRPC
-        asyncio.create_task(broadcast_agent_status_update(is_full_update=True))
+        # Use the unified broadcast function to send to all subscribers
+        asyncio.create_task(agent_manager.broadcast_agent_status_to_all_subscribers(is_full_update=True))
     except Exception as e:
         logger.error(f"Error broadcasting agent status updates: {e}")
 
+@log_function_call # Added decorator
 async def update_agent_metrics(agent_id: str, agent_name: str, metrics: Dict[str, Any]) -> None:
     """Update an agent's metrics and broadcast the updates."""
     # Create agent state if it doesn't exist
@@ -148,21 +148,21 @@ async def update_agent_metrics(agent_id: str, agent_name: str, metrics: Dict[str
     
     # Broadcast the updates
     try:
-        # Broadcast to frontends via WebSockets
-        asyncio.create_task(agent_manager.broadcast_agent_status(is_full_update=True, target_websocket=None))
-        
-        # Broadcast to brokers via gRPC
-        asyncio.create_task(broadcast_agent_status_update(is_full_update=True))
+        # Use the unified broadcast function to send to all subscribers
+        asyncio.create_task(agent_manager.broadcast_agent_status_to_all_subscribers(is_full_update=True))
     except Exception as e:
         logger.error(f"Error broadcasting agent metrics updates: {e}")
 
+@log_function_call # Added decorator
 async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
-    """Broadcast agent status updates to all subscribers via gRPC."""
-
+    """Broadcast agent status updates to all subscribers.
     
+    This is a legacy function maintained for backward compatibility.
+    It now uses the unified broadcast function from agent_manager.
+    """
     try:
-        # Call the broadcast function from the gRPC service
-        await broadcast_agent_status_updates(is_full_update=is_full_update)
+        # Use the unified broadcast function from agent_manager
+        await agent_manager.broadcast_agent_status_to_all_subscribers(is_full_update=is_full_update)
         logger.debug(f"Broadcast agent status update (full_update={is_full_update})")
     except Exception as e:
         logger.error(f"Error broadcasting agent status update: {e}")

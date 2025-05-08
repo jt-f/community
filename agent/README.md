@@ -160,3 +160,14 @@ Use a `.env` file in the `agent` directory for local development.
 ## gRPC Debug Logging
 
 Set `GRPC_DEBUG=1` environment variable to enable verbose gRPC core logs (useful for debugging keepalives and connections).
+
+## Mock gRPC Server for Testing
+
+A simple mock server is provided for local agent development and testing. It accepts agent registration and status updates, logging all received requests.
+
+**To run the mock server:**
+```bash
+poetry run python -m mock_server.main --port 50051
+```
+- The agent can then be pointed at `localhost:50051` (the default) for registration and status updates.
+- All requests are logged to the console.

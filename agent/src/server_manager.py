@@ -73,6 +73,7 @@ class ServerManager:
             logger.debug("Skipping status update: Agent not registered or status stub unavailable.")
             return
 
+        # Check gRPC readiness without awaiting the boolean result
         if not await self.check_grpc_readiness(timeout=1.0, retries=0): # Quick check
             logger.warning("Skipping status update: gRPC channel not ready.")
             return
@@ -80,11 +81,11 @@ class ServerManager:
         # Extract necessary info from the state updater
         # Use get_full_status_for_update to ensure all relevant data is included
         try:
-            agent_id = await self._state_manager.get_agent_id()
-            agent_name = await self._state_manager.get_agent_name()
-            full_status = await self._state_manager.get_full_status_for_update()
-            last_seen = full_status.get('last_updated') # Use the timestamp from the state
-            metrics = full_status # Pass the full dictionary as metrics
+            # Use the state that triggered this notification
+            agent_id = updated_state.get('agent_id')
+            agent_name = updated_state.get('agent_name')
+            last_seen = updated_state.get('last_updated')
+            metrics = updated_state # Pass the triggering state as metrics
 
             if not agent_id or not agent_name:
                 logger.warning("Skipping status update: Agent ID or Name not available in state.")

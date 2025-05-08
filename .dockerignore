@@ -1,52 +1,108 @@
-# Git
-.git
-.gitignore
-
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-.env
-.venv
-venv/
-ENV/
-
-# Node
-node_modules
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-frontend/dist
-frontend/.vite
-frontend/coverage
-frontend/.next
-frontend/.cache
-frontend/.turbo
-
-# IDE
-.idea
-.vscode
-*.swp
-*.swo
-
-# Docker
-Dockerfile
-docker-compose.yml
-.dockerignore
-
-# Other
-README.md
+# General
+################################################################################
+.DS_Store
+Thumbs.db
 *.log
-*.md
-
-# Exclude unnecessary files
 *.tmp
 *.bak
 *.old
 *.orig
 *.swp
 *.swo
-*.DS_Store
-Thumbs.db
+
+# Version Control
+################################################################################
+.git/
+.gitignore
+
+# IDEs and Editors
+################################################################################
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Python
+################################################################################
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*$py.class
+.Python/
+.env
+.env.*
+!.env.example
+.venv/
+env/
+venv/
+ENV/
+pip-wheel-metadata/
+.python-version
+*.egg-info/
+dist/
+build/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# Node.js / Frontend
+################################################################################
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/.next/
+frontend/.cache/
+frontend/.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Project-specific large directories not needed for backend Docker builds
+################################################################################
+# frontend/
+.cursor/
+.github/
+.trae/
+logs/
+rabbitmq.conf
+
+# Documentation and Tests (globally)
+# These are generally not needed in the final image's context.
+# If a specific README or test file IS needed by a COPY command, an explicit
+# negation like `!path/to/needed/file.md` would be required if a broader
+# pattern (e.g., `**/docs/`) would otherwise exclude it.
+################################################################################
+**/docs/
+**/tests/
+**/test/
+**/*.test.py
+**/*.spec.py
+
+# Allow specific important files at the root or service levels
+################################################################################
+!README.md
+!agent/README.md
+!broker/README.md
+!server/README.md
+!shared_models/README.md
+!shared/README.md
+
+!compose.yaml
+# !docker-compose.yml # Uncomment if you use this file name
+
+# The .dockerignore file itself is always processed by Docker
+# !.dockerignore
+
+# IMPORTANT:
+# The patterns above are mostly for *ignoring* files.
+# Files and directories specified in your Dockerfiles' COPY commands
+# (e.g., `agent/src/`, `shared_models/`, `server/pyproject.toml`)
+# should generally NOT match these ignore patterns.
+# If they do (e.g., a needed file ends in .log), you must add an
+# explicit negation rule (e.g., `!server/src/important.log`).

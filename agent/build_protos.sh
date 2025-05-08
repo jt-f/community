@@ -11,11 +11,11 @@ cd "$SCRIPT_DIR"
 mkdir -p src/generated
 
 # Generate Python gRPC files
-python -m grpc_tools.protoc \
-    -I/app/shared/protos \
+poetry run python -m grpc_tools.protoc \
+    -Ishared/protos \
     --python_out=src/generated \
     --grpc_python_out=src/generated \
-    /app/shared/protos/*.proto
+    shared/protos/*.proto
 
 # Fix imports in generated files
 for file in src/generated/*.py; do

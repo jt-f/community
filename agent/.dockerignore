@@ -5,7 +5,9 @@ __pycache__/
 *.pyd
 .Python
 .env
+.env.*
 .venv
+.venv/
 venv/
 ENV/
 
@@ -38,3 +40,9 @@ README.md
 # Ignore OS generated files
 .DS_Store
 Thumbs.db
+
+# Ignore test and docs
+**/tests/
+**/test/
+**/docs/
+*.test.py

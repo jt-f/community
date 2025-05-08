@@ -1,5 +1,5 @@
 #!/bin/bash
-source ~/.bashrc
+# source ~/.bashrc
 
 # Exit on error
 set -e
@@ -9,7 +9,7 @@ echo "Building protos..."
 pwd
 ls -lrt
 
-chmod +x ./build_protos.sh
+# chmod +x ./build_protos.sh
 ./build_protos.sh
 
 

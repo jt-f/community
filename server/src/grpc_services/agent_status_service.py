@@ -16,6 +16,7 @@ from generated.agent_status_service_pb2_grpc import (AgentStatusServiceServicer,
 
 # Import shared modules
 from shared_models import setup_logging
+from decorators import log_function_call
 import state
 import agent_manager # Import moved here for clarity
 
@@ -31,6 +32,7 @@ subscription_lock = asyncio.Lock()
 class AgentStatusServicer(AgentStatusServiceServicer):
     """Implementation of the AgentStatusService."""
 
+    @log_function_call
     async def SubscribeToAgentStatus(self, request, context):
         """
         Stream agent status updates to a subscriber (e.g., a broker).
@@ -39,7 +41,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         It sends an initial full update and then subsequent partial or full updates.
         """
         broker_id = request.broker_id
-        logger.info(f"Broker {broker_id} subscribed to agent status updates")
+        logger.debug(f"Broker {broker_id} subscribed to agent status updates")
         
         # Add this subscriber to active subscribers with its context
         subscriber_id = id(context)
@@ -59,7 +61,8 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         
         try:
             # Send initial full status update
-            yield await self._create_status_response(is_full_update=True)
+            initial_response = await self._create_status_response(is_full_update=True)
+            await context.write(initial_response)
             
             # Process updates from the queue while context is active
             while subscriber_contexts.get(subscriber_id, {}).get("active", False):
@@ -68,7 +71,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
                     response = await asyncio.wait_for(queue.get(), timeout=5.0)
                     # Check if the context is still valid before yielding
                     if not context.cancelled():
-                        yield response
+                        await context.write(response)
                     else:
                         logger.debug(f"Context cancelled for broker {broker_id}, stopping stream")
                         break
@@ -85,8 +88,9 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         finally:
             # Remove this subscriber when done
             await self._cleanup_subscriber(subscriber_id)
-            logger.info(f"Broker {broker_id} unsubscribed from agent status updates")
+            logger.debug(f"Broker {broker_id} unsubscribed from agent status updates")
     
+    @log_function_call
     async def GetAgentStatus(self, request, context):
         """
         Get a one-time full agent status update.
@@ -94,11 +98,12 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         This is a unary RPC that returns the current status of all known agents.
         """
         broker_id = request.broker_id
-        logger.info(f"Broker {broker_id} requested a one-time agent status update")
+        logger.debug(f"Broker {broker_id} requested a one-time agent status update")
         
         # Simply return the current status
         return await self._create_status_response(is_full_update=True)
     
+    @log_function_call
     async def SendAgentStatus(self, request, context):
         """
         Receive an agent-initiated status update.
@@ -109,11 +114,11 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         agent = request.agent
         agent_id = agent.agent_id
         agent_name = agent.agent_name
-        logger.info(f"""
+        logger.debug(f"""
         Received status update from agent {agent_id} ('{agent_name}')
-        {request.agent}
         """)
-
+        logger.debug("Print agent metrics:")
+        print_agent_metrics(agent)
         try:
             # Ensure 'last_seen' is present in the agent info
             if not agent.last_seen:
@@ -122,17 +127,20 @@ class AgentStatusServicer(AgentStatusServiceServicer):
                 agent.last_seen = datetime.now().isoformat()
 
 
-            await state.update_agent_status(agent_id, agent)
+            # Convert protobuf ScalarMapContainer to a Python dict for metrics
+            metrics_dict = dict(agent.metrics)
+            await agent_manager.update_agent_status(agent_id, agent_name, metrics_dict)
 
             # Broadcast the update to connected frontends/subscribers
             # Use force_full_update=True to ensure consistency after direct update
-            asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+            # asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
         except Exception as e:
             logger.error(f"Failed to process agent status update from {agent_id}: {e}", exc_info=True)
             return AgentStatusUpdateResponse(success=False, message=f"Error processing update: {e}")
 
         return AgentStatusUpdateResponse(success=True, message="Status update received")
 
+    @log_function_call
     async def _create_status_response(self, is_full_update=False):
         """Create an AgentStatusResponse message from the current agent state."""
         response = AgentStatusResponse()
@@ -157,6 +165,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         
         return response
 
+    @log_function_call
     def _handle_context_done(self, subscriber_id):
         """Callback function invoked when a subscriber's gRPC context is done (cancelled/closed)."""
         subscriber_info = subscriber_contexts.get(subscriber_id)
@@ -165,15 +174,27 @@ class AgentStatusServicer(AgentStatusServiceServicer):
             broker_id = subscriber_info.get("broker_id", "unknown")
             logger.debug(f"Marked subscriber for broker {broker_id} as inactive due to context completion")
 
+    @log_function_call
     async def _cleanup_subscriber(self, subscriber_id):
         """Remove a subscriber's context and queue from the active subscribers list."""
         async with subscription_lock:
             if subscriber_id in subscriber_contexts:
                 broker_id = subscriber_contexts[subscriber_id].get("broker_id", "unknown")
-                logger.info(f"Cleaning up subscriber for broker {broker_id}")
+                logger.debug(f"Cleaning up subscriber for broker {broker_id}")
                 del subscriber_contexts[subscriber_id]
 
 
+@log_function_call
+def print_agent_metrics(agent_info: AgentInfo):
+    """Prints the metrics from an AgentInfo protobuf object."""
+    logger.debug(f"Metrics for Agent ID: {agent_info.agent_id}")
+    if agent_info.metrics:
+        for key, value in agent_info.metrics.items():
+            logger.debug(f"  {key}: {value}")
+    else:
+        logger.debug("  No metrics available.")
+
+@log_function_call
 async def broadcast_agent_status_updates(is_full_update=False):
     """
     Broadcast the current agent status to all active subscribers.
@@ -185,14 +206,18 @@ async def broadcast_agent_status_updates(is_full_update=False):
     if subscriber_count == 0:
         return
     
-    logger.info(f"Broadcasting agent status updates to {subscriber_count} subscribers (is_full_update={is_full_update})")
+    logger.debug(f"Broadcasting agent status updates to {subscriber_count} subscribers (is_full_update={is_full_update})")
     
     # Create a status response just once for all subscribers
     try:
         # Need an instance to call the method
         servicer_instance = AgentStatusServicer()
         response = await servicer_instance._create_status_response(is_full_update=is_full_update)
-        logger.info(f"Created status response for broadcast: {response}")
+        logger.info(f"Created status response for broadcast")
+        for a in response.agents:
+            logger.info("Broadcast agent metrics:")
+            print_agent_metrics(a)
+
     except Exception as e:
          logger.error(f"Failed to create status response for broadcast: {e}", exc_info=True)
          return
@@ -214,7 +239,10 @@ async def broadcast_agent_status_updates(is_full_update=False):
                 if queue:
                     try:
                         # Use put_nowait to avoid blocking
-                        if queue.qsize() < 10:  # Limit queue size to prevent memory issues
+                        if queue.qsize() < 10:
+                            for a in response.agents:
+                                logger.info("Broadcast agent metrics:")
+                                print_agent_metrics(a)  # Limit queue size to prevent memory issues
                             queue.put_nowait(response)
                             logger.debug(f"Added status update to broker {broker_id}'s queue")
                         else:
@@ -237,6 +265,7 @@ async def broadcast_agent_status_updates(is_full_update=False):
                 subscriber_contexts.pop(subscriber_id, None)
 
 
+@log_function_call
 def start_agent_status_service(server):
     """Add the AgentStatusServiceServicer to the given gRPC server."""
     logger.info("Adding agent status service to gRPC server")

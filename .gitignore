@@ -193,6 +193,7 @@ src/__pycache__/llm_interface.cpython-39.pyc
 
 .env
 .env.api
+.env.mock
 
 # Generated gRPC files
 shared/generated/

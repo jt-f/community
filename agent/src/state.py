@@ -51,18 +51,17 @@ class AgentState:
         except ValueError:
             logger.warning(f"Attempted to unregister a non-existent listener: {listener.__name__}")
 
-    async def _notify_listeners(self):
+    async def _notify_listeners(self,state_snapshot: dict[str, Any]):
         """Notify all registered listeners about the state change."""
         # Get a snapshot of the state to pass to listeners
-        state_snapshot = await self.get_full_status_for_update() # Use the method that prepares the update format
-
+        logger.info(f"Notifying listeners of state change: {state_snapshot}")
 
         listeners_to_notify = self._listeners[:] 
-        logger.debug(f"Notifying {len(listeners_to_notify)} listeners of state change.")
         
         tasks = []
         for listener in listeners_to_notify:
             try:
+                logger.info(f"Notifying listener: {listener.__name__}")
                 # Check if the listener is a coroutine function
                 if asyncio.iscoroutinefunction(listener):
                     # Schedule coroutine listeners
@@ -72,7 +71,7 @@ class AgentState:
                     listener(state_snapshot)
             except Exception as e:
                 logger.error(f"Error scheduling/calling state listener {listener.__name__}: {e}", exc_info=True)
-        
+
         # Wait for all scheduled async listeners to complete (optional, depends on requirements)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -155,10 +154,13 @@ class AgentState:
                 # Notify even if only internal state changed
                 if internal_changed:
                     notify = True
+        logger.info(f"Notify={notify}")
 
         if notify:
             # Schedule the notification task
-            asyncio.create_task(self._notify_listeners())
+            state_snapshot = await self.get_full_status_for_update() # Use the method that prepares the update format
+
+            asyncio.create_task(self._notify_listeners(state_snapshot))
 
 
         return changed or internal_changed # Return True if either the value or internal state changed
@@ -228,6 +230,7 @@ class AgentState:
 
         if notify:
             logger.debug("Internal state updated based on components. Notifying listeners.")
-            asyncio.create_task(self._notify_listeners())
+            state_snapshot = await self.get_full_status_for_update() # Use the method that prepares the update format
+            asyncio.create_task(self._notify_listeners(state_snapshot))
 
         return changed

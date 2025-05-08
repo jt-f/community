@@ -28,6 +28,19 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+      # Enable BuildKit features
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+      # Enable BuildKit cache mounts
+      # For local development, type=local is used.
+      # For CI/CD, consider adding registry-based caching for faster builds:
+      # cache_from:
+      #   - type=registry,ref=your-registry/server-cache
+      #   - type=local,src=/tmp/docker-cache/server
+      # cache_to:
+      #   - type=registry,ref=your-registry/server-cache,mode=max
+      cache_from:
+        - type=local,src=/tmp/docker-cache/server
     ports:
       - "8765:8765"  # WebSocket
       - "50051:50051" # gRPC
@@ -60,6 +73,19 @@ services:
     build:
       context: .
       dockerfile: broker/Dockerfile
+      # Enable BuildKit features
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+      # Enable BuildKit cache mounts
+      # For local development, type=local is used.
+      # For CI/CD, consider adding registry-based caching for faster builds:
+      # cache_from:
+      #   - type=registry,ref=your-registry/broker-cache
+      #   - type=local,src=/tmp/docker-cache/broker
+      # cache_to:
+      #   - type=registry,ref=your-registry/broker-cache,mode=max
+      cache_from:
+        - type=local,src=/tmp/docker-cache/broker
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
@@ -78,6 +104,19 @@ services:
     build: 
       context: .
       dockerfile: frontend/Dockerfile
+      # Enable BuildKit features
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+      # Enable BuildKit cache mounts
+      # For local development, type=local is used.
+      # For CI/CD, consider adding registry-based caching for faster builds:
+      # cache_from:
+      #   - type=registry,ref=your-registry/frontend-cache
+      #   - type=local,src=/tmp/docker-cache/frontend
+      # cache_to:
+      #   - type=registry,ref=your-registry/frontend-cache,mode=max
+      cache_from:
+        - type=local,src=/tmp/docker-cache/frontend
     ports:
       - "5173:5173"
     environment:

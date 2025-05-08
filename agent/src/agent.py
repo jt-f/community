@@ -61,7 +61,7 @@ class Agent:
         """Asynchronous wrapper to process messages received from the queue."""
         # Update state to busy
         await self.state.set_internal_state('busy')
-        logger.debug(f"Received raw message body (first 100 bytes): {body[:100]}...")
+
         try:
             message_dict = json.loads(body.decode('utf-8'))
             # Call the actual processing function (which might involve LLM)

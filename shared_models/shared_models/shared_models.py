@@ -8,6 +8,7 @@ import logging
 import sys
 import colorlog
 import contextlib
+import os
 
 class MessageType(str, Enum):
     """Enumeration of all possible message types in the system."""
@@ -156,13 +157,13 @@ def setup_logging(
     Uses colorlog for colored output.
     """
     log_formatter = colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        '%(log_color)s%(asctime)s - %(name)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s',
         log_colors={
-            'DEBUG':    'cyan',
-            'INFO':     'green',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white',
+            'DEBUG':    'bold_cyan',
+            'INFO':     'bold_green',
+            'WARNING':  'bold_yellow',
+            'ERROR':    'bold_red',
+            'CRITICAL': 'bold_red,bg_white', # CRITICAL is already very visible
         }
     )
     root_logger = logging.getLogger() # Get the root logger
@@ -176,24 +177,54 @@ def setup_logging(
 
     if not has_console_handler:
         console_handler = colorlog.StreamHandler(sys.stdout) # Use colorlog's StreamHandler
-        # Explicitly set the HANDLER's level to match the root logger's level
-        # This prevents the handler filtering messages the logger allows
         console_handler.setLevel(level)
         console_handler.setFormatter(log_formatter)
         root_logger.addHandler(console_handler)
-        # Optional: Log a message indicating handler was added
-        # root_logger.debug(f"Root console handler added with level {logging.getLevelName(level)}")
     else:
-        # Optional: Check if existing handler level is too high or formatter needs update
         for h in root_logger.handlers:
             if isinstance(h, logging.StreamHandler) and h.stream in (sys.stdout, sys.stderr):
-                # Update formatter to the colored one if it's not already set
                 if not isinstance(h.formatter, colorlog.ColoredFormatter):
                     h.setFormatter(log_formatter)
                     root_logger.debug("Updated existing console handler formatter to ColoredFormatter.")
                 if h.level > level:
-                    # Log a warning if the existing handler might filter messages
                     root_logger.warning(f"Existing console handler level ({logging.getLevelName(h.level)}) is higher than requested ({logging.getLevelName(level)}). Some logs may not appear on console.")
-                    # Optionally force the level down (use with caution):
-                    # h.setLevel(level)
-                break # Assume only one console handler
+                break
+
+    # Add FileHandler for services that define LOG_FILE
+    log_file_path = os.getenv('LOG_FILE')
+    if log_file_path:
+        # Ensure the directory for the log file exists
+        log_dir = os.path.dirname(log_file_path)
+        if log_dir and not os.path.exists(log_dir):
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                root_logger.info(f"Created log directory: {log_dir}")
+            except OSError as e:
+                root_logger.error(f"Failed to create log directory {log_dir}: {e}")
+                # Fallback or skip file logging if directory creation fails
+                log_file_path = None # Prevent trying to use the path
+
+        if log_file_path:
+            # Check if a FileHandler for the same path already exists
+            has_file_handler_for_path = any(
+                isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(log_file_path)
+                for h in root_logger.handlers
+            )
+            if not has_file_handler_for_path:
+                try:
+                    file_handler = logging.FileHandler(log_file_path, mode='a') # Append mode
+                    file_handler.setLevel(level) # Set level for file handler
+                    # Use a simpler formatter for file logs, or the same colored one if preferred
+                    file_log_formatter = logging.Formatter(
+                        '%(asctime)s - %(name)s - %(filename)s:%(lineno)d - %(levelname)s - %(message)s'
+                    )
+                    file_handler.setFormatter(file_log_formatter)
+                    root_logger.addHandler(file_handler)
+                    root_logger.info(f"Added FileHandler for {log_file_path} with level {logging.getLevelName(level)}")
+                except Exception as e:
+                    # Log to console if file handler setup fails
+                    root_logger.error(f"Failed to set up FileHandler for {log_file_path}: {e}")
+            else:
+                root_logger.debug(f"FileHandler for {log_file_path} already exists.")
+    else:
+        root_logger.debug("LOG_FILE environment variable not set. Skipping file logging configuration.")

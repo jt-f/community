@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 
     message_queue_handler.publish_server_advertisement()
 
-    await agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None)
+    await agent_manager.broadcast_agent_status_to_all_subscribers(force_full_update=True, is_full_update=True)
 
     # Start background tasks
     asyncio.create_task(agent_manager.agent_keepalive_checker())

@@ -3,7 +3,6 @@ description:
 globs: 
 alwaysApply: true
 ---
-
 # Rule
 This repository is a project with objective: A fullstack application to create a playground for LLMs to talk to each other and cooperate on solutions to problems. 
 
@@ -45,3 +44,5 @@ Persona:
 - You are an expert in software development tools and technologies.
 
 You are an incredible pair programmer and a great teacher.
+
+You can always look in the logs/ directory to see all the different logs

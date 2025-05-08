@@ -7,6 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 # Import shared models, config, state, and utils
 from shared_models import MessageType, ResponseStatus, ChatMessage, setup_logging
+from decorators import log_function_call
 import state
 import message_queue_handler
 import agent_manager
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__) # Get logger for this module
 # Store client names
 client_names: Dict[str, str] = {}
 
+@log_function_call
 async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict:
     """Handle frontend registration."""
     frontend_name = message.get("frontend_name")
@@ -52,6 +54,7 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
         "message": "Frontend registered successfully"
     }
 
+@log_function_call
 async def _handle_chat_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle standard chat, reply, and system messages."""
     message_type = message_data.get("message_type", "UNKNOWN")
@@ -91,10 +94,12 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
         except Exception as e:
             logger.error(f"Failed to send broker publish error back to client {client_id}: {e}")
 
+@log_function_call
 async def _handle_client_disconnected_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle (unexpected) client disconnected messages."""
     logger.warning(f"Received unexpected CLIENT_DISCONNECTED message from {client_id}. Ignoring.")
 
+@log_function_call
 async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle unrecognized message types."""
     message_type = message_data.get("message_type", "UNKNOWN")
@@ -110,6 +115,7 @@ async def _handle_unknown_message(websocket: WebSocket, client_id: str, message_
     except Exception as e:
         logger.error(f"Failed to send unknown message type error back to client {client_id}: {e}")
 
+@log_function_call
 async def _handle_request_agent_status(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle REQUEST_AGENT_STATUS message from frontend clients."""
     connection_type = getattr(websocket, "connection_type", "unknown")
@@ -129,6 +135,7 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
     
     logger.info(f"Agent status update sent to requesting frontend {client_id}")
 
+@log_function_call
 async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command_type, message_type):
     """Send a command (pause/resume/shutdown) to one or more agents and send an ack to the frontend."""
     from agent_registration_service import send_command_to_agent
@@ -148,17 +155,20 @@ async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command
     except Exception as e:
         logger.error(f"Failed to send {message_type} ack to client {client_id}: {e}")
 
+@log_function_call
 async def _handle_pause_all_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle PAUSE_ALL_AGENTS control message from frontend."""
     # Select all agent_ids (no is_online check, as that field is removed)
     agent_ids = list(state.agent_statuses.keys())
     await _send_agent_command_to_agents(agent_ids, websocket, client_id, "pause", MessageType.PAUSE_ALL_AGENTS)
 
+@log_function_call
 async def _handle_RESUME_All_agents(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle RESUME_ALL_AGENTS control message from frontend."""
     agent_ids = list(state.agent_statuses.keys())
     await _send_agent_command_to_agents(agent_ids, websocket, client_id, "resume", MessageType.RESUME_ALL_AGENTS)
 
+@log_function_call
 async def _handle_pause_agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle PAUSE_AGENT control message for a single agent from frontend."""
     agent_id = message_data.get('agent_id')
@@ -167,6 +177,7 @@ async def _handle_pause_agent(websocket: WebSocket, client_id: str, message_data
         return
     await _send_agent_command_to_agents([agent_id], websocket, client_id, "pause", MessageType.PAUSE_AGENT)
 
+@log_function_call
 async def _handle_RESUME_Agent(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):
     """Handle RESUME_AGENT control message for a single agent from frontend."""
     agent_id = message_data.get('agent_id')
@@ -175,11 +186,13 @@ async def _handle_RESUME_Agent(websocket: WebSocket, client_id: str, message_dat
         return
     await _send_agent_command_to_agents([agent_id], websocket, client_id, "resume", MessageType.RESUME_AGENT)
 
+@log_function_call
 async def _handle_deregister_all_agents(websocket: WebSocket, client_id: str, message_data: dict):
     """Handle DEREGISTER_ALL_AGENTS control message from frontend."""
     agent_ids = list(state.agent_statuses.keys())
     await _send_agent_command_to_agents(agent_ids, websocket, client_id, "shutdown", MessageType.DEREGISTER_ALL_AGENTS)
 
+@log_function_call
 async def _handle_deregister_agent(websocket: WebSocket, client_id: str, message_data: dict):
     """Handle DEREGISTER_AGENT control message for a single agent from frontend."""
     agent_id = message_data.get('agent_id')
@@ -188,6 +201,7 @@ async def _handle_deregister_agent(websocket: WebSocket, client_id: str, message
         return
     await _send_agent_command_to_agents([agent_id], websocket, client_id, "shutdown", MessageType.DEREGISTER_AGENT)
 
+@log_function_call
 async def _handle_disconnect(websocket: WebSocket, client_id: str):
     """Handle cleanup when a WebSocket connection is closed."""
     logger.info(f"Cleaning up connection for {client_id} ({getattr(websocket, 'connection_type', 'unknown')})")
@@ -211,6 +225,7 @@ async def _handle_disconnect(websocket: WebSocket, client_id: str):
         if connection_type == "frontend":
             state.frontend_connections.discard(websocket)
 
+@log_function_call
 async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket handling endpoint - Primarily for Frontends now"""
     await websocket.accept()
