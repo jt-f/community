@@ -24,8 +24,8 @@ export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, em
                     case 'initializing':
                         statusClass = 'initializing';
                         break;
-                    case 'working':
-                        statusClass = 'working';
+                    case 'busy':
+                        statusClass = 'busy';
                         break;
                     case 'paused':
                         statusClass = 'paused';
@@ -192,9 +192,10 @@ export const AgentList: React.FC<AgentListProps> = ({ agents, showId = false, em
                     background-color: #ff9800;
                     box-shadow: 0 0 4px #ff9800;
                 }
-                .status-indicator.working {
+                .status-indicator.busy {
                     background-color: #2196f3;
                     box-shadow: 0 0 4px #2196f3;
+                    animation: pulse 2s infinite;
                 }
                 .status-indicator.paused {
                     background-color: #ffd600;
