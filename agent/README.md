@@ -13,7 +13,7 @@ For overall system architecture and setup, see the main [Project README](../../R
 *   **Message Processing:** Handles received messages. This example uses the Mistral AI API to generate responses.
 *   **Response Publishing (RabbitMQ):** Sends replies back to the `broker_input_queue` for routing.
 
-## Architecture & Message Flow
+## Architecture & Message Flows
 
 ```mermaid
 graph TD
