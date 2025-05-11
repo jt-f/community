@@ -3,7 +3,6 @@ import asyncio
 import grpc
 from concurrent import futures
 import logging
-import datetime
 import grpc_server.grpc_config as grpc_config
 
 # Local imports
@@ -34,9 +33,7 @@ def create_grpc_server(port):
     listen_addr_ipv4 = f'0.0.0.0:{port}'
     listen_addr_ipv6 = f'[::]:{port}'
     server.add_insecure_port(listen_addr_ipv4)
-    logger.debug(f"gRPC server configured to listen on {listen_addr_ipv4}")
     server.add_insecure_port(listen_addr_ipv6)
-    logger.debug(f"gRPC server configured to listen on {listen_addr_ipv6}")
 
 
     return server

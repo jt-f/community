@@ -30,7 +30,6 @@ class CommandHandler:
             "status": self._handle_status_command,
             # Add more command handlers here as needed
         }
-        logger.debug(f"CommandHandler initialized for agent '{self.agent.agent_name}' (ID: {self.agent.agent_id})")
 
     @log_exceptions
     async def handle_server_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
@@ -64,7 +63,6 @@ class CommandHandler:
             try:
                 handler_result = await handler(command)
                 result.update(handler_result)
-                logger.info(f"Command '{command_type}' (ID: {command_id}) executed. Success: {result.get('success')}")
             except Exception as e:
                 logger.error(f"Error executing command handler for '{command_type}' (ID: {command_id}): {e}", exc_info=True)
                 result.update({

@@ -35,7 +35,6 @@ class AgentState:
         str_value = str(value)
         if key not in self.metrics or self.metrics[key] != str_value:
             self.metrics[key] = str_value
-            logger.debug(f"Agent {self.agent_id} metric updated: {key} = {str_value}")
     
     def update_metrics(self, metrics: Dict[str, Any]) -> None:
         """Update multiple metrics at once"""
@@ -45,10 +44,9 @@ class AgentState:
             if key not in self.metrics or self.metrics[key] != str_value:
                 self.metrics[key] = str_value
                 changed = True
-                logger.debug(f"Agent {self.agent_id} metric '{key}' set to '{str_value}'") # Log individual change
         
         if changed:
-            logger.debug(f"Agent {self.agent_id} metrics updated with {len(metrics)} values")
+            logger.info(f"Agent {self.agent_id} metrics updated with {len(metrics)} values")
     
     def to_agent_status(self) -> AgentStatus:
         """Convert to AgentStatus for API/serialization."""
@@ -120,8 +118,7 @@ async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     # Update metrics if provided
     if status.metrics:
         agent_state.update_metrics(status.metrics)
-    
-    logger.debug(f"Updated status for agent {agent_id}")
+
     
     # Broadcast updates to all clients
     try:
@@ -153,16 +150,3 @@ async def update_agent_metrics(agent_id: str, agent_name: str, metrics: Dict[str
     except Exception as e:
         logger.error(f"Error broadcasting agent metrics updates: {e}")
 
-@log_function_call # Added decorator
-async def broadcast_agent_status_update(is_full_update: bool = False) -> None:
-    """Broadcast agent status updates to all subscribers.
-    
-    This is a legacy function maintained for backward compatibility.
-    It now uses the unified broadcast function from agent_manager.
-    """
-    try:
-        # Use the unified broadcast function from agent_manager
-        await agent_manager.broadcast_agent_status_to_all_subscribers(is_full_update=is_full_update)
-        logger.debug(f"Broadcast agent status update (full_update={is_full_update})")
-    except Exception as e:
-        logger.error(f"Error broadcasting agent status update: {e}")

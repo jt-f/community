@@ -37,7 +37,7 @@ async def shutdown_server():
     state.frontend_connections.clear()
     state.agent_statuses.clear()
     state.agent_status_history.clear()
-    logger.debug("Server state cleared.")
+
     
     logger.info("Server shutdown sequence complete.")
 
@@ -70,7 +70,7 @@ def setup_signal_handlers():
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, handle_exit, sig, None)
-        logger.info("Signal handlers registered")
+
     except NotImplementedError:
         logger.warning("asyncio.add_signal_handler not supported, falling back to signal.signal.")
         for sig in (signal.SIGINT, signal.SIGTERM):

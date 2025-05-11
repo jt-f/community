@@ -80,7 +80,6 @@ class MessageQueueHandler:
             self.channel = self.connection.channel()
             # Declare the agent-specific queue
             self.channel.queue_declare(queue=self.queue_name, durable=True)
-            logger.info(f"Declared queue '{self.queue_name}' successfully.")
 
             # Start consumer in a separate thread
             self._consumer_thread = threading.Thread(target=self._consumer_loop, daemon=True)

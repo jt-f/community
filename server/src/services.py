@@ -51,7 +51,7 @@ async def _safe_send_websocket(ws: WebSocket, payload_str: str, client_desc: str
     """Sends data to a WebSocket, handling exceptions and logging."""
     try:
         await ws.send_text(payload_str)
-        logger.debug(f"Successfully sent message to {client_desc}")
+        logger.info(f"Successfully sent message to {client_desc}")
         return True
     except Exception as e:
         logger.error(f"Error sending message to {client_desc}: {e}. Connection assumed lost.")
@@ -62,7 +62,6 @@ async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_de
     disconnected_frontend = set()
     frontend_count = len(state.frontend_connections)
     if frontend_count > 0:
-        logger.info(f"Broadcasting message {message_id} from {origin_desc} to {frontend_count} frontend clients: {payload_str}")
         # Iterate over a copy of the set to avoid modification during iteration
         for fe_ws in list(state.frontend_connections):
             # Get the client_id for better logging
@@ -75,8 +74,6 @@ async def _broadcast_to_frontends(payload_str: str, message_type: str, origin_de
         if disconnected_frontend:
             state.frontend_connections -= disconnected_frontend
             logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
-    else:
-        logger.info("No frontend clients connected, skipping broadcast.")
 
 # --- Server Input Consumer Service ---
 
@@ -132,13 +129,12 @@ async def _process_server_input_message(message_data: dict):
             # Message is already broadcast to frontends with pending status before being queued
             # Just forward to broker for routing
             if publish_to_broker_input_queue(message_data):
-                logger.info(f"Published message ID {original_message_id} from {sender_id} to broker_input_queue.")
+                logger.debug(f"Published message ID {original_message_id} from {sender_id} to broker_input_queue.")
             else:
                 logger.error(f"Failed to publish message ID {original_message_id} from {sender_id} to broker_input_queue.")
 
         # --- Case 3: Message has been routed by broker ---
         elif routing_status == "routed" and receiver_id is not None:
-            logger.info(f"Received routed message {original_message_id} on server_input_queue for final receiver {receiver_id}.")
 
             # Broadcast as routed to frontends so they can update message status
             message_for_frontend = _prepare_message_for_client(message_data, routing_status="routed")
@@ -168,27 +164,8 @@ async def _process_server_input_message(message_data: dict):
 
         # --- Case 4: Unrecognized message or routing status ---
         else:
-            logger.warning(f"Unrecognized message: sender={sender_id}, routing_status={routing_status}, receiver={receiver_id}")
-            # Try to handle as a legacy message for backward compatibility
-            if receiver_id is not None:
-                # Treat as a routed message
-                logger.info(f"Treating message {original_message_id} as a legacy routed message.")
-                
-                # Update as routed for frontend display
-                message_data["routing_status"] = "routed"
-                message_for_frontend = _prepare_message_for_client(message_data, routing_status="routed")
-                payload_str = json.dumps(message_for_frontend)
-                await _broadcast_to_frontends(payload_str, message_type, f"Server (legacy routed)", original_message_id)
-                
-                # Forward to agent if valid
-                if receiver_id in state.agent_statuses:
-                    agent_metrics = getattr(state.agent_statuses[receiver_id], 'metrics', {}) or {}
-                    if agent_metrics.get('internal_state', 'offline') == 'online':
-                        if publish_to_agent_queue(receiver_id, message_data):
-                            logger.info(f"Published legacy routed message {original_message_id} to {receiver_id}'s queue.")
-                        else:
-                            logger.error(f"Failed to publish legacy routed message {original_message_id} to agent {receiver_id}'s queue.")
-                
+            logger.warning(f"Unrecognized message ignored: sender={sender_id}, routing_status={routing_status}, receiver={receiver_id}")
+ 
     except Exception as e:
         logger.error(f"Error processing message from server input queue: {e}", exc_info=True)
 
@@ -213,13 +190,11 @@ async def server_input_consumer():
             # Define the callback for received messages
             def callback_wrapper(ch, method, properties, body):
                 try:
-                    logger.debug(f"Received raw message from {config.SERVER_INPUT_QUEUE}")
                     message_data = json.loads(body.decode('utf-8'))
                     # Run the async processing in the main event loop
                     asyncio.create_task(_process_server_input_message(message_data))
                     # Acknowledge message *after* creating the task (fire-and-forget)
                     ch.basic_ack(delivery_tag=method.delivery_tag)
-                    logger.debug(f"Acknowledged message from {config.SERVER_INPUT_QUEUE}")
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON received on {config.SERVER_INPUT_QUEUE}: {body[:100]}...")
                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
@@ -253,7 +228,7 @@ async def server_input_consumer():
             logger.error("Server input consumer: AMQP Connection Error. Reconnecting...")
             await asyncio.sleep(5)
         except asyncio.CancelledError:
-            logger.info("Server input consumer task cancelled.")
+            logger.warning("Server input consumer task cancelled.")
             break
         except Exception as e:
             logger.exception(f"Unexpected error in server input consumer: {e}")
@@ -266,7 +241,6 @@ async def server_input_consumer():
                 except Exception as close_exc:
                     logger.error(f"Error closing server input consumer channel: {close_exc}")
             
-    logger.info("Server input consumer service stopped.")
 
 # --- Periodic Status Broadcast Service --- 
 
@@ -275,7 +249,6 @@ async def periodic_status_broadcast():
     logger.info("Starting periodic status broadcast service...")
     while not shutdown_event.is_set(): # Check shutdown flag
         try:
-            logger.info(f"Scheduled broadcast of full agent status...")
             # Broadcast full agent status (includes online/offline)
             await agent_manager.broadcast_agent_status(force_full_update=True, target_websocket=None)
             
@@ -283,250 +256,159 @@ async def periodic_status_broadcast():
             await asyncio.sleep(config.PERIODIC_STATUS_INTERVAL)
             
         except asyncio.CancelledError:
-            logger.info("Periodic status broadcast service task cancelled.")
+            logger.warning("Periodic status broadcast service task cancelled.")
             break # Exit loop if cancelled
         except Exception as e:
             logger.exception(f"Error in periodic status broadcast service: {e}. Continuing after 5s...")
             await asyncio.sleep(5) # Avoid rapid failure loops
 
-    logger.info("Periodic status broadcast service stopped.")
 
-# --- Agent Metadata Consumer Service ---
-
-# async def agent_metadata_consumer():
-#     """Service that consumes messages from the AGENT_METADATA_QUEUE."""
-#     channel = None
-#     logger.info(f"Starting agent metadata consumer listening on {config.AGENT_METADATA_QUEUE}...")
+# async def _handle_broker_registration(message_data: dict):
+#     """Handle broker registration via RabbitMQ."""
+#     broker_name = message_data.get("broker_name", "Unknown Broker")
+#     broker_id = message_data.get("broker_id")
     
-#     while not shutdown_event.is_set():
-#         try:
-#             connection = message_queue_handler.get_rabbitmq_connection()
-#             if not connection or connection.is_closed:
-#                 logger.warning("Agent metadata consumer: No RabbitMQ connection or connection closed. Retrying in 5s...")
-#                 await asyncio.sleep(5)
-#                 continue
-
-#             channel = connection.channel()
-#             # Ensure queue exists
-#             channel.queue_declare(queue=config.AGENT_METADATA_QUEUE, durable=True)
-            
-#             # Define the callback for received messages
-#             def callback_wrapper(ch, method, properties, body):
-#                 try:
-#                     logger.debug(f"Received raw message from {config.AGENT_METADATA_QUEUE}")
-#                     message_data = json.loads(body.decode('utf-8'))
-#                     # Run the async processing in the main event loop
-#                     asyncio.create_task(_process_agent_metadata_message(message_data))
-#                     # Acknowledge message *after* creating the task (fire-and-forget)
-#                     ch.basic_ack(delivery_tag=method.delivery_tag)
-#                     logger.debug(f"Acknowledged message from {config.AGENT_METADATA_QUEUE}")
-#                 except json.JSONDecodeError:
-#                     logger.error(f"Invalid JSON received on {config.AGENT_METADATA_QUEUE}: {body[:100]}...")
-#                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-#                 except Exception as e:
-#                     logger.exception(f"Error in callback_wrapper for {config.AGENT_METADATA_QUEUE}: {e}")
-#                     ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-            
-#             # Start consuming
-#             channel.basic_consume(queue=config.AGENT_METADATA_QUEUE, on_message_callback=callback_wrapper, auto_ack=False)
-#             logger.info(f"Agent metadata consumer started listening on {config.AGENT_METADATA_QUEUE}")
-            
-#             # Keep consuming using process_data_events
-#             while not shutdown_event.is_set() and connection.is_open:
-#                 try:
-#                     connection.process_data_events(time_limit=1)
-#                     await asyncio.sleep(0.1)  # Yield to allow other tasks to run
-#                 except pika.exceptions.ConnectionClosedByBroker:
-#                     logger.warning("Agent metadata consumer: Connection closed by broker. Reconnecting...")
-#                     break
-#                 except pika.exceptions.AMQPConnectionError:
-#                     logger.warning("Agent metadata consumer: AMQP connection error. Reconnecting...")
-#                     break
-#                 except Exception as e:
-#                     logger.error(f"Unexpected error in agent metadata consumer: {e}")
-#                     await asyncio.sleep(1)  # Wait before retrying
-                    
-#         except pika.exceptions.ChannelClosedByBroker:
-#             logger.warning("Agent metadata consumer: Channel closed by broker. Reconnecting...")
-#             await asyncio.sleep(5)
-#         except pika.exceptions.AMQPConnectionError:
-#             logger.error("Agent metadata consumer: AMQP Connection Error. Reconnecting...")
-#             await asyncio.sleep(5)
-#         except asyncio.CancelledError:
-#             logger.info("Agent metadata consumer task cancelled.")
-#             break
-#         except Exception as e:
-#             logger.exception(f"Unexpected error in agent metadata consumer: {e}")
-#             await asyncio.sleep(5)
-#         finally:
-#             if channel and channel.is_open:
-#                 try:
-#                     channel.close()
-#                     logger.info("Agent metadata consumer channel closed.")
-#                 except Exception as close_exc:
-#                     logger.error(f"Error closing agent metadata consumer channel: {close_exc}")
-            
-#     logger.info("Agent metadata consumer service stopped.")
-
-# async def _process_agent_metadata_message(message_data: dict):
-#     """Process a single message from the agent_metadata_queue."""
-#     message_type = message_data.get("message_type")
+#     if not broker_id:
+#         # Generate broker ID if not provided
+#         broker_id = f"broker_{uuid.uuid4().hex[:8]}"
     
-#     if message_type == MessageType.REGISTER_BROKER:
-#         # Handle broker registration via RabbitMQ
-#         await _handle_broker_registration(message_data)
-#     elif message_type == MessageType.CLIENT_DISCONNECTED:
-#         # Handle disconnection notification
-#         await _handle_client_disconnected(message_data)
+#     logger.info(f"Handling broker registration via RabbitMQ: {broker_name} (ID: {broker_id})")
+    
+#     # Update broker status
+#     async with state.broker_status_lock:
+#         state.broker_statuses[broker_id] = {
+#             "is_online": True,
+#             "last_seen": datetime.now().isoformat()
+#         }
+    
+#     # Get gRPC config for the response
+#     grpc_host = os.getenv("GRPC_HOST", "localhost")
+#     grpc_port = os.getenv("GRPC_PORT", "50051")
+    
+#     # Create response
+#     response = {
+#         "message_type": MessageType.REGISTER_BROKER_RESPONSE,
+#         "status": ResponseStatus.SUCCESS,
+#         "broker_id": broker_id,
+#         "broker_name": broker_name,
+#         "message": "Broker registered successfully via RabbitMQ",
+#         "grpc_host": grpc_host,
+#         "grpc_port": grpc_port,
+#         "use_grpc_for_agent_status": True
+#     }
+    
+#     # Send response to the server input queue (broker will consume from there)
+#     if not message_queue_handler.publish_to_queue(config.SERVER_INPUT_QUEUE, response):
+#         logger.error(f"Failed to send registration response to broker {broker_id}")
 #     else:
-#         logger.warning(f"Unrecognized message type in agent metadata queue: {message_type}")
+#         logger.info(f"Sent registration response to broker {broker_id}")
 
-async def _handle_broker_registration(message_data: dict):
-    """Handle broker registration via RabbitMQ."""
-    broker_name = message_data.get("broker_name", "Unknown Broker")
-    broker_id = message_data.get("broker_id")
+# async def _handle_client_disconnected(message_data: dict):
+#     """Handle client disconnection notification."""
+#     client_id = message_data.get("client_id")
+#     client_type = message_data.get("client_type", "unknown")
     
-    if not broker_id:
-        # Generate broker ID if not provided
-        broker_id = f"broker_{uuid.uuid4().hex[:8]}"
+#     if not client_id:
+#         logger.warning("Received CLIENT_DISCONNECTED message without client_id")
+#         return
     
-    logger.info(f"Handling broker registration via RabbitMQ: {broker_name} (ID: {broker_id})")
+#     logger.info(f"Handling client disconnection via RabbitMQ: {client_id} ({client_type})")
     
-    # Update broker status
-    async with state.broker_status_lock:
-        state.broker_statuses[broker_id] = {
-            "is_online": True,
-            "last_seen": datetime.now().isoformat()
-        }
-    
-    # Get gRPC config for the response
-    grpc_host = os.getenv("GRPC_HOST", "localhost")
-    grpc_port = os.getenv("GRPC_PORT", "50051")
-    
-    # Create response
-    response = {
-        "message_type": MessageType.REGISTER_BROKER_RESPONSE,
-        "status": ResponseStatus.SUCCESS,
-        "broker_id": broker_id,
-        "broker_name": broker_name,
-        "message": "Broker registered successfully via RabbitMQ",
-        "grpc_host": grpc_host,
-        "grpc_port": grpc_port,
-        "use_grpc_for_agent_status": True
-    }
-    
-    # Send response to the server input queue (broker will consume from there)
-    if not message_queue_handler.publish_to_queue(config.SERVER_INPUT_QUEUE, response):
-        logger.error(f"Failed to send registration response to broker {broker_id}")
-    else:
-        logger.info(f"Sent registration response to broker {broker_id}")
+#     if client_id.startswith("broker_"):
+#         # Update broker status
+#         async with state.broker_status_lock:
+#             if client_id in state.broker_statuses:
+#                 state.broker_statuses[client_id]["is_online"] = False
+#                 state.broker_statuses[client_id]["last_seen"] = datetime.now().isoformat()
+#                 logger.info(f"Marked broker {client_id} as offline due to disconnection message")
 
-async def _handle_client_disconnected(message_data: dict):
-    """Handle client disconnection notification."""
-    client_id = message_data.get("client_id")
-    client_type = message_data.get("client_type", "unknown")
-    
-    if not client_id:
-        logger.warning("Received CLIENT_DISCONNECTED message without client_id")
-        return
-    
-    logger.info(f"Handling client disconnection via RabbitMQ: {client_id} ({client_type})")
-    
-    if client_id.startswith("broker_"):
-        # Update broker status
-        async with state.broker_status_lock:
-            if client_id in state.broker_statuses:
-                state.broker_statuses[client_id]["is_online"] = False
-                state.broker_statuses[client_id]["last_seen"] = datetime.now().isoformat()
-                logger.info(f"Marked broker {client_id} as offline due to disconnection message")
+# async def _handle_control_message(message_data: dict):
+#     """Handle new agent/system control messages (pause, deregister, reset, etc)."""
+#     message_type = message_data.get("message_type")
+#     agent_id = message_data.get("agent_id")
+#     logger.info(f"[CONTROL] Received control message: {message_type} agent_id={agent_id}")
 
-async def _handle_control_message(message_data: dict):
-    """Handle new agent/system control messages (pause, deregister, reset, etc)."""
-    message_type = message_data.get("message_type")
-    agent_id = message_data.get("agent_id")
-    logger.info(f"[CONTROL] Received control message: {message_type} agent_id={agent_id}")
+#     # Handle PAUSE_ALL_AGENTS
+#     if message_type == MessageType.PAUSE_ALL_AGENTS:
+#         from agent_registration_service import send_command_to_agent
+#         # Iterate over all online agents and send a pause command
+#         tasks = []
+#         for agent_id, status in state.agent_statuses.items():
+#             agent_metrics = getattr(status, 'metrics', {}) or {}
+#             if agent_metrics.get('internal_state', 'offline') == 'online':
+#                 # Set agent status to paused
+#                 status.status = "paused"
+#                 # Send a 'pause' command (type can be 'pause', content can be empty or a message)
+#                 tasks.append(send_command_to_agent(agent_id, "pause", ""))
+#         if tasks:
+#             await asyncio.gather(*tasks)
+#             logger.info(f"Sent PAUSE command to {len(tasks)} agents.")
+#             # Broadcast updated status
+#             await agent_manager.broadcast_agent_status(force_full_update=True)
+#         else:
+#             logger.info("No online agents to pause.")
 
-    # Handle PAUSE_ALL_AGENTS
-    if message_type == MessageType.PAUSE_ALL_AGENTS:
-        from agent_registration_service import send_command_to_agent
-        # Iterate over all online agents and send a pause command
-        tasks = []
-        for agent_id, status in state.agent_statuses.items():
-            agent_metrics = getattr(status, 'metrics', {}) or {}
-            if agent_metrics.get('internal_state', 'offline') == 'online':
-                # Set agent status to paused
-                status.status = "paused"
-                # Send a 'pause' command (type can be 'pause', content can be empty or a message)
-                tasks.append(send_command_to_agent(agent_id, "pause", ""))
-        if tasks:
-            await asyncio.gather(*tasks)
-            logger.info(f"Sent PAUSE command to {len(tasks)} agents.")
-            # Broadcast updated status
-            await agent_manager.broadcast_agent_status(force_full_update=True)
-        else:
-            logger.info("No online agents to pause.")
+#     # Handle RESUME_ALL_AGENTS
+#     elif message_type == MessageType.RESUME_ALL_AGENTS:
+#         from agent_registration_service import send_command_to_agent
+#         tasks = []
+#         updated = False
+#         for agent_id, status in state.agent_statuses.items():
+#             if status.status == "paused":
+#                 status.status = "online"
+#                 tasks.append(send_command_to_agent(agent_id, "resume", ""))
+#                 updated = True
+#         if tasks:
+#             await asyncio.gather(*tasks)
+#             logger.info(f"Sent RESUME command to {len(tasks)} agents.")
+#             if updated:
+#                 await agent_manager.broadcast_agent_status(force_full_update=True)
+#         else:
+#             logger.info("No paused agents to resume.")
 
-    # Handle RESUME_ALL_AGENTS
-    elif message_type == MessageType.RESUME_ALL_AGENTS:
-        from agent_registration_service import send_command_to_agent
-        tasks = []
-        updated = False
-        for agent_id, status in state.agent_statuses.items():
-            if status.status == "paused":
-                status.status = "online"
-                tasks.append(send_command_to_agent(agent_id, "resume", ""))
-                updated = True
-        if tasks:
-            await asyncio.gather(*tasks)
-            logger.info(f"Sent RESUME command to {len(tasks)} agents.")
-            if updated:
-                await agent_manager.broadcast_agent_status(force_full_update=True)
-        else:
-            logger.info("No paused agents to resume.")
+#     # Handle PAUSE_AGENT
+#     elif message_type == MessageType.PAUSE_AGENT and agent_id:
+#         from agent_registration_service import send_command_to_agent
+#         if agent_id in state.agent_statuses:
+#             agent_metrics = getattr(state.agent_statuses[agent_id], 'metrics', {}) or {}
+#             if agent_metrics.get('internal_state', 'offline') == 'online':
+#                 state.agent_statuses[agent_id].status = "paused"
+#                 await send_command_to_agent(agent_id, "pause", "")
+#                 logger.info(f"Sent PAUSE command to agent {agent_id}.")
+#                 await agent_manager.broadcast_agent_status(force_full_update=True)
+#             else:
+#                 logger.warning(f"Cannot pause agent {agent_id}: Not online.")
 
-    # Handle PAUSE_AGENT
-    elif message_type == MessageType.PAUSE_AGENT and agent_id:
-        from agent_registration_service import send_command_to_agent
-        if agent_id in state.agent_statuses:
-            agent_metrics = getattr(state.agent_statuses[agent_id], 'metrics', {}) or {}
-            if agent_metrics.get('internal_state', 'offline') == 'online':
-                state.agent_statuses[agent_id].status = "paused"
-                await send_command_to_agent(agent_id, "pause", "")
-                logger.info(f"Sent PAUSE command to agent {agent_id}.")
-                await agent_manager.broadcast_agent_status(force_full_update=True)
-            else:
-                logger.warning(f"Cannot pause agent {agent_id}: Not online.")
+#     # Handle RESUME_AGENT
+#     elif message_type == MessageType.RESUME_AGENT and agent_id:
+#         from agent_registration_service import send_command_to_agent
+#         if agent_id in state.agent_statuses and state.agent_statuses[agent_id].status == "paused":
+#             state.agent_statuses[agent_id].status = "online"
+#             await send_command_to_agent(agent_id, "resume", "")
+#             logger.info(f"Sent RESUME command to agent {agent_id}.")
+#             await agent_manager.broadcast_agent_status(force_full_update=True)
+#         else:
+#             logger.warning(f"Cannot resume agent {agent_id}: Not found or not paused.")
 
-    # Handle RESUME_AGENT
-    elif message_type == MessageType.RESUME_AGENT and agent_id:
-        from agent_registration_service import send_command_to_agent
-        if agent_id in state.agent_statuses and state.agent_statuses[agent_id].status == "paused":
-            state.agent_statuses[agent_id].status = "online"
-            await send_command_to_agent(agent_id, "resume", "")
-            logger.info(f"Sent RESUME command to agent {agent_id}.")
-            await agent_manager.broadcast_agent_status(force_full_update=True)
-        else:
-            logger.warning(f"Cannot resume agent {agent_id}: Not found or not paused.")
+#     # Handle DEREGISTER_ALL_AGENTS
+#     elif message_type == MessageType.DEREGISTER_ALL_AGENTS:
+#         from agent_registration_service import send_command_to_agent
+#         agent_ids = list(state.agent_statuses.keys())
+#         tasks = [send_command_to_agent(agent_id, "shutdown", "") for agent_id in agent_ids]
+#         if tasks:
+#             await asyncio.gather(*tasks)
+#             logger.info(f"Sent SHUTDOWN command to {len(tasks)} agents (irreversible).")
+#         else:
+#             logger.info("No agents to shutdown.")
 
-    # Handle DEREGISTER_ALL_AGENTS
-    elif message_type == MessageType.DEREGISTER_ALL_AGENTS:
-        from agent_registration_service import send_command_to_agent
-        agent_ids = list(state.agent_statuses.keys())
-        tasks = [send_command_to_agent(agent_id, "shutdown", "") for agent_id in agent_ids]
-        if tasks:
-            await asyncio.gather(*tasks)
-            logger.info(f"Sent SHUTDOWN command to {len(tasks)} agents (irreversible).")
-        else:
-            logger.info("No agents to shutdown.")
-
-    # Handle DEREGISTER_AGENT
-    elif message_type == MessageType.DEREGISTER_AGENT and agent_id:
-        from agent_registration_service import send_command_to_agent
-        if agent_id in state.agent_statuses:
-            await send_command_to_agent(agent_id, "shutdown", "")
-            logger.info(f"Sent SHUTDOWN command to agent {agent_id} (irreversible).")
-        else:
-            logger.warning(f"Cannot shutdown agent {agent_id}: Not found.")
+#     # Handle DEREGISTER_AGENT
+#     elif message_type == MessageType.DEREGISTER_AGENT and agent_id:
+#         from agent_registration_service import send_command_to_agent
+#         if agent_id in state.agent_statuses:
+#             await send_command_to_agent(agent_id, "shutdown", "")
+#             logger.info(f"Sent SHUTDOWN command to agent {agent_id} (irreversible).")
+#         else:
+#             logger.warning(f"Cannot shutdown agent {agent_id}: Not found.")
 
 async def start_services():
     """Starts all background services."""
@@ -545,7 +427,7 @@ async def stop_services():
 
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     if not tasks:
-        logger.info("No background tasks found to stop.")
+        logger.warning("No background tasks found to stop.")
         # Still close RabbitMQ connection if it was opened
         message_queue_handler.close_rabbitmq_connection()
         return
@@ -570,4 +452,3 @@ async def stop_services():
 
     # Close RabbitMQ connection after services are stopped
     message_queue_handler.close_rabbitmq_connection()
-    logger.info("Background services stopped.")

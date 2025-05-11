@@ -38,11 +38,11 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manages application startup and shutdown events."""
+
     message_queue_handler.get_rabbitmq_connection()
+
     grpc_server = create_grpc_server(grpc_config.GRPC_PORT)
-
     await grpc_server.start()
-
     broker_registration_service.start_registration_service(grpc_server)
     agent_registration_service.start_registration_service(grpc_server)
     agent_status_service.start_agent_status_service(grpc_server)
@@ -56,14 +56,12 @@ async def lifespan(app: FastAPI):
 
     # Start background tasks
     asyncio.create_task(agent_manager.agent_keepalive_checker())
-    logger.info("Started agent keepalive checker task.")
 
     logger.info("Server startup complete")
 
     yield # The application runs while yielding
 
     logger.info("Server shutting down")
-    logger.info("Shutting down gRPC server")
     await grpc_server.stop(grace=None)
     logger.info("gRPC server stopped")
     logger.info("Server shutdown complete")
@@ -116,7 +114,7 @@ async def health_check():
             "rabbitmq": message_queue_handler.get_rabbitmq_connection() is not None
         }
     }
-    logger.info(f"Health check: {result}")
+
     return result
 
 # --- Main Execution ---
@@ -132,4 +130,3 @@ if __name__ == "__main__":
         reload=False # Typically False in production/non-dev environments
     )
 
-    logger.info("Server process finished.")

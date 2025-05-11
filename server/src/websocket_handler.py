@@ -72,12 +72,10 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
     if frontend_count > 0:
         for fe_ws in list(state.frontend_connections):
             fe_client_desc = f"frontend client {getattr(fe_ws, 'client_id', '?')}"
-            logger.debug(f"Broadcasting message {message_data.get('message_id','N/A')} to {fe_client_desc}")
             if not await services._safe_send_websocket(fe_ws, payload_str, fe_client_desc):
                 disconnected_frontend.add(fe_ws)
         if disconnected_frontend:
             state.frontend_connections -= disconnected_frontend
-            logger.info(f"Removed {len(disconnected_frontend)} disconnected frontend clients during broadcast.")
 
     # Forward to Broker via RabbitMQ
     if not message_queue_handler.publish_to_broker_input_queue(message_data):
@@ -128,7 +126,6 @@ async def _handle_request_agent_status(websocket: WebSocket, client_id: str, mes
         logger.warning(f"Received REQUEST_AGENT_STATUS from non-frontend client {client_id}. Ignoring.")
         return
 
-    logger.info(f"Frontend {client_id} requested agent status update")
     
     # Use the agent_manager's broadcast_agent_status function to send the update
     # to just the requesting frontend using the target_websocket parameter
@@ -149,7 +146,7 @@ async def _send_agent_command_to_agents(agent_ids, websocket, client_id, command
         await asyncio.gather(*tasks)
         logger.info(f"Sent {command_type.upper()} command to {len(tasks)} agent(s).")
     else:
-        logger.info(f"No agents to {command_type}.")
+        logger.warning(f"No agents to {command_type}.")
     ack = {
         "message_type": message_type,
         "status": ResponseStatus.SUCCESS,
@@ -218,12 +215,9 @@ async def _handle_disconnect(websocket: WebSocket, client_id: str):
         if connection_type == "frontend":
             state.frontend_connections.discard(websocket)
             client_names.pop(client_id, None) # Clean up name mapping
-            logger.info(f"Frontend client connection closed: {client_id}")
         else:
-            logger.info(f"Non-frontend client {client_id} ({connection_type}) disconnected. Cleanup handled elsewhere.")
+            logger.warning(f"Non-frontend client {client_id} ({connection_type}) disconnected. Cleanup handled elsewhere.")
 
-        # Log current counts
-        logger.info(f"Connection counts after cleanup: {len(state.frontend_connections)} frontend")
 
     except Exception as e:
         logger.error(f"Error during disconnect cleanup for {client_id}: {e}")
@@ -238,7 +232,6 @@ async def websocket_endpoint(websocket: WebSocket):
     connection_type = "unknown" # Track connection type
 
     try:
-        logger.debug("New WebSocket connection attempting registration...")
 
         # First message should be a registration message (only frontend expected now)
         registration_msg_str = await websocket.receive_text()

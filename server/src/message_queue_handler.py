@@ -39,7 +39,7 @@ def close_rabbitmq_connection():
     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
         try:
             state.rabbitmq_connection.close()
-            logger.info("RabbitMQ connection closed")
+
         except Exception as e:
             logger.error(f"Error closing RabbitMQ connection: {e}")
         finally:
@@ -104,40 +104,10 @@ def publish_server_advertisement():
     else:
         logger.error("Failed to publish server availability")
 
-# def process_rabbitmq_events():
-#     """Process RabbitMQ events without blocking asyncio loop."""
-#     if state.rabbitmq_connection and state.rabbitmq_connection.is_open:
-#         try:
-#             state.rabbitmq_connection.process_data_events(time_limit=0.1)
-#             return True
-#         except Exception as e:
-#             logger.error(f"Error processing RabbitMQ data events: {e}")
-#             close_rabbitmq_connection()
-#             return False
-#     return False
-
-# def setup_agent_queue(queue_name: str) -> bool:
-#     """Create or verify an agent's message queue exists."""
-#     connection = get_rabbitmq_connection()
-#     if not connection:
-#         logger.error(f"Cannot setup queue {queue_name}: No RabbitMQ connection")
-#         return False
-        
-#     try:
-#         channel = connection.channel()
-#         # Ensure queue exists and is durable
-#         channel.queue_declare(queue=queue_name, durable=True)
-#         logger.info(f"Successfully created/verified queue: {queue_name}")
-#         channel.close()
-#         return True
-#     except Exception as e:
-#         logger.error(f"Failed to setup queue {queue_name}: {e}")
-#         return False
-
 def publish_to_agent_queue(agent_id: str, message_data: dict) -> bool:
     """Publish a message directly to an agent's queue."""
     queue_name = f"{agent_id}"
-    logger.info(f"Publishing message to queue: {queue_name}...")
+
     result = publish_to_queue(queue_name, message_data)
     if result:
         logger.info(f"Published message to queue: {queue_name} successfully")

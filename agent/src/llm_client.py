@@ -71,11 +71,9 @@ class LLMClient:
                     messages=[{"role": "user", "content": prompt}],
                     **kwargs
                 )
-                logger.debug(f"Raw LLM response: {chat_response}")
 
                 if chat_response.choices:
                     response_content = chat_response.choices[0].message.content
-                    logger.debug("LLM response received successfully.")
                     return response_content
                 else:
                     logger.warning("Mistral API returned no choices in the response.")

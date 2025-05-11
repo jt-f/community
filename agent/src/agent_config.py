@@ -122,8 +122,6 @@ def create_agent_metadata(agent_name_override: Optional[str] = None) -> Tuple[st
     """
     agent_id = f"agent_{uuid.uuid4()}"
     agent_name = agent_name_override if agent_name_override else DEFAULT_AGENT_NAME
-    logger.debug(f"Generated Agent ID: {agent_id}, Agent Name: {agent_name}")
+
     return agent_id, agent_name
 
-# Log loaded configuration for debugging (optional)
-logger.debug(f"Loaded configuration: GRPC_HOST={GRPC_HOST}, GRPC_PORT={GRPC_PORT}, RABBITMQ_HOST={RABBITMQ_HOST}, ...")

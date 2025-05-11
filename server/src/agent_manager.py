@@ -44,15 +44,6 @@ async def prepare_agent_status_data(is_full_update: bool = False, force_full_upd
         if internal_state != "offline":
             online_agent_count += 1
     
-    # Get online agents based on internal_state
-    online_agents = [
-        s['agent_id'] for s in agent_status_list 
-        if state.agent_states[s['agent_id']].metrics.get("internal_state", "initializing") != "offline"
-    ]
-    if len(online_agents) > 0:
-        logger.debug(f"Online agents: {online_agents}")
-    else:
-        logger.debug("No agents online")
     
     status_update = {
         "message_type": MessageType.AGENT_STATUS_UPDATE,
@@ -76,7 +67,6 @@ async def broadcast_to_websocket(target_websocket: WebSocket, status_update_json
     try:
         # Check if WebSocket is connected - use a different approach that works with FastAPI
         try:
-            logger.info(f"Sending targeted agent status ({online_agent_count} online) to frontend {frontend_id}")
             await target_websocket.send_text(status_update_json)
         except RuntimeError as conn_error:
             if "WebSocket is not connected" in str(conn_error):
@@ -97,11 +87,9 @@ async def broadcast_to_websockets(status_update_json: str, online_agent_count: i
     # Broadcast to all connected frontends
     active_connections = state.frontend_connections
     if not active_connections:
-        logger.debug("No frontend WebSockets connected, status update not broadcasted")
         return
         
     # Now we know we have connections to process
-    logger.info(f"Broadcasting agent status ({online_agent_count} online) to {len(active_connections)} frontends")
     disconnected = []
     
     # Send to all connected frontends
@@ -130,9 +118,8 @@ async def broadcast_to_websockets(status_update_json: str, online_agent_count: i
         if ws in state.frontend_connections:
             state.frontend_connections.remove(ws)
             frontend_id = getattr(ws, 'client_id', 'unknown')
-            logger.info(f"Removed disconnected frontend: {frontend_id}")
     
-    logger.info(f"Successfully broadcasted agent status to {len(active_connections) - len(disconnected)} frontends")
+    logger.info(f"Successful broadcast of agent status to {len(active_connections) - len(disconnected)} frontends")
 
 @log_function_call
 async def broadcast_agent_status(force_full_update: bool = False, is_full_update: bool = False, target_websocket: WebSocket = None):
@@ -146,7 +133,6 @@ async def broadcast_agent_status(force_full_update: bool = False, is_full_update
         is_full_update: Flag indicating this is a full agent status update (vs. delta)
         target_websocket: Optional specific WebSocket to send the update to instead of broadcasting
     """
-    logger.info(f"Broadcasting agent status")
     
     try:
         # Prepare the agent status data
@@ -174,7 +160,6 @@ async def broadcast_agent_status_to_all_subscribers(is_full_update: bool = False
         is_full_update: Flag indicating this is a full agent status update (vs. delta).
         force_full_update: Force sending a full status update even if no changes detected (primarily for WebSockets).
     """
-    logger.info(f"Broadcasting agent status to all subscribers (is_full_update={is_full_update}, force_full_update={force_full_update})")
     try:
         # Prepare the agent status data once for both channels
         agent_status_list, online_agent_count, status_update, status_update_json = await prepare_agent_status_data(
@@ -189,7 +174,6 @@ async def broadcast_agent_status_to_all_subscribers(is_full_update: bool = False
         # Note: agent_status_service.broadcast_agent_status_updates handles its own logging for success/failure
         asyncio.create_task(agent_status_service.broadcast_agent_status_updates(is_full_update=is_full_update))
         
-        logger.debug("Successfully scheduled broadcasts to all subscribers.")
     except Exception as e:
         logger.error(f"Error initiating broadcast to all subscribers: {e}")
     
@@ -197,7 +181,6 @@ async def broadcast_agent_status_to_all_subscribers(is_full_update: bool = False
 @log_function_call
 async def broadcast_agent_deregister(agent_id: str):
     """Broadcast a DEREGISTER_AGENT message to all frontend clients to remove the agent from the UI."""
-    logger.info(f"Broadcasting DEREGISTER_AGENT for agent {agent_id} to all frontends.")
     message = {
         "message_type": MessageType.DEREGISTER_AGENT,
         "agent_id": agent_id,
@@ -207,7 +190,6 @@ async def broadcast_agent_deregister(agent_id: str):
         payload = json.dumps(message)
         active_connections = state.frontend_connections
         if not active_connections:
-            logger.info("No frontend WebSockets connected, DEREGISTER_AGENT not broadcasted")
             return
         disconnected = []
         for ws in active_connections:
@@ -221,7 +203,6 @@ async def broadcast_agent_deregister(agent_id: str):
         for ws in disconnected:
             if ws in state.frontend_connections:
                 state.frontend_connections.remove(ws)
-        logger.info(f"Successfully broadcasted DEREGISTER_AGENT for {agent_id} to {len(active_connections) - len(disconnected)} frontends")
     except Exception as e:
         logger.error(f"Error broadcasting DEREGISTER_AGENT for {agent_id}: {e}")
 
@@ -275,7 +256,6 @@ async def update_agent_status(agent_id: str, agent_name: str, metrics: dict) -> 
             # Skip update if no significant changes
             metrics_changed = any(agent_state.metrics.get(k) != str(v) for k, v in metrics.items())
             if not metrics_changed:
-                logger.debug(f"No significant change in agent {agent_id} status, skipping update.")
                 # Even if no change, update last_seen to keep the agent 'alive'
                 agent_state.last_seen = current_time
                 # Update legacy status as well to reflect last_seen update
@@ -284,7 +264,6 @@ async def update_agent_status(agent_id: str, agent_name: str, metrics: dict) -> 
                 return False
             
             # We have detected changes in metrics other than internal_state
-            logger.info(f"Agent {agent_id} metrics changed")
             agent_state.agent_name = agent_name
             agent_state.last_seen = current_time
             agent_state.update_metrics(metrics)
@@ -294,7 +273,6 @@ async def update_agent_status(agent_id: str, agent_name: str, metrics: dict) -> 
         state.agent_statuses[agent_id] = agent_state.to_agent_status()
     else:
         # Create new agent state
-        logger.info(f"Creating state for new agent: {agent_id}, name={agent_name}, internal_state={internal_state}")
         agent_state = state.AgentState(agent_id, agent_name)
         agent_state.last_seen = current_time
         agent_state.update_metrics(metrics)
@@ -314,7 +292,6 @@ async def update_agent_status(agent_id: str, agent_name: str, metrics: dict) -> 
 @log_function_call
 async def mark_agent_offline(agent_id: str) -> bool:
     """Marks an agent as offline. Returns True if the status changed."""
-    logger.info(f"Marking agent offline: {agent_id}")
     if agent_id in state.agent_states:
         agent_state = state.agent_states[agent_id]
         # Set all metrics/state attributes to offline template
@@ -346,7 +323,6 @@ async def agent_keepalive_checker():
     while True:
         # Check interval first before performing checks
         await asyncio.sleep(config.AGENT_KEEPALIVE_INTERVAL_SECONDS)
-        logger.info(f"Checking agent keepalive status...")
         now = datetime.now(timezone.utc)
         agents_to_mark_unknown = []
         agents_to_mark_offline = []
@@ -354,14 +330,26 @@ async def agent_keepalive_checker():
         try:
             # Use items() for safe iteration if state might change elsewhere (though updates should be async safe)
             current_agent_states = state.agent_states.copy() # Copy for iteration safety
+            
+            # Get list of agents with active gRPC connections from agent_registration_service
+            from grpc_services.agent_registration_service import agent_command_streams
+            active_connections = set(agent_command_streams.keys())
 
             for agent_id, agent_state in current_agent_states.items():
-                logger.debug(f"Processing keepalive check for agent {agent_id} ({agent_state.agent_name})")
                 current_internal_state = agent_state.metrics.get("internal_state", "initializing")
+                
+                # Check if agent has an active gRPC connection
+                has_active_connection = agent_id in active_connections
+
+                # --- Handle agent recovery ---
+                # If agent is in unknown_status or offline but has an active connection and was seen recently, recover it
+                if current_internal_state in ["unknown_status", "offline"] and has_active_connection:
+                    await state.update_agent_metrics(agent_id, agent_state.agent_name, {"internal_state": "idle"})
+                    continue
 
                 # --- Skip agents already marked offline ---
-                if current_internal_state == "offline":
-                    logger.debug(f"Agent {agent_id} is already offline, skipping keepalive check.")
+                if current_internal_state == "offline" and not has_active_connection:
+                    logger.debug(f"Agent {agent_id} is already offline and has no active connection, skipping keepalive check.")
                     continue
 
                 try:
@@ -376,23 +364,23 @@ async def agent_keepalive_checker():
                         last_seen = last_seen.replace(tzinfo=timezone.utc)
 
                     delta = (now - last_seen).total_seconds()
-                    logger.debug(f"Agent {agent_id} last seen: {last_seen_str}, delta: {delta:.1f}s")
+                    logger.debug(f"Agent {agent_id} last seen: {last_seen_str}, delta: {delta:.1f}s, active connection: {has_active_connection}")
 
                     # --- Handle transition from active to unknown_status ---
-                    # Check if grace period exceeded AND status is *not* already 'unknown_status' or 'offline'
-                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and current_internal_state not in ["unknown_status", "offline"]:
-                        logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) missed keepalive window ({delta:.1f}s > {config.AGENT_KEEPALIVE_GRACE_SECONDS}s). Marking as unknown_status.")
+                    # Only mark as unknown if both last_seen is old AND no active connection
+                    if delta > config.AGENT_KEEPALIVE_GRACE_SECONDS and not has_active_connection and current_internal_state not in ["unknown_status", "offline"]:
+                        logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) missed keepalive window ({delta:.1f}s > {config.AGENT_KEEPALIVE_GRACE_SECONDS}s) and has no active connection. Marking as unknown_status.")
                         agents_to_mark_unknown.append((agent_id, agent_state.agent_name))
 
                     # --- Handle transition from unknown_status to offline ---
-                    # Check if status is unknown_status AND it has exceeded the unknown_offline grace period
-                    elif current_internal_state == "unknown_status" and delta > config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS:
-                         logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) in unknown_status missed the unknown-to-offline window ({delta:.1f}s > {config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS}s). Marking as offline.")
-                         agents_to_mark_offline.append(agent_id)
+                    # Only mark as offline if it's in unknown_status, has exceeded grace period, AND has no active connection
+                    elif current_internal_state == "unknown_status" and delta > config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS and not has_active_connection:
+                        logger.warning(f"Agent {agent_id} ({agent_state.agent_name}) in unknown_status missed the unknown-to-offline window ({delta:.1f}s > {config.AGENT_UNKNOWN_OFFLINE_GRACE_SECONDS}s) and has no active connection. Marking as offline.")
+                        agents_to_mark_offline.append(agent_id)
 
                     else:
-                        # Agent is active or in unknown_status but within grace period
-                        logger.debug(f"Agent {agent_id} is within its keepalive window (delta: {delta:.1f}s)")
+                        # Agent is active or in unknown_status but within grace period or has active connection
+                        logger.debug(f"Agent {agent_id} is within its keepalive window or has active connection (delta: {delta:.1f}s)")
 
                 except ValueError as ve:
                     logger.error(f"Error parsing last_seen for agent {agent_id} ('{last_seen_str}'): {ve}")
@@ -402,19 +390,17 @@ async def agent_keepalive_checker():
             # Perform state updates outside the iteration loop
             # Mark agents as unknown_status
             if agents_to_mark_unknown:
-                logger.info(f"Updating status for {len(agents_to_mark_unknown)} agents to unknown_status...")
                 tasks = [
                     state.update_agent_metrics(agent_id, agent_name, {"internal_state": "unknown_status"})
                     for agent_id, agent_name in agents_to_mark_unknown
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for result, (agent_id, _) in zip(results, agents_to_mark_unknown):
-                     if isinstance(result, Exception):
-                           logger.error(f"Failed to update status for agent {agent_id} to unknown_status: {result}")
+                    if isinstance(result, Exception):
+                        logger.error(f"Failed to update status for agent {agent_id} to unknown_status: {result}")
 
             # Mark agents as offline
             if agents_to_mark_offline:
-                logger.info(f"Marking {len(agents_to_mark_offline)} agents as offline...")
                 # Use the existing mark_agent_offline function which handles broadcasting
                 tasks = [
                     mark_agent_offline(agent_id)
@@ -423,7 +409,6 @@ async def agent_keepalive_checker():
                 # Await the tasks, but we don't necessarily need the results unless debugging failures
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-
         except Exception as e:
-             logger.error(f"Error during agent keepalive check cycle: {e}", exc_info=True)
+            logger.error(f"Error during agent keepalive check cycle: {e}", exc_info=True)
 

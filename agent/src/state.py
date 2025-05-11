@@ -40,43 +40,29 @@ class AgentState:
 
         if listener not in self._listeners:
             self._listeners.append(listener)
-            logger.debug(f"Registered listener: {listener.__name__}")
 
     async def unregister_listener(self, listener: Callable[[Dict[str, Any]], None]):
         """Unregister a callback function."""
 
         try:
             self._listeners.remove(listener)
-            logger.debug(f"Unregistered listener: {listener.__name__}")
         except ValueError:
             logger.warning(f"Attempted to unregister a non-existent listener: {listener.__name__}")
 
     async def _notify_listeners(self,state_snapshot: dict[str, Any]):
         """Notify all registered listeners about the state change."""
-        # Get a snapshot of the state to pass to listeners
-        logger.info(f"Notifying listeners of state change: {state_snapshot}")
-
-        listeners_to_notify = self._listeners[:] 
-        
+        listeners_to_notify = self._listeners[:]
         tasks = []
         for listener in listeners_to_notify:
             try:
-                logger.info(f"Notifying listener: {listener.__name__}")
-                # Check if the listener is a coroutine function
                 if asyncio.iscoroutinefunction(listener):
-                    # Schedule coroutine listeners
                     tasks.append(asyncio.create_task(listener(state_snapshot)))
                 else:
-                    # Call sync listeners directly (consider running in executor if they block)
                     listener(state_snapshot)
-            except Exception as e:
-                logger.error(f"Error scheduling/calling state listener {listener.__name__}: {e}", exc_info=True)
-
-        # Wait for all scheduled async listeners to complete (optional, depends on requirements)
+            except Exception:
+                pass
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
-
 
     async def _update_internal_state(self) -> bool:
         """Internal method to determine the overall agent state based on component statuses."""
@@ -123,7 +109,6 @@ class AgentState:
     # This method modifies internal state
     async def _set_key_value(self, key: str, value: Any):
         """Set a specific state value"""
-        logger.info(f"{key}={value}")
         self._state[key] = value
         self._state["last_updated"] = datetime.now().isoformat()
 
@@ -154,15 +139,11 @@ class AgentState:
                 # Notify even if only internal state changed
                 if internal_changed:
                     notify = True
-        logger.info(f"Notify={notify}")
 
         if notify:
             # Schedule the notification task
             state_snapshot = await self.get_full_status_for_update() # Use the method that prepares the update format
-
             asyncio.create_task(self._notify_listeners(state_snapshot))
-
-
         return changed or internal_changed # Return True if either the value or internal state changed
 
     # --- Specific State Setters (now async) --- 

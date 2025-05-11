@@ -62,6 +62,8 @@ class Agent:
         # Update state to busy
         await self.state.set_internal_state('busy')
 
+        # Only log on message received
+        logger.info("Message received from queue.")
         try:
             message_dict = json.loads(body.decode('utf-8'))
             # Call the actual processing function (which might involve LLM)
@@ -71,7 +73,8 @@ class Agent:
                 agent_id=self.agent_id,
                 message=message_dict
             )
-            # Update state to idle after processing
+            # Only log on message sent
+            logger.info("Message sent to broker.")
             await self.state.set_internal_state('idle')
 
         except json.JSONDecodeError as e:
@@ -88,7 +91,7 @@ class Agent:
         try:
             # Directly await the async CommandHandler method for full async flow
             result = await self.command_handler.handle_server_command(command)
-            logger.info(f"Command handling result: {result}")
+            logger.info("Status changed after command execution.")
             return result
         except Exception as e:
             logger.error(f"Error in handle_server_command_wrapper: {e}", exc_info=True)
@@ -174,13 +177,6 @@ class Agent:
             logger.info(f"Shutdown initiated by signal {signal.name}...")
         else:
             logger.info("Shutdown initiated...")
-
-        # The actual cleanup logic will run after the main loop exits
-        # We just set the flag here to break the loop
-
-        # Optionally, cancel long-running tasks here if they don't check _shutdown_requested
-        # e.g., if server_manager tasks need explicit cancellation:
-        # await self.server_manager.stop_tasks()
 
         logger.info("Shutdown flag set. Main loop will exit and perform cleanup.")
 
