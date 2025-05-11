@@ -44,7 +44,8 @@ async def _handle_register_frontend(websocket: WebSocket, message: dict) -> dict
     logger.info(f"Frontend registered: {frontend_name} (ID: {frontend_id})")
 
     # Send an immediate agent status update to the newly connected frontend
-    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=None))
+    # Use force_full_update to ensure the frontend gets current agent statuses
+    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True, target_websocket=websocket))
 
     return {
         "message_type": MessageType.REGISTER_FRONTEND_RESPONSE,
@@ -93,6 +94,10 @@ async def _handle_chat_message(websocket: WebSocket, client_id: str, message_dat
             logger.warning(f"Sent broker publish error back to client {client_id}")
         except Exception as e:
             logger.error(f"Failed to send broker publish error back to client {client_id}: {e}")
+            
+    # When a chat message is sent, also trigger an agent status update
+    # This ensures frontend gets updated agent state (busy/idle) without waiting
+    asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
 
 @log_function_call
 async def _handle_client_disconnected_message(websocket: WebSocket, client_id: str, message_data: Dict[str, Any]):

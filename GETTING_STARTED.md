@@ -25,10 +25,7 @@ Ensure the following are installed on your system:
     # Or follow official installation instructions
     ```
 
-4.  **Node.js (v18+) and npm/yarn:** Required for the Frontend service.
-    *   Install from [nodejs.org](https://nodejs.org/) or use a version manager like [nvm](https://github.com/nvm-sh/nvm).
-
-5.  **Git:** For cloning the repository.
+4.  **Git:** For cloning the repository.
 
 ## Initial Project Setup
 
@@ -38,24 +35,22 @@ Ensure the following are installed on your system:
     cd community
     ```
 
-2.  **Start Core Infrastructure (RabbitMQ):**
+2.  **Start Core Infrastructure**
     Use Docker Compose to start the RabbitMQ message broker.
     ```bash
-    docker compose up --build -d rabbitmq
-    # (Ensure 'rabbitmq' service is defined in your docker-compose.yml)
+    docker compose up --build
     ```
     You can check the status with `docker compose ps`.
 
 ## Next Steps
 
-With the prerequisites installed and RabbitMQ running, you can now set up and run the individual components:
+With the prerequisites installed and core infrastructure running, you can find out more here:
 
 *   **[Server](./server/README.md)**
 *   **[Broker](./broker/README.md)**
 *   **[Agent](./agent/README.md)**
 *   **[Frontend](./frontend/README.md)**
 
-Follow the instructions in each component's README file for specific installation (dependency installation, gRPC code generation) and running steps.
 
 ### Building and Running the Agent Service with Docker
 
@@ -68,9 +63,7 @@ docker build -f agent/Dockerfile -t agent .
 
 **Run the Agent container:**
 ```bash
-docker run --rm \
-  --env-file agent/.env \
-  agent
+docker run --rm --network community_default --env-file agent/.env agent
 ```
 
 - The container will use the `run.sh` script as its entrypoint.

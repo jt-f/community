@@ -23,7 +23,7 @@ class CommandHandler:
         self.agent = agent
 
         # Map command type strings to their corresponding handler methods
-        self.command_handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+        self.command_handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {
             "pause": self._handle_pause_command,
             "resume": self._handle_resume_command,
             "shutdown": self._handle_shutdown_command,
@@ -33,11 +33,11 @@ class CommandHandler:
         logger.debug(f"CommandHandler initialized for agent '{self.agent.agent_name}' (ID: {self.agent.agent_id})")
 
     @log_exceptions
-    def handle_server_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_server_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process a command received from the server.
+        Asynchronously process a command received from the server.
 
-        Identifies the command type and delegates to the appropriate handler method.
+        Identifies the command type and delegates to the appropriate handler coroutine.
         Returns a result dictionary indicating success or failure.
 
         Args:
@@ -62,9 +62,7 @@ class CommandHandler:
         handler = self.command_handlers.get(command_type)
         if handler:
             try:
-                # Execute the specific command handler
-                handler_result = handler(command)
-                # Merge the handler's result with the default structure
+                handler_result = await handler(command)
                 result.update(handler_result)
                 logger.info(f"Command '{command_type}' (ID: {command_id}) executed. Success: {result.get('success')}")
             except Exception as e:
@@ -88,38 +86,37 @@ class CommandHandler:
 
     # --- Specific Command Handlers ---
 
-    def _handle_pause_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Handles the 'pause' command."""
+    async def _handle_pause_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Handles the 'pause' command asynchronously."""
         logger.info("Executing pause command.")
         try:
-            self.agent.pause()  # Assuming agent has a pause method
+            await self.agent.pause()  # Agent.pause should be async
             return {"success": True, "output": "Agent paused successfully.", "exit_code": 0}
         except Exception as e:
             logger.error(f"Error pausing agent: {e}", exc_info=True)
             return {"success": False, "output": "Failed to pause agent.", "error_message": str(e), "exit_code": 1}
 
-    def _handle_resume_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Handles the 'resume' command."""
+    async def _handle_resume_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Handles the 'resume' command asynchronously."""
         logger.info("Executing resume command.")
         try:
-            self.agent.resume()  # Assuming agent has a resume method
+            await self.agent.resume()  # Agent.resume should be async
             return {"success": True, "output": "Agent resumed successfully.", "exit_code": 0}
         except Exception as e:
             logger.error(f"Error resuming agent: {e}", exc_info=True)
             return {"success": False, "output": "Failed to resume agent.", "error_message": str(e), "exit_code": 1}
 
-    def _handle_shutdown_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Handles the 'shutdown' command."""
+    async def _handle_shutdown_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Handles the 'shutdown' command asynchronously."""
         logger.info("Executing shutdown command.")
-        # Initiate shutdown asynchronously, don't wait here
-        asyncio.create_task(self.agent.shutdown())
+        await self.agent.shutdown()
         return {"success": True, "output": "Agent shutdown initiated.", "exit_code": 0}
 
-    def _handle_status_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
-        """Handles the 'status' command."""
+    async def _handle_status_command(self, command: Dict[str, Any]) -> Dict[str, Any]:
+        """Handles the 'status' command asynchronously."""
         logger.info("Executing status command.")
         try:
-            status_info = self.agent.get_status()  # Assuming agent has a get_status method
+            status_info = await self.agent.get_status()  # Agent.get_status should be async
             return {"success": True, "output": json.dumps(status_info), "exit_code": 0}
         except Exception as e:
             logger.error(f"Error getting agent status: {e}", exc_info=True)

@@ -114,9 +114,7 @@ class AgentStatusServicer(AgentStatusServiceServicer):
         agent = request.agent
         agent_id = agent.agent_id
         agent_name = agent.agent_name
-        logger.debug(f"""
-        Received status update from agent {agent_id} ('{agent_name}')
-        """)
+        logger.debug(f"Received status update from agent {agent_id} ('{agent_name}')")
         logger.debug("Print agent metrics:")
         print_agent_metrics(agent)
         try:
@@ -126,14 +124,29 @@ class AgentStatusServicer(AgentStatusServiceServicer):
                 # Use current time as fallback
                 agent.last_seen = datetime.now().isoformat()
 
-
             # Convert protobuf ScalarMapContainer to a Python dict for metrics
             metrics_dict = dict(agent.metrics)
-            await agent_manager.update_agent_status(agent_id, agent_name, metrics_dict)
-
-            # Broadcast the update to connected frontends/subscribers
-            # Use force_full_update=True to ensure consistency after direct update
-            # asyncio.create_task(agent_manager.broadcast_agent_status(force_full_update=True, is_full_update=True))
+            
+            # Check for internal_state changes and log them explicitly
+            internal_state = metrics_dict.get("internal_state")
+            if internal_state:
+                current_state = state.agent_states.get(agent_id, None)
+                if current_state:
+                    prev_state = current_state.metrics.get("internal_state", "unknown")
+                    if prev_state != internal_state:
+                        logger.info(f"Agent {agent_id} internal_state change: {prev_state} -> {internal_state}")
+            
+            # Update agent status with the new metrics
+            updated = await agent_manager.update_agent_status(agent_id, agent_name, metrics_dict)
+            
+            # Always broadcast status updates for internal_state changes
+            if updated and internal_state:
+                # Use force_full_update=True to ensure the frontend gets the update
+                asyncio.create_task(agent_manager.broadcast_agent_status_to_all_subscribers(
+                    force_full_update=True, 
+                    is_full_update=True
+                ))
+                logger.info(f"Triggered immediate broadcast for {agent_id} internal_state change to {internal_state}")
         except Exception as e:
             logger.error(f"Failed to process agent status update from {agent_id}: {e}", exc_info=True)
             return AgentStatusUpdateResponse(success=False, message=f"Error processing update: {e}")

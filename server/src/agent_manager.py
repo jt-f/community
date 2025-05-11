@@ -248,41 +248,61 @@ async def update_agent_status(agent_id: str, agent_name: str, metrics: dict) -> 
     
     # Ensure essential metrics are present and add server-side timestamp
     if not metrics:
-        logger.warning(f"Cannot update agent {agent_id}: no metrics provided.")
-        return False
-    
-    metrics["last_seen"] = current_time # Server-side timestamp for last contact
-    internal_state = metrics.get("internal_state", "unknown") # Derive internal_state
+        metrics = {}
+        
+    # Derive internal_state
+    internal_state = metrics.get("internal_state", "initializing")
     
     # Check if agent exists
     if agent_id in state.agent_states:
         agent_state = state.agent_states[agent_id]
         
-        # Check for meaningful changes before updating
-        # This is a shallow comparison; for deep comparison, consider a more robust check
-        # For now, we'll update if name or internal_state changes, or if new metrics are substantially different.
-        # A more sophisticated check might involve comparing all keys in the metrics dict.
+        # Always check internal_state change separately to ensure we detect busy/idle transitions
         previous_internal_state = agent_state.metrics.get("internal_state", "initializing")
-        if previous_internal_state == internal_state and agent_state.agent_name == agent_name and agent_state.metrics == metrics:
-            logger.debug(f"No significant change in agent {agent_id} status, skipping update.")
-            # Even if no change, update last_seen to keep the agent 'alive'
+        state_changed = previous_internal_state != internal_state
+        name_changed = agent_state.agent_name != agent_name
+        
+        # If internal_state or name changed, always update
+        if state_changed or name_changed:
+            logger.info(f"Agent {agent_id} state changed: internal_state {previous_internal_state} -> {internal_state}")
+            # Update the agent state
+            agent_state.agent_name = agent_name
             agent_state.last_seen = current_time
-            # Update legacy status as well to reflect last_seen update
-            if agent_id in state.agent_statuses:
-                state.agent_statuses[agent_id].last_seen = current_time
-            return False
+            agent_state.update_metrics(metrics)
+            status_changed = True
+        else:
+            # For other metrics, compare more thoroughly
+            # Skip update if no significant changes
+            metrics_changed = any(agent_state.metrics.get(k) != str(v) for k, v in metrics.items())
+            if not metrics_changed:
+                logger.debug(f"No significant change in agent {agent_id} status, skipping update.")
+                # Even if no change, update last_seen to keep the agent 'alive'
+                agent_state.last_seen = current_time
+                # Update legacy status as well to reflect last_seen update
+                if agent_id in state.agent_statuses:
+                    state.agent_statuses[agent_id].last_seen = current_time
+                return False
             
-        # Update the agent state
-        agent_state.agent_name = agent_name
-        agent_state.last_seen = current_time
-        
-        # Merge new metrics with existing ones, prioritizing new values
-        agent_state.update_metrics(metrics) # update_metrics should handle merging
-        
+            # We have detected changes in metrics other than internal_state
+            logger.info(f"Agent {agent_id} metrics changed")
+            agent_state.agent_name = agent_name
+            agent_state.last_seen = current_time
+            agent_state.update_metrics(metrics)
+            status_changed = True
+            
         # Update legacy status for compatibility
         state.agent_statuses[agent_id] = agent_state.to_agent_status()
+    else:
+        # Create new agent state
+        logger.info(f"Creating state for new agent: {agent_id}, name={agent_name}, internal_state={internal_state}")
+        agent_state = state.AgentState(agent_id, agent_name)
+        agent_state.last_seen = current_time
+        agent_state.update_metrics(metrics)
+        state.agent_states[agent_id] = agent_state
         
-        logger.info(f"Updated existing agent: {agent_id}, name={agent_name}, internal_state={internal_state}")
+        # Also create legacy status for backward compatibility
+        state.agent_statuses[agent_id] = agent_state.to_agent_status()
+        
         status_changed = True
     
     # If status changed, broadcast the update

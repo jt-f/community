@@ -86,13 +86,8 @@ class Agent:
         """Asynchronous wrapper to handle commands received from the server."""
         logger.info(f"Handling server command: {command}")
         try:
-            # Delegate command handling to the synchronous CommandHandler method
-            # Run synchronous code in a separate thread to avoid blocking the event loop
-            result = await self.loop.run_in_executor(
-                None, # Use default executor (ThreadPoolExecutor)
-                self.command_handler.handle_server_command,
-                command
-            )
+            # Directly await the async CommandHandler method for full async flow
+            result = await self.command_handler.handle_server_command(command)
             logger.info(f"Command handling result: {result}")
             return result
         except Exception as e:
